@@ -1,0 +1,16 @@
+# Copy to terraform.tfvars (gitignored) and fill in the values for your organization.
+# Find the organization id with: aws organizations describe-organization --query Organization.Id
+
+organization_id = "<organization-id>"
+
+# First apply of an organization still on consolidated billing: leave SCPs off, apply,
+# confirm the feature set is ALL, then remove this line (or set true) and apply again.
+# See infra/README.md, "Bootstrap".
+# enable_service_control_policies = false
+
+# Only if the roles are being created for a different repository. The trust policies use
+# GitHub's immutable subject, which embeds the numeric owner and repository IDs:
+#   gh api repos/OWNER/REPO --jq '[.owner.id, .id]'
+# github_repository    = "evandbrown/fleetkit"
+# github_owner_id      = 0
+# github_repository_id = 0

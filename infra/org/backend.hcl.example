@@ -1,0 +1,8 @@
+# Only needed to run this stack from a workstation; CI passes the same values as
+# -backend-config flags from the TF_STATE_BUCKET and AWS_REGION repository variables.
+#   terraform init -backend-config=backend.hcl
+bucket       = "fleetkit-tfstate-<management-account-id>"
+key          = "org/terraform.tfstate"
+region       = "us-east-1"
+encrypt      = true
+use_lockfile = true

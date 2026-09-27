@@ -1,0 +1,9 @@
+# Only needed to run this stack from a workstation; CI supplies these as TF_VAR_*
+# repository variables. Copy to terraform.tfvars (gitignored).
+
+# Root email of the fleetkit member account. It must not belong to any other AWS account
+# and cannot be changed afterwards without recreating the account.
+account_email = "<root email for the fleetkit account>"
+
+# Mailbox that receives the budget alerts and the breaker notification.
+alert_email = "<email that receives budget alerts>"

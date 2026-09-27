@@ -1,0 +1,9 @@
+# Copy to backend.hcl (gitignored) after the first apply has created the bucket, then
+# migrate the local state into it:
+#   terraform init -backend-config=backend.hcl -migrate-state
+# The bucket name is the `state_bucket` output of this stack.
+bucket       = "fleetkit-tfstate-<management-account-id>"
+key          = "bootstrap/terraform.tfstate"
+region       = "us-east-1"
+encrypt      = true
+use_lockfile = true

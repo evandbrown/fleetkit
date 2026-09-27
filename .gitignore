@@ -1,13 +1,30 @@
 # Keep secrets, state and raw transcripts out of this public repo.
 .env
-*.tfstate
-*.tfstate.*
-*.tfvars
-.terraform/
-crash.log
 *.jsonl
 transcripts-raw/
 .DS_Store
+
+# Terraform: state, plans, provider caches and anything that carries account-specific
+# values. The committed *.example files show what the ignored files should contain.
+*.tfstate
+*.tfstate.*
+.terraform.tfstate.lock.info
+*.tfplan
+*.tfvars
+*.tfvars.json
+backend.hcl
+*.tfbackend
+.terraform/
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Python bytecode cache produced by compiling the Lambda source locally.
+__pycache__/
+*.pyc
 
 # The private workspace (its own local git repo) and the private working agreement. Never committed.
 private/

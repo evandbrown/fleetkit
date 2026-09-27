@@ -1,0 +1,7 @@
+# CI supplies this as TF_VAR_state_bucket from the TF_STATE_BUCKET repository variable.
+# Only needed from a workstation, and there only for `terraform state list` or `terraform output`:
+# a plan or apply of this stack needs the CI apply role (see infra/README.md, "Running a stack
+# locally"). Copy to terraform.tfvars (gitignored).
+
+# The state bucket created by infra/bootstrap; this stack reads the org stack's outputs from it.
+state_bucket = "fleetkit-tfstate-<management-account-id>"

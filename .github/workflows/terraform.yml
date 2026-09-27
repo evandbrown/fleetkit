@@ -1,0 +1,224 @@
+# Terraform CI for the stacks GitHub Actions owns: infra/org and infra/project.
+# infra/bootstrap is applied by hand (it creates the roles this workflow assumes);
+# it is only formatted and validated here.
+#
+# Pull request:  check (fmt, validate) -> plan, with the read-only plan role.
+# Push to main:  check -> plan -> apply. The apply job is bound to the `aws`
+#                environment and waits for a reviewer before it runs.
+#
+# The project stack reads the org stack's outputs, so its plan is skipped (not
+# failed) while org has never been applied; otherwise the very first push to
+# main could never reach the apply job that creates that state.
+#
+# Credentials come from GitHub's OIDC token: the AWS roles trust this repository's
+# pull requests, its main branch and the `aws` environment, so no AWS keys are
+# stored anywhere. Every account-specific value (state bucket, role ARNs, emails)
+# is a GitHub repository variable; see infra/README.md for the list.
+name: terraform
+
+on:
+  pull_request:
+    paths:
+      - infra/org/**
+      - infra/project/**
+      - .github/workflows/terraform.yml
+  push:
+    branches: [main]
+    paths:
+      - infra/org/**
+      - infra/project/**
+      - .github/workflows/terraform.yml
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  TF_VERSION: "1.16.4"
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+  TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+  # The project stack reads the org stack's outputs from the same bucket.
+  TF_VAR_state_bucket: ${{ vars.TF_STATE_BUCKET }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # Needs no credentials, so it also runs for pull requests from forks.
+  check:
+    name: check ${{ matrix.stack }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        stack: [bootstrap, org, project]
+    defaults:
+      run:
+        working-directory: infra/${{ matrix.stack }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - run: terraform fmt -check -diff -recursive
+      - run: terraform init -backend=false
+      - run: terraform validate
+
+  plan:
+    name: plan ${{ matrix.stack }}
+    needs: check
+    # Fork pull requests cannot mint an OIDC token, so skip them instead of failing
+    # at the credentials step. Pushes to main plan too, so the reviewer of the apply
+    # job below has an up-to-date plan to read before approving.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        stack: [org, project]
+    # A newer commit on the same branch supersedes an older, still-running plan.
+    concurrency:
+      group: terraform-plan-${{ matrix.stack }}-${{ github.ref }}
+      cancel-in-progress: true
+    defaults:
+      run:
+        working-directory: infra/${{ matrix.stack }}
+    env:
+      AWS_ROLE_ARN: ${{ vars.AWS_PLAN_ROLE_ARN }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - name: Require repository variables
+        run: |
+          for name in TF_STATE_BUCKET AWS_ROLE_ARN; do
+            [ -n "${!name}" ] || { echo "::error::repository variable for $name is not set; see infra/README.md"; exit 1; }
+          done
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          role-session-name: fleetkit-plan-${{ matrix.stack }}-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+          mask-aws-account-id: true
+      - name: Export TF_VAR_* repository variables
+        # Every repository (or `aws` environment) variable named TF_VAR_<name> becomes
+        # the Terraform input variable <name>, so adding a variable to a stack never
+        # requires editing this workflow.
+        env:
+          GITHUB_VARS: ${{ toJSON(vars) }}
+        run: |
+          jq -r 'to_entries[] | select(.key | startswith("TF_VAR_"))
+                 | "\(.key)<<__TF_VAR__\n\(.value)\n__TF_VAR__"' <<< "$GITHUB_VARS" >> "$GITHUB_ENV"
+      - name: terraform init
+        run: |
+          terraform init \
+            -backend-config="bucket=$TF_STATE_BUCKET" \
+            -backend-config="key=${{ matrix.stack }}/terraform.tfstate" \
+            -backend-config="region=$AWS_REGION" \
+            -backend-config="encrypt=true" \
+            -backend-config="use_lockfile=true"
+      # project/ reads org/terraform.tfstate through terraform_remote_state and
+      # cannot be planned until that state exists. The apply job plans project
+      # again after applying org, so skipping here loses nothing.
+      - name: Check that org has been applied
+        id: org_state
+        if: matrix.stack == 'project'
+        run: |
+          keys=$(aws s3api list-objects-v2 --bucket "$TF_STATE_BUCKET" \
+                   --prefix org/terraform.tfstate --query 'Contents[].Key' --output text)
+          if grep -qx org/terraform.tfstate <<< "$keys"; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::org has not been applied yet, so the project plan is skipped; the apply job plans it after applying org"
+            {
+              echo "## terraform plan: project"
+              echo "Skipped: \`org/terraform.tfstate\` does not exist yet. The apply job plans this stack after applying org."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: terraform plan
+        if: matrix.stack != 'project' || steps.org_state.outputs.exists == 'true'
+        run: |
+          terraform plan -no-color -lock-timeout=120s 2>&1 | tee "$RUNNER_TEMP/plan.txt"
+          {
+            echo "## terraform plan: ${{ matrix.stack }}"
+            echo '```'
+            cat "$RUNNER_TEMP/plan.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # A single job runs both applies in order (org first: project reads its outputs),
+  # so a push to main needs exactly one approval and applies are never interleaved.
+  apply:
+    name: apply
+    needs: plan
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment: aws
+    concurrency:
+      group: terraform-apply
+      cancel-in-progress: false
+    env:
+      AWS_ROLE_ARN: ${{ vars.AWS_APPLY_ROLE_ARN }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - name: Require repository variables
+        run: |
+          for name in TF_STATE_BUCKET AWS_ROLE_ARN; do
+            [ -n "${!name}" ] || { echo "::error::repository variable for $name is not set; see infra/README.md"; exit 1; }
+          done
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          role-session-name: fleetkit-apply-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+          mask-aws-account-id: true
+      - name: Export TF_VAR_* repository variables
+        env:
+          GITHUB_VARS: ${{ toJSON(vars) }}
+        run: |
+          jq -r 'to_entries[] | select(.key | startswith("TF_VAR_"))
+                 | "\(.key)<<__TF_VAR__\n\(.value)\n__TF_VAR__"' <<< "$GITHUB_VARS" >> "$GITHUB_ENV"
+
+      # The plan file stays on the runner: it embeds variable values and is never
+      # uploaded as an artifact. Applying the saved plan guarantees that what was
+      # printed is exactly what changes.
+      - name: terraform init (org)
+        working-directory: infra/org
+        run: |
+          terraform init \
+            -backend-config="bucket=$TF_STATE_BUCKET" \
+            -backend-config="key=org/terraform.tfstate" \
+            -backend-config="region=$AWS_REGION" \
+            -backend-config="encrypt=true" \
+            -backend-config="use_lockfile=true"
+      - name: terraform apply (org)
+        working-directory: infra/org
+        run: |
+          terraform plan -no-color -lock-timeout=120s -out=tfplan
+          terraform apply -no-color tfplan
+
+      - name: terraform init (project)
+        working-directory: infra/project
+        run: |
+          terraform init \
+            -backend-config="bucket=$TF_STATE_BUCKET" \
+            -backend-config="key=project/terraform.tfstate" \
+            -backend-config="region=$AWS_REGION" \
+            -backend-config="encrypt=true" \
+            -backend-config="use_lockfile=true"
+      - name: terraform apply (project)
+        working-directory: infra/project
+        run: |
+          terraform plan -no-color -lock-timeout=120s -out=tfplan
+          terraform apply -no-color tfplan
