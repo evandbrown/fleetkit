@@ -49,8 +49,6 @@ Extra trials at one level show how much the same test varies on the same host. R
 | VMM | hypervisor |
 | session, for a microVM | microVM |
 
-Documents committed before this glossary existed keep their original words, so that their commit still proves when they were written. This table maps those words.
-
 ## The procedure
 
 ### 1. Write the spec and commit it first
