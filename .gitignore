@@ -39,3 +39,7 @@ harness/.venv/
 fixture/dist/
 tfplan*
 *.tfplan
+
+# Claude Code settings for this checkout (personal permission rules). Never committed.
+.claude/settings.json
+.claude/settings.local.json
