@@ -1,0 +1,14 @@
+# Keep secrets, state and raw transcripts out of this public repo.
+.env
+*.tfstate
+*.tfstate.*
+*.tfvars
+.terraform/
+crash.log
+*.jsonl
+transcripts-raw/
+.DS_Store
+
+# The private workspace (its own local git repo) and the private working agreement. Never committed.
+private/
+CLAUDE.local.md
