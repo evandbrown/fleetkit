@@ -410,17 +410,22 @@ def render_evidence(rundir: RunDir, trials: list[dict], manifest: dict, inv: dic
             L.append(f"- {c.get('trial_id')}: {c.get('case')} expected {c.get('expected_outcome')}, got {c.get('outcome')} "
                      f"({'pass' if c.get('passed') else 'FAIL'})")
     L += ["", "## What passed", ""]
-    passed = {}
+    # A level passes only if every one of its trials passed; warm-up, illustration and fault
+    # trials do not count. The highest such level is reported, as in `driver report`.
+    by_level: dict = {}
     for t in trials:
-        if t.get("fault"):
+        if t.get("fault") or t.get("kind") in ("warmup", "illustration", "fault"):
             continue
-        b = t["backend"]
-        if t.get("level_passed"):
-            passed[b] = max(passed.get(b, 0), int(t["level_n"]))
-        passed.setdefault(b, passed.get(b, 0))
+        by_level.setdefault((t["backend"], int(t["level_n"])), []).append(bool(t.get("level_passed")))
+    passed = {}
+    for (b, n), oks in sorted(by_level.items()):
+        passed.setdefault(b, 0)
+        if oks and all(oks):
+            passed[b] = max(passed[b], n)
     if passed:
         for b, n in passed.items():
-            L.append(f"- {b}: highest N tested successfully (protocol only; targets are applied by `driver report`) = {n}")
+            L.append(f"- {b}: highest N whose trials passed (criteria from run.json when set, else protocol only; "
+                     f"`driver report` applies the level and headline rules) = {n}")
     else:
         L.append("- no level passed")
     st = read_json(rundir.smoke_state_json, None)

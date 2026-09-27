@@ -255,3 +255,11 @@ def test_idle_and_lifetime_over_http(stack):
     assert ra["outcome"] == "idle_expired"
     assert rb["outcome"] == "lifetime_expired"
     assert _call(base, "GET", "/host/verify-clean")[1]["clean"] is True
+
+
+def test_listen_backlog_absorbs_a_burst_of_task_requests():
+    # With socketserver's default backlog of 5, a burst of N simultaneous task requests on a
+    # saturated host overflowed it and some tasks started a second late (SYN retransmit).
+    from hostd.server import _HTTPServer
+    assert _HTTPServer.request_queue_size >= 256
+    assert _HTTPServer.daemon_threads is True

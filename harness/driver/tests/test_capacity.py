@@ -43,6 +43,10 @@ def test_capacity_ladder_end_to_end(fixture_site, tmp_path):
     t4 = trials["t004-docker-n4-r1"]
     assert t4["evaluation"]["protocol_ok"] and not t4["evaluation"]["targets_met"] and t4["status"] == "ok"
     assert any(r.startswith("step home p50") for r in t4["evaluation"]["reasons"])
+    # A trial that misses its targets must not read as passed anywhere in trial.json.
+    assert t4["protocol_ok"] is True and t4["level_passed"] is False
+    for t in trials.values():
+        assert t["level_passed"] == t["evaluation"]["passed"]
     assert t4["criteria"]["step_p50_target_ms"] == 100.0
     for t in trials.values():
         pre = t["pre_trial"]

@@ -599,6 +599,12 @@ class TrialRunner:
             with self._lock:
                 task_rows, step_rows = list(self.task_rows), list(self.step_rows)
             doc["evaluation"] = evaluate_trial(doc, task_rows, step_rows, cfg.criteria)
+        # level_passed used to mean "protocol ok" only, so a trial that missed its latency
+        # targets still read as passed (cap-baseline-1, n=12). It is now the trial's verdict
+        # against its criteria; the protocol-only flag is kept as protocol_ok.
+        doc["protocol_ok"] = level_passed
+        if doc["evaluation"] is not None:
+            doc["level_passed"] = bool(doc["evaluation"].get("passed"))
         write_json_atomic(self.rundir.trial_json_path(self.trial_id), doc)
         return doc
 

@@ -144,10 +144,17 @@ def make_handler(app: HostdApp):
     return Handler
 
 
+class _HTTPServer(ThreadingHTTPServer):
+    # socketserver's default listen backlog is 5. When N tasks are released together on a
+    # CPU-saturated host, connections beyond the backlog were dropped and retried after
+    # Linux's 1 s SYN retransmit, so some tasks started a second late (cap-baseline-1).
+    request_queue_size = 512
+    daemon_threads = True
+
+
 class Server:
     def __init__(self, app: HostdApp, bind: str = "127.0.0.1", port: int = 8090):
-        self.httpd = ThreadingHTTPServer((bind, port), make_handler(app))
-        self.httpd.daemon_threads = True
+        self.httpd = _HTTPServer((bind, port), make_handler(app))
         self.port = self.httpd.server_address[1]
         self._thread: Optional[threading.Thread] = None
 
