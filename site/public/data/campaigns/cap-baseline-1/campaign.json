@@ -1,0 +1,703 @@
+{
+  "schema": "fleetkit-site-data/1",
+  "id": "cap-baseline-1",
+  "title": "Capacity baseline",
+  "question": "How many 2 vCPU / 2 GiB Firecracker microVMs can one m8i.4xlarge worker host run at once, with every shopping task inside its latency targets?",
+  "started": "2026-09-27T17:09Z",
+  "ended": "2026-09-27T17:12Z",
+  "status": "complete",
+  "before_campaigns": true,
+  "provenance": "reconstructed",
+  "preregistration": {
+    "path": "docs/capacity-experiment.md",
+    "commit": "652f26d88cda86a453e31e29f9def2e771dd4971"
+  },
+  "definition": {
+    "format": "fleetkit-campaign/1",
+    "id": "cap-baseline-1",
+    "question": "How many 2 vCPU / 2 GiB Firecracker microVMs can one m8i.4xlarge worker host run at once, with every shopping task inside its latency targets?",
+    "base": {
+      "host": {
+        "instance_type": "m8i.4xlarge"
+      },
+      "hypervisor": {
+        "name": "firecracker",
+        "version": "v1.17.0"
+      },
+      "microvm": {
+        "vcpus": 2,
+        "mem_mib": 2048,
+        "mem_overhead_mib": 256
+      },
+      "workload": {
+        "task": "shop-5-steps",
+        "products": 20
+      },
+      "procedure": {
+        "densities": [
+          1,
+          2,
+          4,
+          8,
+          12,
+          16
+        ],
+        "boundary_trials": 2,
+        "warmup_trials": 1,
+        "settle_s": 10,
+        "illustration": true,
+        "stop_at_first_failure": true,
+        "release": "all_ready"
+      },
+      "criteria": {
+        "step_p50_ms": 1000,
+        "step_p95_ms": 2000,
+        "task_p95_ms": 5000,
+        "ready_limit_s": 180
+      },
+      "attribution": {
+        "host_cpu_pressure_pct": 20,
+        "host_cpu_util_pct": 90,
+        "microvm_throttled_fraction": 0.1,
+        "host_mem_available_fraction": 0.1,
+        "host_mem_pressure_pct": 5,
+        "host_io_pressure_pct": 10,
+        "host_steal_pct": 5
+      },
+      "measurement": {
+        "host_hz": 5,
+        "guest_interval_ms": 200
+      },
+      "support": {
+        "instance_type": "m8i.xlarge"
+      }
+    },
+    "specs": [
+      {
+        "name": "baseline",
+        "label": "m8i.4xlarge, Firecracker, 2 vCPU / 2 GiB",
+        "changes": {}
+      }
+    ],
+    "replicas": 1
+  },
+  "spec_fields": [
+    {
+      "path": "host.instance_type",
+      "label": "Instance type",
+      "group": "Worker host",
+      "note": "Host kind and price are derived from it."
+    },
+    {
+      "path": "hypervisor.name",
+      "label": "Hypervisor",
+      "group": "Hypervisor"
+    },
+    {
+      "path": "hypervisor.version",
+      "label": "Version",
+      "group": "Hypervisor"
+    },
+    {
+      "path": "microvm.vcpus",
+      "label": "vCPUs",
+      "group": "MicroVM"
+    },
+    {
+      "path": "microvm.mem_mib",
+      "label": "Memory",
+      "group": "MicroVM",
+      "unit": "MiB"
+    },
+    {
+      "path": "microvm.mem_overhead_mib",
+      "label": "Memory allowed on top for the hypervisor",
+      "group": "MicroVM",
+      "unit": "MiB"
+    },
+    {
+      "path": "workload.task",
+      "label": "Task",
+      "group": "Workload"
+    },
+    {
+      "path": "workload.products",
+      "label": "Products in the test shop",
+      "group": "Workload"
+    },
+    {
+      "path": "procedure.densities",
+      "label": "Densities to test",
+      "group": "Procedure",
+      "note": "In order; the run stops at the first density that fails."
+    },
+    {
+      "path": "procedure.boundary_trials",
+      "label": "Extra trials at the boundary",
+      "group": "Procedure"
+    },
+    {
+      "path": "procedure.warmup_trials",
+      "label": "Warm-up trials",
+      "group": "Procedure"
+    },
+    {
+      "path": "procedure.settle_s",
+      "label": "Idle before each trial",
+      "group": "Procedure",
+      "unit": "s"
+    },
+    {
+      "path": "procedure.illustration",
+      "label": "Illustration trial",
+      "group": "Procedure"
+    },
+    {
+      "path": "procedure.stop_at_first_failure",
+      "label": "Stop at the first failing density",
+      "group": "Procedure"
+    },
+    {
+      "path": "procedure.release",
+      "label": "Tasks start when",
+      "group": "Procedure"
+    },
+    {
+      "path": "criteria.step_p50_ms",
+      "label": "Each step's median",
+      "group": "Criteria",
+      "unit": "ms"
+    },
+    {
+      "path": "criteria.step_p95_ms",
+      "label": "Each step's p95",
+      "group": "Criteria",
+      "unit": "ms"
+    },
+    {
+      "path": "criteria.task_p95_ms",
+      "label": "Whole task p95",
+      "group": "Criteria",
+      "unit": "ms"
+    },
+    {
+      "path": "criteria.ready_limit_s",
+      "label": "All microVMs ready within",
+      "group": "Criteria",
+      "unit": "s"
+    },
+    {
+      "path": "attribution.host_cpu_pressure_pct",
+      "label": "Host CPU pressure at least",
+      "group": "Attribution rules",
+      "unit": "%"
+    },
+    {
+      "path": "attribution.host_cpu_util_pct",
+      "label": "Host CPU utilisation at least",
+      "group": "Attribution rules",
+      "unit": "%"
+    },
+    {
+      "path": "attribution.microvm_throttled_fraction",
+      "label": "MicroVM throttled fraction at least",
+      "group": "Attribution rules"
+    },
+    {
+      "path": "attribution.host_mem_available_fraction",
+      "label": "Host memory available below",
+      "group": "Attribution rules"
+    },
+    {
+      "path": "attribution.host_mem_pressure_pct",
+      "label": "Host memory pressure at least",
+      "group": "Attribution rules",
+      "unit": "%"
+    },
+    {
+      "path": "attribution.host_io_pressure_pct",
+      "label": "Host IO pressure at least",
+      "group": "Attribution rules",
+      "unit": "%"
+    },
+    {
+      "path": "attribution.host_steal_pct",
+      "label": "Steal at least",
+      "group": "Attribution rules",
+      "unit": "%"
+    },
+    {
+      "path": "measurement.host_hz",
+      "label": "Host samples per second",
+      "group": "Measurement"
+    },
+    {
+      "path": "measurement.guest_interval_ms",
+      "label": "Guest sample interval",
+      "group": "Measurement",
+      "unit": "ms"
+    },
+    {
+      "path": "support.instance_type",
+      "label": "Support host instance type",
+      "group": "Support host"
+    }
+  ],
+  "specs": [
+    {
+      "name": "baseline",
+      "label": "m8i.4xlarge, Firecracker, 2 vCPU / 2 GiB",
+      "changes": [],
+      "spec": {
+        "host": {
+          "instance_type": "m8i.4xlarge"
+        },
+        "hypervisor": {
+          "name": "firecracker",
+          "version": "v1.17.0"
+        },
+        "microvm": {
+          "vcpus": 2,
+          "mem_mib": 2048,
+          "mem_overhead_mib": 256
+        },
+        "workload": {
+          "task": "shop-5-steps",
+          "products": 20
+        },
+        "procedure": {
+          "densities": [
+            1,
+            2,
+            4,
+            8,
+            12,
+            16
+          ],
+          "boundary_trials": 2,
+          "warmup_trials": 1,
+          "settle_s": 10,
+          "illustration": true,
+          "stop_at_first_failure": true,
+          "release": "all_ready"
+        },
+        "criteria": {
+          "step_p50_ms": 1000,
+          "step_p95_ms": 2000,
+          "task_p95_ms": 5000,
+          "ready_limit_s": 180
+        },
+        "attribution": {
+          "host_cpu_pressure_pct": 20,
+          "host_cpu_util_pct": 90,
+          "microvm_throttled_fraction": 0.1,
+          "host_mem_available_fraction": 0.1,
+          "host_mem_pressure_pct": 5,
+          "host_io_pressure_pct": 10,
+          "host_steal_pct": 5
+        },
+        "measurement": {
+          "host_hz": 5,
+          "guest_interval_ms": 200
+        },
+        "support": {
+          "instance_type": "m8i.xlarge"
+        }
+      },
+      "instance_type": "m8i.4xlarge",
+      "host_kind": "nested",
+      "hypervisor": "firecracker",
+      "microvm": {
+        "vcpus": 2,
+        "mem_mib": 2048,
+        "mem_overhead_mib": 256
+      },
+      "densities": [
+        1,
+        2,
+        4,
+        8,
+        12,
+        16
+      ],
+      "boundary_trials": 2,
+      "criteria": {
+        "step_p50_ms": 1000,
+        "step_p95_ms": 2000,
+        "task_p95_ms": 5000,
+        "ready_limit_s": 180
+      },
+      "rules": [
+        {
+          "key": "host_cpu_pressure_pct",
+          "label": "Host CPU pressure",
+          "verdict": "host_cpu",
+          "op": ">=",
+          "threshold": 20
+        },
+        {
+          "key": "host_cpu_util_pct",
+          "label": "Host CPU utilisation",
+          "verdict": "host_cpu",
+          "op": ">=",
+          "threshold": 90
+        },
+        {
+          "key": "microvm_throttled_fraction",
+          "label": "MicroVM throttled fraction",
+          "verdict": "microvm_cpu_allowance",
+          "op": ">=",
+          "threshold": 0.1
+        },
+        {
+          "key": "host_mem_available_fraction",
+          "label": "Host memory available",
+          "verdict": "host_memory",
+          "op": "<",
+          "threshold": 0.1
+        },
+        {
+          "key": "host_mem_pressure_pct",
+          "label": "Host memory pressure",
+          "verdict": "host_memory",
+          "op": ">=",
+          "threshold": 5
+        },
+        {
+          "key": "host_io_pressure_pct",
+          "label": "Host IO pressure",
+          "verdict": "io",
+          "op": ">=",
+          "threshold": 10
+        },
+        {
+          "key": "host_steal_pct",
+          "label": "Steal",
+          "verdict": "steal",
+          "op": ">=",
+          "threshold": 5
+        }
+      ],
+      "price_usd_per_hour": 0.84672
+    }
+  ],
+  "runs": [
+    {
+      "id": "baseline-r1",
+      "spec": "baseline",
+      "replica": 1,
+      "status": "complete",
+      "started": "2026-09-27T17:09Z",
+      "duration_s": 182,
+      "host": {
+        "instance_type": "m8i.4xlarge",
+        "host_kind": "nested",
+        "vcpus": 16,
+        "cores": 8,
+        "threads_per_core": 2,
+        "sockets": 1,
+        "cpu_model": "Intel(R) Xeon(R) 6975P-C",
+        "mem_gib": 61.8,
+        "kernel_release": "6.18.48-109.150.amzn2023.x86_64",
+        "hypervisor_version": "Firecracker v1.17.0",
+        "chromium_version": "154.0.8037.57"
+      },
+      "result": {
+        "tested_successfully": 8,
+        "first_failed": 12,
+        "not_tried": [
+          9,
+          11
+        ],
+        "not_run": [
+          16
+        ],
+        "per_host_vcpu": 0.5,
+        "vcpus_allocated_per_host_vcpu": 1,
+        "cost_per_1000_tasks": {
+          "execution": [
+            0.0681,
+            0.0827
+          ],
+          "observed": [
+            0.1843,
+            0.2014
+          ],
+          "fixture": [
+            0.0499,
+            0.0501
+          ]
+        },
+        "limit": {
+          "density": 12,
+          "verdicts": [
+            "host_cpu"
+          ],
+          "trials_with_verdict": 3,
+          "trials": 3,
+          "separated_by": {
+            "rule": "host_cpu_pressure_pct",
+            "passing": [
+              5.5176,
+              10.6405
+            ],
+            "failing": [
+              34.5291,
+              46.4842
+            ],
+            "threshold": 20
+          },
+          "host_consumer": "microvm_vcpus",
+          "guest_group": "renderer",
+          "guest_share": [
+            0.5154,
+            0.5239
+          ]
+        }
+      },
+      "by_density": [
+        {
+          "density": 1,
+          "result": "passed",
+          "passed": 1,
+          "trials": 1
+        },
+        {
+          "density": 2,
+          "result": "passed",
+          "passed": 1,
+          "trials": 1
+        },
+        {
+          "density": 4,
+          "result": "passed",
+          "passed": 1,
+          "trials": 1
+        },
+        {
+          "density": 8,
+          "result": "passed",
+          "passed": 3,
+          "trials": 3
+        },
+        {
+          "density": 12,
+          "result": "failed",
+          "passed": 0,
+          "trials": 3
+        },
+        {
+          "density": 16,
+          "result": "not_run",
+          "passed": 0,
+          "trials": 0
+        }
+      ]
+    }
+  ],
+  "outcomes": [
+    {
+      "spec": "baseline",
+      "runs": [
+        "baseline-r1"
+      ],
+      "tested_successfully": [
+        8
+      ],
+      "per_host_vcpu": [
+        0.5
+      ],
+      "cost_per_1000_tasks": [
+        {
+          "execution": [
+            0.0681,
+            0.0827
+          ],
+          "observed": [
+            0.1843,
+            0.2014
+          ]
+        }
+      ]
+    }
+  ],
+  "answer": [
+    {
+      "term": "density",
+      "t": "Density"
+    },
+    {
+      "t": " "
+    },
+    {
+      "v": "8",
+      "cls": "measured",
+      "src": "campaigns/cap-baseline-1/runs/baseline-r1.json › result.tested_successfully"
+    },
+    {
+      "t": " was "
+    },
+    {
+      "term": "tested_successfully"
+    },
+    {
+      "t": " on one m8i.4xlarge worker host (16 vCPUs = 8 cores × 2 threads, nested): "
+    },
+    {
+      "v": "3 of 3",
+      "cls": "measured",
+      "src": "campaigns/cap-baseline-1/runs/baseline-r1.json › by_density[8]"
+    },
+    {
+      "t": " trials passed, "
+    },
+    {
+      "v": "0.5",
+      "cls": "derived",
+      "src": "campaigns/cap-baseline-1/runs/baseline-r1.json › result.per_host_vcpu › 8 ÷ 16 host vCPUs"
+    },
+    {
+      "t": " microVMs per host vCPU."
+    },
+    {
+      "t": " At "
+    },
+    {
+      "v": "12",
+      "cls": "measured",
+      "src": "campaigns/cap-baseline-1/runs/baseline-r1.json › result.first_failed"
+    },
+    {
+      "t": ", the home page's median missed its 1,000 ms target in "
+    },
+    {
+      "v": "3 of 3",
+      "cls": "measured",
+      "src": "campaigns/cap-baseline-1/runs/baseline-r1.json › by_density[12].checks"
+    },
+    {
+      "t": " trials ("
+    },
+    {
+      "v": "1,063–1,563 ms",
+      "cls": "measured",
+      "src": "campaigns/cap-baseline-1/runs/baseline-r1.json › by_density[12].checks › home p50"
+    },
+    {
+      "t": ")."
+    },
+    {
+      "t": " Densities 9 to 11 were not tried."
+    },
+    {
+      "t": " What separated them was host "
+    },
+    {
+      "term": "cpu_pressure",
+      "t": "CPU pressure"
+    },
+    {
+      "t": ": "
+    },
+    {
+      "v": "5.5–10.6%",
+      "cls": "measured",
+      "src": "campaigns/cap-baseline-1/runs/baseline-r1.json › result.limit.separated_by.passing"
+    },
+    {
+      "t": " at 8, "
+    },
+    {
+      "v": "34.5–46.5%",
+      "cls": "measured",
+      "src": "campaigns/cap-baseline-1/runs/baseline-r1.json › result.limit.separated_by.failing"
+    },
+    {
+      "t": " at 12, against a rule of at least 20%."
+    },
+    {
+      "t": " At 8, 1,000 tasks cost "
+    },
+    {
+      "v": "$0.068–0.083",
+      "cls": "modelled",
+      "src": "campaigns/cap-baseline-1/runs/baseline-r1.json › result.cost_per_1000_tasks.execution"
+    },
+    {
+      "t": " of worker-host time while tasks ran ("
+    },
+    {
+      "v": "$0.184–0.201",
+      "cls": "modelled",
+      "src": "campaigns/cap-baseline-1/runs/baseline-r1.json › result.cost_per_1000_tasks.observed"
+    },
+    {
+      "t": " from each trial's start to a clean host), at an assumed "
+    },
+    {
+      "v": "$0.84672/h",
+      "cls": "assumed",
+      "src": "campaign.json › specs › price_usd_per_hour › site/build/prices.json"
+    },
+    {
+      "t": "."
+    }
+  ],
+  "does_not_show": [
+    [
+      {
+        "t": "Other hosts: this is nested virtualization on one m8i.4xlarge, and nothing here extrapolates to metal."
+      }
+    ],
+    [
+      {
+        "t": "Settled browsers: tasks started as soon as every microVM reported ready, while browsers may still have been finishing startup."
+      }
+    ],
+    [
+      {
+        "t": "Densities 9 to 11, which were not tried."
+      }
+    ],
+    [
+      {
+        "t": "A precise tail: over at most 12 tasks per trial, "
+      },
+      {
+        "term": "p95"
+      },
+      {
+        "t": " is effectively the slowest task."
+      }
+    ],
+    [
+      {
+        "t": "Variation between worker hosts: each spec ran once, on one host; a "
+      },
+      {
+        "term": "replica"
+      },
+      {
+        "t": " on another host would show how far the result moves."
+      }
+    ]
+  ],
+  "next": [
+    {
+      "text": "Narrow the boundary.",
+      "motivated_by": "densities 9 to 11 were not tried",
+      "changes": {
+        "procedure.densities": [
+          1,
+          2,
+          4,
+          8,
+          9,
+          10,
+          11,
+          12
+        ]
+      }
+    }
+  ]
+}

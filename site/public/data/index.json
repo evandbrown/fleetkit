@@ -1,0 +1,48 @@
+{
+  "schema": "fleetkit-site-data/1",
+  "latest": "cap-baseline-1",
+  "campaigns": [
+    {
+      "id": "cap-baseline-1",
+      "title": "Capacity baseline",
+      "question": "How many 2 vCPU / 2 GiB Firecracker microVMs can one m8i.4xlarge worker host run at once, with every shopping task inside its latency targets?",
+      "started": "2026-09-27T17:09Z",
+      "status": "complete",
+      "before_campaigns": true,
+      "replicas": 1,
+      "specs": [
+        {
+          "name": "baseline",
+          "label": "m8i.4xlarge, Firecracker, 2 vCPU / 2 GiB"
+        }
+      ],
+      "runs": 1,
+      "outcomes": [
+        {
+          "spec": "baseline",
+          "runs": [
+            "baseline-r1"
+          ],
+          "tested_successfully": [
+            8
+          ],
+          "per_host_vcpu": [
+            0.5
+          ],
+          "cost_per_1000_tasks": [
+            {
+              "execution": [
+                0.0681,
+                0.0827
+              ],
+              "observed": [
+                0.1843,
+                0.2014
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

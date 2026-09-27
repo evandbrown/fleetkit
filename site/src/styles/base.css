@@ -1,0 +1,143 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 16px/1.55 var(--font);
+  overflow-wrap: break-word;
+}
+
+a {
+  color: var(--accent);
+  text-underline-offset: 2px;
+}
+
+h1,
+h2,
+h3 {
+  line-height: 1.25;
+  margin: 1.6em 0 0.5em;
+}
+h1 {
+  font-size: 1.75rem;
+  margin-top: 0.4em;
+}
+h2 {
+  font-size: 1.25rem;
+}
+h3 {
+  font-size: 1.05rem;
+}
+
+p,
+ul,
+ol {
+  max-width: var(--measure);
+}
+
+code {
+  font-family: var(--mono);
+  font-size: 0.9em;
+}
+
+.page {
+  max-width: var(--page);
+  margin: 0 auto;
+  padding: 0 var(--gutter) 48px;
+}
+
+.lead {
+  font-size: 1.1rem;
+  color: var(--ink-2);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.meta {
+  color: var(--ink-2);
+  font-size: 0.9rem;
+}
+
+.crumbs {
+  font-size: 0.9rem;
+  color: var(--muted);
+  margin-top: 20px;
+}
+.crumbs a {
+  color: var(--ink-2);
+}
+
+/* Tables scroll inside their own box, never the page. */
+.table-wrap {
+  overflow-x: auto;
+  margin: 12px 0 20px;
+  max-width: 100%;
+}
+table {
+  border-collapse: collapse;
+  font-size: 0.92rem;
+  min-width: 100%;
+}
+th,
+td {
+  text-align: left;
+  padding: 6px 12px 6px 0;
+  border-bottom: 1px solid var(--rule);
+  vertical-align: top;
+}
+th {
+  font-weight: 600;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+td.num,
+th.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.pass {
+  color: var(--good);
+}
+.fail {
+  color: var(--critical);
+}
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin: 16px 0;
+}
+
+details > summary {
+  cursor: pointer;
+  color: var(--ink-2);
+}
+
+abbr.term {
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  cursor: help;
+}
+
+.status {
+  padding: 24px 0;
+  color: var(--ink-2);
+}
+.status.error {
+  color: var(--critical);
+}

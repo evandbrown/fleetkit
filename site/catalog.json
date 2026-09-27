@@ -1,0 +1,32 @@
+{
+  "format": "fleetkit-catalog/1",
+  "note": "The only list of what the site publishes. The dataset builder (site/build) reads these run directories and nothing else under results/. results/dev is never published, and neither are validation runs.",
+  "campaigns": [
+    {
+      "id": "cap-baseline-1",
+      "title": "Capacity baseline",
+      "question": "How many 2 vCPU / 2 GiB Firecracker microVMs can one m8i.4xlarge worker host run at once, with every shopping task inside its latency targets?",
+      "before_campaigns": true,
+      "preregistration": "docs/capacity-experiment.md",
+      "specs": [
+        { "name": "baseline", "label": "m8i.4xlarge, Firecracker, 2 vCPU / 2 GiB" }
+      ],
+      "runs": [
+        {
+          "spec": "baseline",
+          "replica": 1,
+          "dir": "results/cap-baseline-1/host/capacity",
+          "env_file": "results/cap-baseline-1/host/capacity.env",
+          "support_metrics": "results/cap-baseline-1/host/support/support-metrics.csv"
+        }
+      ],
+      "does_not_show": [
+        "Other hosts: this is nested virtualization on one m8i.4xlarge, and nothing here extrapolates to metal.",
+        "Settled browsers: tasks started as soon as every microVM reported ready, while browsers may still have been finishing startup."
+      ],
+      "reading": "",
+      "next": []
+    }
+  ],
+  "gate_allow": []
+}

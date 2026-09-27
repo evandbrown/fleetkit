@@ -1,0 +1,15 @@
+<script lang="ts">
+  import { DataError } from '../lib/data';
+
+  let { error }: { error: unknown } = $props();
+  const missing = $derived(error instanceof DataError && error.status === 404);
+</script>
+
+<div class="status error" role="alert">
+  {#if missing}
+    <p>That isn't in this dataset. <a href="#/campaigns">See every campaign</a>.</p>
+  {:else}
+    <p>{error instanceof Error ? error.message : String(error)}</p>
+    <p><button type="button" onclick={() => location.reload()}>Try again</button></p>
+  {/if}
+</div>
