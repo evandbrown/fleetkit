@@ -6,8 +6,13 @@ Sections 2-4 of the design, per slot s:
   `fleetkit.fault=<name>` on the command line when a fault is requested;
   VM config JSON with the read-only shared rootfs and the console log path;
   `systemd-run --scope --unit fc-vm<s>` with MemoryMax and CPUQuota, which gives a
-  cgroup v2 leaf for memory.current, memory.peak and cpu.stat;
+  cgroup v2 leaf for memory.current, memory.peak, cpu.stat and the pressure files;
   SIGKILL teardown: kill the scope, delete the tap, remove the run directory.
+
+Sampling splits the VM's CPU time by Firecracker thread: `fc_vcpu <n>` threads are the
+guest's vCPUs, every other thread (the main event loop with the device emulation, the API
+thread) is VMM overhead. The proc and cgroup roots are constructor arguments so the
+readers can be tested against a fake tree.
 
 The serial console (console=ttyS0) is Firecracker's stdout, redirected to the
 per-VM console log; Firecracker's own log goes to firecracker.log next to it.
@@ -23,8 +28,10 @@ import time
 from typing import Any, Dict, List, Optional
 
 from ..model import Session
+from ..procfs import (PROC_ROOT, cgroup_pids, parse_flat_keyed, parse_pressure, read_int, read_text,
+                      status_rss_bytes, thread_cpu_split)
 from ..runner import CommandError, Runner
-from .base import Backend, BackendError
+from .base import Backend, BackendError, empty_sample, public_path
 
 BRIDGE = "fcbr0"
 GATEWAY = "10.200.0.1"
@@ -34,6 +41,8 @@ GUEST_PORT = 8080
 RUN_ROOT = "/run/fleetkit"
 MEM_OVERHEAD_MIB = 256          # Firecracker process + page tables on top of guest memory
 CGROUP_ROOT = "/sys/fs/cgroup"
+CPU_QUOTA_PCT_PER_VCPU = 100    # CPUQuota = vcpus x 100%: one host CPU's worth per vCPU
+SMT = False                     # machine-config smt
 
 DEFAULT_FIRECRACKER = "/usr/local/bin/firecracker"
 DEFAULT_KERNEL = "/var/lib/fleetkit/vmlinux"
@@ -48,7 +57,8 @@ class FirecrackerBackend(Backend):
     def __init__(self, runner: Runner, log_dir: str, firecracker_bin: str = DEFAULT_FIRECRACKER,
                  kernel: str = DEFAULT_KERNEL, rootfs: str = DEFAULT_ROOTFS, bridge: str = BRIDGE,
                  run_root: str = RUN_ROOT, resolver: str = RESOLVER, gateway: str = GATEWAY,
-                 mem_overhead_mib: int = MEM_OVERHEAD_MIB, extra_boot_args: str = ""):
+                 mem_overhead_mib: int = MEM_OVERHEAD_MIB, extra_boot_args: str = "",
+                 cgroup_root: str = CGROUP_ROOT, proc_root: str = PROC_ROOT):
         super().__init__(runner, log_dir)
         self.firecracker = firecracker_bin
         self.kernel = kernel
@@ -59,6 +69,8 @@ class FirecrackerBackend(Backend):
         self.gateway = gateway
         self.mem_overhead_mib = mem_overhead_mib
         self.extra_boot_args = extra_boot_args
+        self.cgroup_root = cgroup_root
+        self.proc_root = proc_root
         self.fixture_base_url = "http://%s:8081" % gateway
         self._cgroup_paths: Dict[str, str] = {}
 
@@ -112,7 +124,7 @@ class FirecrackerBackend(Backend):
             "boot-source": {"kernel_image_path": self.kernel, "boot_args": self.boot_args(session)},
             "drives": [{"drive_id": "rootfs", "path_on_host": self.rootfs,
                         "is_root_device": True, "is_read_only": True}],
-            "machine-config": {"vcpu_count": session.vcpus, "mem_size_mib": session.mem_mib, "smt": False},
+            "machine-config": {"vcpu_count": session.vcpus, "mem_size_mib": session.mem_mib, "smt": SMT},
             "network-interfaces": [{"iface_id": "eth0", "guest_mac": self.guest_mac(session.slot),
                                     "host_dev_name": self.tap(session.slot)}],
             "logger": {"log_path": self.firecracker_log_path(session), "level": "Warning",
@@ -136,7 +148,7 @@ class FirecrackerBackend(Backend):
                 "--description", "fleetkit session %s" % session.id,
                 "-p", "MemoryMax=%dM" % (session.mem_mib + self.mem_overhead_mib),
                 "-p", "MemorySwapMax=0",
-                "-p", "CPUQuota=%d%%" % (session.vcpus * 100),
+                "-p", "CPUQuota=%d%%" % (session.vcpus * CPU_QUOTA_PCT_PER_VCPU),
                 self.firecracker,
                 "--api-sock", os.path.join(d, "fc.sock"),
                 "--config-file", os.path.join(d, "vm.json")]
@@ -221,59 +233,71 @@ class FirecrackerBackend(Backend):
         if cached:
             return cached
         unit = self.unit(session.slot) + ".scope"
-        for candidate in (os.path.join(CGROUP_ROOT, "system.slice", unit),):
+        for candidate in (os.path.join(self.cgroup_root, "system.slice", unit),):
             if os.path.isdir(candidate):
                 self._cgroup_paths[session.id] = candidate
                 return candidate
         r = self.runner.run(["systemctl", "show", "-p", "ControlGroup", "--value", unit], check=False, timeout=10)
         cg = r.stdout.strip()
         if cg:
-            path = CGROUP_ROOT + cg
+            path = self.cgroup_root + cg
             if os.path.isdir(path):
                 self._cgroup_paths[session.id] = path
                 return path
         return None
 
-    @staticmethod
-    def _read_int(path: str) -> Optional[int]:
-        try:
-            with open(path) as f:
-                return int(f.read().strip())
-        except (OSError, ValueError):
-            return None
-
     def sample(self, session: Session) -> Dict[str, Optional[int]]:
-        out: Dict[str, Optional[int]] = {"rss_bytes": None, "cgroup_memory_current": None,
-                                         "cgroup_memory_peak": None, "cpu_usage_usec": None}
+        """The scope's cgroup figures, VmRSS summed over its processes, and the Firecracker
+        process's CPU split into vCPU threads and VMM threads (cumulative, microseconds)."""
+        out = empty_sample()
         if self.runner.dry_run:
             return out
         cg = self._cgroup_dir(session)
         if not cg:
             return out
-        out["cgroup_memory_current"] = self._read_int(os.path.join(cg, "memory.current"))
-        out["cgroup_memory_peak"] = self._read_int(os.path.join(cg, "memory.peak"))
-        try:
-            with open(os.path.join(cg, "cpu.stat")) as f:
-                for line in f:
-                    if line.startswith("usage_usec "):
-                        out["cpu_usage_usec"] = int(line.split()[1])
-        except (OSError, ValueError):
-            pass
-        rss = 0
-        found = False
-        try:
-            with open(os.path.join(cg, "cgroup.procs")) as f:
-                pids = [p.strip() for p in f if p.strip()]
-            for pid in pids:
-                with open("/proc/%s/status" % pid) as f:
-                    for line in f:
-                        if line.startswith("VmRSS:"):
-                            rss += int(line.split()[1]) * 1024
-                            found = True
-        except (OSError, ValueError):
-            pass
-        out["rss_bytes"] = rss if found else None
+        out["cgroup_memory_current"] = read_int(os.path.join(cg, "memory.current"))
+        out["cgroup_memory_peak"] = read_int(os.path.join(cg, "memory.peak"))
+        cpu_stat = parse_flat_keyed(read_text(os.path.join(cg, "cpu.stat")))
+        out["cpu_usage_usec"] = cpu_stat.get("usage_usec")
+        out["cpu_throttled_usec"] = cpu_stat.get("throttled_usec")
+        out["cpu_nr_throttled"] = cpu_stat.get("nr_throttled")
+        cpu_psi = parse_pressure(read_text(os.path.join(cg, "cpu.pressure")))
+        mem_psi = parse_pressure(read_text(os.path.join(cg, "memory.pressure")))
+        out["cpu_pressure_some_total_us"] = _int_or_none(cpu_psi["some_total"])
+        out["cpu_pressure_full_total_us"] = _int_or_none(cpu_psi["full_total"])
+        out["memory_pressure_some_total_us"] = _int_or_none(mem_psi["some_total"])
+        pids = cgroup_pids(cg)
+        rss = [r for r in (status_rss_bytes(self.proc_root, pid) for pid in pids) if r is not None]
+        out["rss_bytes"] = sum(rss) if rss else None
+        split = thread_cpu_split(pids, self.proc_root)
+        out["cpu_vcpu_usec"] = split["vcpu_usec"]
+        out["cpu_vmm_usec"] = split["other_usec"]
         return out
+
+    # --- static facts for GET /host/info -------------------------------------
+    def version(self) -> Optional[str]:
+        """First line of `firecracker --version` (None in dry-run or when it does not run)."""
+        if self.runner.dry_run:
+            return None
+        r = self.runner.run([self.firecracker, "--version"], check=False, timeout=10)
+        lines = [line.strip() for line in r.stdout.splitlines() if line.strip()] if r.ok else []
+        return lines[0] if lines else None
+
+    def info(self) -> Dict[str, Any]:
+        example = Session(id="s000-example", slot=0, backend=self.name, address=self.address(0), vcpus=2,
+                          mem_mib=2048, fault=None, ready_timeout_s=0, max_lifetime_s=0, idle_timeout_s=0,
+                          fixture_base_url=self.fixture_base_url)
+        return {
+            "version": self.version(),
+            "kernel_path": public_path(self.kernel),
+            "kernel_bytes": _size(self.kernel),
+            "rootfs_path": public_path(self.rootfs),
+            "rootfs_bytes": _size(self.rootfs),
+            "boot_args_example": self.boot_args(example),
+            "mem_overhead_mib": self.mem_overhead_mib,
+            "cpu_quota_pct_per_vcpu": CPU_QUOTA_PCT_PER_VCPU,
+            "smt": SMT,
+        }
 
     # --- host checks -------------------------------------------------------
     def verify_clean(self) -> List[str]:
@@ -320,3 +344,14 @@ class FirecrackerBackend(Backend):
         if os.geteuid() != 0:
             problems.append("not running as root (taps and scopes need it)")
         return problems
+
+
+def _int_or_none(v: Optional[float]) -> Optional[int]:
+    return int(v) if v is not None else None
+
+
+def _size(path: str) -> Optional[int]:
+    try:
+        return os.path.getsize(path)
+    except OSError:
+        return None

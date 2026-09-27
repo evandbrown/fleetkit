@@ -3,6 +3,12 @@
 # exits non-zero if any is FAIL. Boots one microVM from the built guest rootfs on
 # a tap and waits for the guest daemon's /health, then kills it and cleans up.
 # Everything that can hang is under timeout. Run as root.
+#
+# With FIXTURE_URL set (the support host's fixture) the fixture checks go there and
+# FIXTURE_MATCH compares its manifest.json with the local build; with OTLP_ENDPOINT
+# set, OTLP posts one span to the collector. GUEST_EGRESS always runs: the test VM
+# fetches <fixture>/index.html itself through the guest daemon's /egress-check, which
+# for a remote fixture goes through this host's NAT.
 set -uo pipefail
 . /opt/fleetkit/images/lock.env 2>/dev/null || true
 FK=/var/lib/fleetkit
@@ -10,6 +16,7 @@ RUN_ID=${FLEETKIT_RUN_ID:-hostcheck}
 EV="$FK/runs/$RUN_ID"; mkdir -p "$EV"
 exec > >(tee "$EV/hostcheck.txt") 2>&1
 BUCKET=$(cat "$FK/results-bucket" 2>/dev/null || true)
+FIX=${FIXTURE_URL:-http://10.200.0.1:8081}
 fail=0
 res() { echo "$1_RESULT=$2"; [ "$2" = PASS ] || fail=1; }
 
@@ -34,7 +41,19 @@ ip -br addr show fcbr0 2>&1; ip -br addr show fcbr0 2>/dev/null | grep -q 10.200
 iptables -S DOCKER-USER 2>/dev/null | grep -q 'fcbr0' && res FORWARD_RULES PASS || res FORWARD_RULES FAIL
 iptables -t nat -S POSTROUTING 2>/dev/null | grep -q '10.200.0.0/24' && res NAT_RULE PASS || res NAT_RULE FAIL
 [ "$(sysctl -n net.ipv4.ip_forward)" = 1 ] && res IP_FORWARD PASS || res IP_FORWARD FAIL
-curl -fsS -m 5 -o /dev/null http://10.200.0.1:8081/ && res FIXTURE PASS || res FIXTURE FAIL
+echo "fixture: $FIX"; curl -fsS -m 5 -o /dev/null "$FIX/" && res FIXTURE PASS || res FIXTURE FAIL
+if [ -n "${FIXTURE_URL:-}" ]; then
+  curl -fsS -m 5 "$FIXTURE_URL/manifest.json" 2>/dev/null | cmp -s - /opt/fleetkit/fixture/dist/manifest.json \
+    && res FIXTURE_MATCH PASS || res FIXTURE_MATCH FAIL
+fi
+if [ -n "${OTLP_ENDPOINT:-}" ]; then
+  # One minimal OTLP/JSON span; the collector answers 200 when it accepts it.
+  now=$(date +%s%N)
+  span='{"resourceSpans":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"hostcheck"}},{"key":"fleetkit.run_id","value":{"stringValue":"'"$RUN_ID"'"}}]},"scopeSpans":[{"scope":{"name":"hostcheck"},"spans":[{"traceId":"'"$(od -An -tx1 -N16 /dev/urandom | tr -d ' \n')"'","spanId":"'"$(od -An -tx1 -N8 /dev/urandom | tr -d ' \n')"'","name":"hostcheck","kind":1,"startTimeUnixNano":"'"$now"'","endTimeUnixNano":"'"$now"'"}]}]}]}'
+  code=$(printf '%s' "$span" | curl -sS -m 5 -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' --data-binary @- "$OTLP_ENDPOINT/v1/traces" 2>&1)
+  echo "otlp: POST $OTLP_ENDPOINT/v1/traces -> $code"
+  [ "$code" = 200 ] && res OTLP PASS || res OTLP FAIL
+fi
 
 echo "== services =="
 systemctl is-active fleetkit-hostd 2>&1; systemctl is-active --quiet fleetkit-hostd && curl -fsS -m 5 http://127.0.0.1:8090/health >/dev/null && res HOSTD PASS || res HOSTD FAIL
@@ -61,8 +80,12 @@ done
 echo "guest /health after $(( $(date +%s) - t0 )) s: $(cat "$EV/hostcheck-health.json" 2>/dev/null)"
 res GUEST_HEALTH $ready
 if [ "$ready" = PASS ]; then
-  # egress through NAT from inside the guest, via the guest daemon's own fetch if it has one; otherwise skip
-  curl -fsS -m 20 "http://$GIP:8080/egress-check" 2>/dev/null && res GUEST_EGRESS PASS || echo "GUEST_EGRESS_RESULT=SKIP (no /egress-check endpoint)"
+  # The guest fetches the fixture itself (guest daemon, 5 s timeout); PASS needs ok and HTTP 200.
+  curl -fsS -m 20 -G --data-urlencode "url=$FIX/index.html" "http://$GIP:8080/egress-check" > "$EV/hostcheck-egress.json" 2>/dev/null
+  echo "guest egress-check: $(cat "$EV/hostcheck-egress.json" 2>/dev/null)"
+  jq -e '.ok == true and .status == 200' "$EV/hostcheck-egress.json" >/dev/null 2>&1 && res GUEST_EGRESS PASS || res GUEST_EGRESS FAIL
+else
+  res GUEST_EGRESS FAIL
 fi
 kill -9 "$FCPID" 2>/dev/null; wait "$FCPID" 2>/dev/null; kill "$WATCHDOG" 2>/dev/null
 pkill -9 -f 'fleetkit-check.sock' 2>/dev/null; ip link del "$TAP" 2>/dev/null; rm -f /run/fleetkit-check.sock

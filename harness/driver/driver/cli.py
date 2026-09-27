@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import collections
 import copy
 import json
 import os
@@ -11,8 +12,11 @@ import time
 from pathlib import Path
 
 from . import __version__
-from .config import (DEFAULT_FIXTURE_CHECK_URL, DEFAULT_HOST_URL, DEFAULT_OTLP_ENDPOINT, Timeouts, TrialConfig)
+from .config import (DEFAULT_FIXTURE_BASE_URL, DEFAULT_FIXTURE_CHECK_URL, DEFAULT_HOST_URL, DEFAULT_OTLP_ENDPOINT,
+                     DEFAULT_SAMPLE_INTERVAL_MS, Timeouts, TrialConfig)
+from .criteria import make_criteria
 from .hostclient import HostClient, HostError
+from .ladder import LadderPlanner, Outcome
 from .metrics import HostMetricsSampler
 from .outputs import RunDir
 from .telemetry import Tracer
@@ -65,14 +69,38 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--repeats", type=int, default=1)
     t.add_argument("--fault", default=None, help="fault name for every session (crash_on_start, never_ready, "
                                                   "hang_task, hang_step, slow_step:<ms>)")
+    t.add_argument("--step-p50-target-ms", type=float, default=None, help="pass criterion: every step's p50 (unset: not checked)")
+    t.add_argument("--step-p95-target-ms", type=float, default=None, help="pass criterion: every step's p95 (unset: not checked)")
+    t.add_argument("--task-p95-target-ms", type=float, default=None, help="pass criterion: task_ms p95 (unset: not checked)")
+    t.add_argument("--stop-at-first-miss", action="store_true",
+                   help="after all repeats of a level, run no higher level if it did not pass; a miss is then a "
+                        "result, so the exit code is non-zero only for trial errors (fixture, host daemon, verify-clean)")
+    t.add_argument("--confirm-repeats", type=int, default=0,
+                   help="after the ladder, K more trials at the last passing and the first failing level, walking "
+                        "down while a confirmation of the last pass fails")
+    t.add_argument("--warmup", type=int, default=0, help="K trials at n=1 before the ladder (kind warmup, not evaluated)")
+    t.add_argument("--settle-s", type=float, default=0.0,
+                   help="wait S seconds before each trial, recording host cpu_util as trial.json pre_trial")
+    t.add_argument("--illustration", action="store_true",
+                   help="finish with one n=1 trial with untimed per-step screenshots (kind illustration)")
+    t.add_argument("--metrics-hz", type=float, default=1.0,
+                   help="host metrics sampling rate; start the host daemon with a matching --metrics-period")
+    t.add_argument("--sample-interval-ms", type=int, default=DEFAULT_SAMPLE_INTERVAL_MS,
+                   help="guest process sampling interval sent with every task (0 disables)")
+    t.add_argument("--no-fixture-probe", action="store_true",
+                   help="do not time a GET of <fixture-check-url>/ at 1 Hz (fixture_rtt_ms in host_metrics.csv)")
 
     r = sub.add_parser("report", help="report from a run directory (works from the bundle alone)")
     r.add_argument("--run", required=True)
     r.add_argument("--price-per-hour", type=float, default=None, help="public on-demand USD per hour (assumed)")
     r.add_argument("--instance", default=None)
-    r.add_argument("--step-target-ms", type=float, default=None, help="target for step p50")
-    r.add_argument("--step-p95-ms", type=float, default=None, help="target for step p95")
-    r.add_argument("--task-target-ms", type=float, default=None, help="target for task p95")
+    # criteria: from these flags when any is given, else from run.json ``criteria`` (the run's own)
+    r.add_argument("--step-p50-target-ms", "--step-target-ms", dest="step_target_ms", type=float, default=None,
+                   help="target for step p50 (default: run.json criteria)")
+    r.add_argument("--step-p95-target-ms", "--step-p95-ms", dest="step_p95_ms", type=float, default=None,
+                   help="target for step p95 (default: run.json criteria)")
+    r.add_argument("--task-p95-target-ms", "--task-target-ms", dest="task_target_ms", type=float, default=None,
+                   help="target for task p95 (default: run.json criteria)")
     r.add_argument("--s3-get-price-per-1000", type=float, default=0.0004)
     r.add_argument("--fixture-manifest", default=None, help="fixture manifest with expected bytes/requests per task")
     r.add_argument("--bytes-tolerance", type=float, default=0.25)
@@ -149,12 +177,19 @@ class Session:
             self.tracer.error(f"host daemon not reachable at {a.host_url}: {exc}")
             raise
         if not a.no_host_metrics:
-            self.sampler = HostMetricsSampler(self.client, self.writers.host_metrics, log=self.tracer).start()
+            hz = float(getattr(a, "metrics_hz", None) or 1.0)
+            probe = None
+            if a.command == "trial" and not getattr(a, "no_fixture_probe", True):
+                probe = a.fixture_check_url
+            self.sampler = HostMetricsSampler(self.client, self.writers.host_metrics, interval_s=1.0 / hz,
+                                              log=self.tracer, fixture_url=probe).start()
 
     def close(self) -> None:
         if self.sampler:
             self.sampler.stop()
-            self.tracer.info("host metrics sampling stopped", samples=self.sampler.samples, errors=self.sampler.errors)
+            self.tracer.info("host metrics sampling stopped", samples=self.sampler.samples, errors=self.sampler.errors,
+                             repeats_skipped=self.sampler.repeats, fixture_probes=self.sampler.probes,
+                             fixture_probe_errors=self.sampler.probe_errors)
         self.rundir.update_run_json(ended_ts=time.time())
         self.writers.close()
         self.tracer.close()
@@ -169,33 +204,113 @@ def _install_signals() -> None:
         pass
 
 
+def _trial_inputs(a, sess: Session, criteria: dict, levels: list[int]) -> dict:
+    """run.json ``inputs``: everything needed to know what this invocation was asked to do, and on what."""
+    from .bundle import _git_commit
+    return {
+        "argv": list(getattr(a, "_argv", None) or []),
+        "options": {k: v for k, v in vars(a).items() if not k.startswith("_")},
+        "criteria": criteria, "ladder": levels, "repeats": a.repeats, "confirm_repeats": a.confirm_repeats,
+        "stop_at_first_miss": a.stop_at_first_miss, "warmup": a.warmup, "settle_s": a.settle_s,
+        "illustration": a.illustration, "metrics_hz": a.metrics_hz, "sample_interval_ms": a.sample_interval_ms,
+        "fixture_probe": not a.no_fixture_probe and not a.no_host_metrics,
+        "fixture_check_url": a.fixture_check_url,
+        "fixture_base_url": a.fixture_base_url or DEFAULT_FIXTURE_BASE_URL[a.backend],
+        "otlp_endpoint": None if a.no_lgtm else a.otlp_endpoint,
+        "host_info": sess.client.host_info(),
+        "guest_info": None,  # filled from the first ready session's record
+        "git_commit": os.environ.get("FLEETKIT_GIT_COMMIT") or _git_commit(),
+    }
+
+
+def _first_guest_info(runner: TrialRunner) -> dict | None:
+    for s in sorted(runner.sessions, key=lambda x: x.slot):
+        if s.ready and isinstance(s.info.get("guest_info"), dict):
+            return s.info["guest_info"]
+    return None
+
+
 def cmd_trial(a) -> int:
     levels = [int(x) for x in a.n.split(",") if x.strip()]
     if not levels or any(n < 1 for n in levels):
         print("--n must list positive integers", file=sys.stderr)
+        return 2
+    ladder_mode = a.stop_at_first_miss or a.confirm_repeats > 0
+    if ladder_mode and any(hi <= lo for lo, hi in zip(levels, levels[1:])):
+        print("--stop-at-first-miss and --confirm-repeats need --n in strictly ascending order", file=sys.stderr)
+        return 2
+    if a.metrics_hz <= 0 or a.confirm_repeats < 0 or a.warmup < 0 or a.settle_s < 0 or a.sample_interval_ms < 0:
+        print("--metrics-hz must be positive; --confirm-repeats, --warmup, --settle-s and --sample-interval-ms "
+              "must not be negative", file=sys.stderr)
         return 2
     _install_signals()
     try:
         sess = Session(a)
     except HostError:
         return 3
+    criteria = make_criteria(a.step_p50_target_ms, a.step_p95_target_ms, a.task_p95_target_ms)
+    planner = LadderPlanner(levels, a.repeats, a.confirm_repeats, a.stop_at_first_miss)
+    history: list[Outcome] = []
+    docs: list[dict] = []
     rc = 0
+    interrupted = False
     try:
+        inputs = _trial_inputs(a, sess, criteria, levels)
+        sess.rundir.update_run_json(criteria=criteria, inputs=inputs, plan=planner.summary(history))
         base = _timeouts(a)
-        for n in levels:
-            for rep in range(1, a.repeats + 1):
-                cfg = TrialConfig(run_id=sess.run_id, backend=a.backend, level_n=n, repeat=rep,
-                                  timeouts=copy.deepcopy(base), vcpus=a.vcpus, mem_mib=a.mem_mib, fault=a.fault,
-                                  fixture_check_url=a.fixture_check_url, fixture_base_url=a.fixture_base_url,
-                                  products_source=a.products, host_id=sess.host_id)
-                result = TrialRunner(cfg, sess.client, sess.rundir, sess.writers, sess.tracer).run()
-                if result["status"] != "ok":
-                    rc = 1
+
+        def run_one(level_n: int, repeat: int, kind: str, label: str | None = None, shots: bool = False) -> dict:
+            cfg = TrialConfig(run_id=sess.run_id, backend=a.backend, level_n=level_n, repeat=repeat,
+                              timeouts=copy.deepcopy(base), vcpus=a.vcpus, mem_mib=a.mem_mib, fault=a.fault,
+                              fixture_check_url=a.fixture_check_url, fixture_base_url=a.fixture_base_url,
+                              products_source=a.products, host_id=sess.host_id, trial_label=label,
+                              kind="fault" if a.fault else kind, criteria=criteria, settle_s=a.settle_s,
+                              sample_interval_ms=a.sample_interval_ms, screenshot_each_step=shots)
+            runner = TrialRunner(cfg, sess.client, sess.rundir, sess.writers, sess.tracer, metrics=sess.sampler)
+            try:
+                doc = runner.run()
+            finally:
+                if inputs["guest_info"] is None:
+                    gi = _first_guest_info(runner)
+                    if gi is not None:
+                        inputs["guest_info"] = gi
+                        sess.rundir.update_run_json(inputs=inputs)
+            docs.append(doc)
+            return doc
+
+        for k in range(1, a.warmup + 1):
+            run_one(1, k, "warmup", f"warmup-n1-r{k}")
+        at_level: collections.Counter = collections.Counter()  # repeat counts every trial at a level
+        while True:
+            nxt = planner.next(history)
+            if nxt is None:
+                break
+            at_level[nxt.level] += 1
+            doc = run_one(nxt.level, at_level[nxt.level], nxt.kind)
+            ev = doc.get("evaluation") or {}
+            history.append(Outcome(nxt.kind, nxt.level, bool(ev.get("passed")), doc["trial_id"]))
+            sess.rundir.update_run_json(plan=planner.summary(history))
+            sess.tracer.info(f"{nxt.kind} trial {doc['trial_id']} {'passed' if ev.get('passed') else 'missed'}",
+                             reasons="; ".join(ev.get("reasons") or []))
+        if a.illustration:
+            run_one(1, 1, "illustration", "illustration-n1", shots=True)
     except KeyboardInterrupt:
+        interrupted = True
         sess.tracer.warn("interrupted")
         rc = 130
     finally:
+        plan = planner.summary(history, interrupted=interrupted)
+        sess.rundir.update_run_json(plan=plan)
+        if not interrupted:
+            sess.tracer.info("plan done", stop_reason=plan["stop_reason"], last_pass=plan["boundary"]["last_pass"],
+                             first_miss=plan["boundary"]["first_miss"])
         sess.close()
+    if rc == 0:
+        if ladder_mode:
+            # a missed level is the experiment's result; only a trial that could not be measured fails the run
+            rc = 1 if any(d.get("error") for d in docs) else 0
+        else:
+            rc = 1 if any(d.get("status") != "ok" for d in docs) else 0
     return rc
 
 
@@ -272,5 +387,7 @@ def cmd_bundle(a) -> int:
 
 
 def main(argv=None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
     a = build_parser().parse_args(argv)
+    a._argv = argv
     return {"trial": cmd_trial, "report": cmd_report, "smoke": cmd_smoke, "bundle": cmd_bundle}[a.command](a)

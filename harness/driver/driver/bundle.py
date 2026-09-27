@@ -136,6 +136,17 @@ def _guest_manifest_fields(guest: dict) -> dict:
     }
 
 
+HOST_INFO_FACTS = ("cpu_model", "cpu_count", "threads_per_core", "cores_per_socket", "sockets", "mem_total",
+                   "kernel_release", "virtualized", "kvm")
+
+
+def _host_info(run_json: dict) -> dict:
+    """run.json ``inputs.host_info`` (the host daemon's GET /host/info at run start), or {}."""
+    inputs = run_json.get("inputs") if isinstance(run_json.get("inputs"), dict) else {}
+    hi = inputs.get("host_info")
+    return hi if isinstance(hi, dict) else {}
+
+
 def build_manifest(rundir: RunDir, trials: list[dict], opts: dict) -> dict:
     lock = _parse_env(opts.get("lock_env"))
     guest = read_json(Path(opts["guest_manifest"]), {}) if opts.get("guest_manifest") else {}
@@ -155,6 +166,9 @@ def build_manifest(rundir: RunDir, trials: list[dict], opts: dict) -> dict:
     debian = lock.get("DEBIAN_IMAGE", "")
     kernel_sha = {k: v for k, v in lock.items() if "KERNEL" in k and "SHA256" in k}
     prior = read_json(rundir.manifest_json, {}) or {}
+    hi = _host_info(run_json)
+    ec2 = hi.get("ec2") if isinstance(hi.get("ec2"), dict) else {}
+    fc = hi.get("firecracker") if isinstance(hi.get("firecracker"), dict) else {}
     manifest = {
         "run_id": rundir.run_id,
         "driver_version": __version__,
@@ -182,17 +196,30 @@ def build_manifest(rundir: RunDir, trials: list[dict], opts: dict) -> dict:
         "backends": sorted({t["backend"] for t in trials}),
         "trials": [{"trial_id": t["trial_id"], "backend": t["backend"], "level_n": t["level_n"],
                     "repeat": t.get("repeat"), "fault": t.get("fault"), "status": t.get("status"),
-                    "level_passed": t.get("level_passed")} for t in trials],
+                    "level_passed": t.get("level_passed"), "kind": t.get("kind"),
+                    "passed": (t.get("evaluation") or {}).get("passed")} for t in trials],
         "bundled_at": time.time(),
-        "labels": {"git_commit": "measured", "timestamps": "measured", "instance_type": "operator input",
+        "labels": {"git_commit": "measured", "timestamps": "measured",
+                   "instance_type": "operator input, else the host daemon's GET /host/info (IMDS)",
+                   "ami_id": "AMI lock or operator input, else GET /host/info (IMDS)",
+                   "host facts": "GET /host/info at run start (run.json inputs.host_info)",
                    "vcpu_quota": "operator input at run time", "prices": "not in this file; see report inputs"},
     }
+    # cpu and memory facts of the host the run measured, from the host daemon (null on old runs);
+    # host_kernel_release is the host's kernel, kernel_version the guest's
+    for k in HOST_INFO_FACTS:
+        manifest["host_" + k] = hi.get(k)
     # keep operator-provided values from earlier bundles when this call did not supply them
     for k in ("instance_type", "vcpu_quota", "ami_id", "host_provisioning_s", "rootfs_sha256", "rootfs_size_bytes",
               "guest_image_base_digest", "guest_image_id", "guest_arch", "guest_chromium_version",
-              "firecracker_version", "kernel_sha256"):
+              "firecracker_version", "kernel_sha256") + tuple("host_" + k for k in HOST_INFO_FACTS):
         if manifest.get(k) in (None, {}, "") and prior.get(k) not in (None, {}, ""):
             manifest[k] = prior[k]
+    # what the operator did not give, from the host daemon's view of the host (IMDS on EC2)
+    for k, v in (("instance_type", ec2.get("instance_type")), ("ami_id", ec2.get("ami_id")),
+                 ("firecracker_version", fc.get("version"))):
+        if manifest.get(k) in (None, {}, "") and v not in (None, ""):
+            manifest[k] = v
     return manifest
 
 

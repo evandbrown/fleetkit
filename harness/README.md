@@ -279,26 +279,44 @@ manifest.json  evidence.md  report.md  report.json  smoke-report.md  smoke-state
 ```
 
 Trial ids are `t<seq>-<backend>-n<N>-r<repeat>` (`t<seq>-smoke-n<N>`, `t<seq>-fault-<name>`,
-`t<seq>-case-<idle|lifetime>` from the smoke suite); task ids are `<trial_id>-slot<slot>`.
+`t<seq>-case-<idle|lifetime>` from the smoke suite; `t<seq>-warmup-n1-r<k>` and
+`t<seq>-illustration-n1` from a capacity run); task ids are `<trial_id>-slot<slot>`. Every trial has a
+`kind`: `ladder`, `confirm`, `warmup`, `illustration`, `smoke` or `fault`.
 
 **`tasks.csv`**: `run_id, trial_id, backend, level_n, repeat, session_id, slot, task_id, product_id,
 dispatch_ts, task_ms, wall_ms, ok, failure_category, failed_step, bytes_received, request_count,
-guest_mem_available, chromium_rss, screenshot_path, trace_id, clock_offset_ns, error`
+guest_mem_available, chromium_rss, screenshot_path, trace_id, clock_offset_ns, error, timing_valid,
+guestd_cpu_ms, kind` (`timing_valid` is false for the illustration trial, whose step screenshots
+fall inside the task)
 
 **`steps.csv`**: `run_id, trial_id, task_id, step_index, name, dispatch_ts, settle_ts, duration_ms,
-error` (`step_index` is 0-based in dispatch order; `error` is set on the failed step only). The
+error, bytes_received, request_count` (the traffic from this step's dispatch to the next step's; the
+steps of an ok task sum to the task's totals; `step_index` is 0-based in dispatch order; `error` is set on the failed step only). The
 guest reports only the steps that completed, so for a failed task the driver adds one row for
 `failed_step` itself: `dispatch_ts` is the previous step's `settle_ts` (or the task's dispatch),
 `settle_ts` and `duration_ms` are empty, `error` is the task's error. Percentiles ignore rows
 without a `duration_ms`.
 
 **`sessions.csv`**: `run_id, trial_id, session_id, slot, backend, vcpus, mem_mib, created_ts,
-process_started_ts, ready_ts, destroyed_ts, startup_ms, cleanup_ms, outcome, error`
+process_started_ts, ready_ts, destroyed_ts, startup_ms, cleanup_ms, outcome, error, kernel_start_ts,
+guestd_start_ts, chromium_launch_ts, chromium_ready_ts` (the boot phases, on the host clock, derived
+from the uptimes the guest reports in its first ready `/health`)
 
 **`host_metrics.csv`** (long): `ts, session_id or host, metric, value`. Host metrics:
 `mem_total, mem_available, cpu_util, steal, psi_<cpu|memory|io>_<some_avg10|some_total|full_avg10|full_total>`;
-per session: `rss_bytes, cgroup_memory_current, cgroup_memory_peak, cpu_usage_usec`. Nulls (PSI and
-steal where the platform has none) are not written.
+`cpu_count, hostd_cpu_usec, hostd_rss_bytes`; per session: `rss_bytes, cgroup_memory_current,
+cgroup_memory_peak, cpu_usage_usec`, and on Firecracker `cpu_vcpu_usec, cpu_vmm_usec` (the VM's vCPU
+threads and its other threads), `cpu_throttled_usec, cpu_nr_throttled, cpu_pressure_some_total_us,
+cpu_pressure_full_total_us, memory_pressure_some_total_us` (the VM's cgroup); session id `driver`:
+`driver_cpu_usec, driver_rss_bytes`; session id `fixture`: `fixture_rtt_ms` (1 Hz). Counters are
+cumulative. Nulls (PSI and steal where the platform has none) are not written. Sampled at
+`--metrics-hz` (the host daemon's `--metrics-period` must match).
+
+**`guest_metrics.csv`** (long): `ts, trial_id, session_id, task_id, metric, value`, sampled inside the
+guest every `--sample-interval-ms` during each task, `ts` on the host clock. Metrics: `cpu_total_ms`,
+`cpu_idle_ms` (since the previous sample), `mem_available`, `psi_cpu_some_total_us`, and per process
+group (`browser, renderer, gpu, network, utility, zygote, chromium_other, guestd, other`)
+`cpu_ms.<group>`, `rss_bytes.<group>`, `procs.<group>`.
 
 **`trial.json`**: ids (`run_id`, `trial_id`, `trace_id`, `host_id`), `level_n`, `repeat`, `backend`,
 `fault`, `vcpus`, `mem_mib`, `timeouts` used (including the derived proxy deadline and client

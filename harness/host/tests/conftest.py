@@ -78,13 +78,19 @@ class FakeGuest:
         self.metrics_body: Dict[str, Any] = {"mem_total": 1, "mem_available": 12345, "cached": 0,
                                              "chromium_rss": 6789, "tasks_run": 0, "tasks_failed": 0}
         self.task_calls: List[Dict[str, Any]] = []
+        # Extra /health fields (boot phases, guest_info) merged into the ready answer.
+        self.health_extra: Dict[str, Any] = {}
+        self.health_rtt_ns = 2_000_000
+        self.health_send_ns: Optional[int] = None
 
     def _resp(self, status: int, body: Any) -> GuestResponse:
         return GuestResponse(status, body, rtt_ns=2_000_000, send_ns=time.time_ns())
 
     def health(self, address: str, timeout: float = 1.0) -> GuestResponse:
         if address in self.ready:
-            return self._resp(200, {"ready": True, "chromium_version": "154.0", "uptime_s": 1.0})
+            body = {"ready": True, "chromium_version": "154.0", "uptime_s": 1.0, **self.health_extra}
+            return GuestResponse(200, body, rtt_ns=self.health_rtt_ns,
+                                 send_ns=self.health_send_ns if self.health_send_ns is not None else time.time_ns())
         raise GuestError("connection refused")
 
     def task(self, address: str, body: Dict[str, Any], timeout: float, traceparent: Optional[str] = None) -> GuestResponse:

@@ -21,6 +21,12 @@ class CsvAppender:
         self._lock = threading.Lock()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         new = not self.path.exists() or self.path.stat().st_size == 0
+        if not new:
+            # Appending to a file an older driver started: keep its header, so rows stay aligned
+            # with it (columns it lacks are dropped from the new rows; readers use row.get()).
+            existing = _read_header(self.path)
+            if existing:
+                self.columns = existing
         self._fh = open(self.path, "a", newline="", encoding="utf-8")
         self._writer = csv.DictWriter(self._fh, fieldnames=self.columns, extrasaction="ignore")
         if new:
@@ -33,12 +39,29 @@ class CsvAppender:
             self._writer.writerow(clean)
             self._fh.flush()
 
+    def append_many(self, rows: list[dict]) -> None:
+        """Several rows under one lock and one flush (guest samples arrive a few hundred at a time)."""
+        if not rows:
+            return
+        clean = [{c: _cell(r.get(c)) for c in self.columns} for r in rows]
+        with self._lock:
+            self._writer.writerows(clean)
+            self._fh.flush()
+
     def close(self) -> None:
         with self._lock:
             try:
                 self._fh.close()
             except Exception:
                 pass
+
+
+def _read_header(path: Path) -> list[str] | None:
+    try:
+        with open(path, newline="", encoding="utf-8") as fh:
+            return next(csv.reader(fh), None)
+    except OSError:
+        return None
 
 
 def _cell(v):
@@ -88,6 +111,7 @@ class RunDir:
         self.steps_csv = self.root / "steps.csv"
         self.sessions_csv = self.root / "sessions.csv"
         self.host_metrics_csv = self.root / "host_metrics.csv"
+        self.guest_metrics_csv = self.root / "guest_metrics.csv"
         self.trials_dir = self.root / "trials"
         self.screenshots_dir = self.root / "screenshots"
         self.guest_logs_dir = self.root / "guest-logs"
@@ -144,7 +168,8 @@ class Writers:
         self.steps = CsvAppender(rundir.steps_csv, schemas.STEPS_COLUMNS)
         self.sessions = CsvAppender(rundir.sessions_csv, schemas.SESSIONS_COLUMNS)
         self.host_metrics = CsvAppender(rundir.host_metrics_csv, schemas.HOST_METRICS_COLUMNS)
+        self.guest_metrics = CsvAppender(rundir.guest_metrics_csv, schemas.GUEST_METRICS_COLUMNS)
 
     def close(self) -> None:
-        for w in (self.tasks, self.steps, self.sessions, self.host_metrics):
+        for w in (self.tasks, self.steps, self.sessions, self.host_metrics, self.guest_metrics):
             w.close()

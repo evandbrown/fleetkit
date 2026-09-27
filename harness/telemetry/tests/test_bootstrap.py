@@ -119,6 +119,37 @@ def test_session_state_record(make_tel):
     assert attrs["session.to"] == {"stringValue": "destroyed"}
     assert attrs["session.outcome"] == {"stringValue": "completed"}
     assert attrs[ft.ATTR_SESSION_ID] == {"stringValue": "s1"}
+    # the design's (and hostd's) names too; the transition time as state_ts
+    assert attrs["session_id"] == {"stringValue": "s1"}
+    assert attrs["from"] == {"stringValue": "ready"}
+    assert attrs["to"] == {"stringValue": "destroyed"}
+    assert attrs["outcome"] == {"stringValue": "completed"}
+    assert attrs["state_ts"] == {"doubleValue": 1700000010.0}
+    first = {a["key"]: a["value"] for a in recs[0]["attributes"]}
+    assert first["from"] == {"stringValue": "booting"} and first["state_ts"] == {"doubleValue": 1700000000.5}
+    assert "outcome" not in first and "session.outcome" not in first
+
+
+def test_session_state_json_line_matches_hostd_names(make_tel):
+    """The JSON formatter flattens extras into the line: from/to/outcome as hostd writes them,
+    state_ts for the transition time, and the line's own ts left alone."""
+    import io
+    import json
+    import logging
+
+    tel = make_tel()
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(ft.JsonFormatter("hostd"))
+    tel.logger.addHandler(handler)
+    try:
+        tel.log_session_state("s2", None, "creating", 1700000000.25)
+    finally:
+        tel.logger.removeHandler(handler)
+    line = json.loads(stream.getvalue().strip().splitlines()[-1])
+    assert line["session_id"] == "s2" and line["from"] == "" and line["to"] == "creating"
+    assert line["state_ts"] == 1700000000.25 and line["ts"] != 1700000000.25
+    assert "outcome" not in line
 
 
 def test_host_id_covers_every_resource_attribute(make_tel, monkeypatch):

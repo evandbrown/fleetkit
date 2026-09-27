@@ -161,6 +161,9 @@ async def run_selftest(
         log.info("selftest: /health ready", health=health, after_ms=round((time.monotonic() - started) * 1000, 1))
         if not health.get("chromium_version"):
             failures.append("/health has no chromium_version")
+        for key in ("guestd_version", "guestd_uptime_s", "chromium_launch_s", "chromium_ready_s", "chromium_flags", "vcpus"):
+            if health.get(key) is None:
+                failures.append(f"/health has no {key}")
 
         product = site.products[0]
         body = {
@@ -217,6 +220,22 @@ def _check_task_result(result: Any, product: Dict[str, Any], traceparent: str, f
         failures.append(f"bytes_received {result.get('bytes_received')} < {HOME_PAGE_BYTES}")
     if result.get("request_count", 0) < 5:
         failures.append(f"request_count {result.get('request_count')} < 5")
+    steps = result.get("steps", [])
+    for key in ("bytes_received", "request_count"):
+        if sum(s.get(key) or 0 for s in steps) != result.get(key):
+            failures.append(f"per-step {key} does not sum to the task's {result.get(key)}")
+    if result.get("timing_valid") is not True:
+        failures.append(f"timing_valid is {result.get('timing_valid')!r}")
+    if not isinstance(result.get("guestd_cpu_ms"), (int, float)):
+        failures.append("guestd_cpu_ms missing")
+    samples = result.get("proc_samples")
+    if not isinstance(samples, list):
+        failures.append("proc_samples missing")
+    elif os.path.isfile("/proc/stat"):
+        # Linux: the sampler must see the browser and at least one renderer by the end.
+        last = (samples[-1].get("groups") or {}) if samples else {}
+        if (last.get("browser") or {}).get("procs") != 1 or not (last.get("renderer") or {}).get("procs"):
+            failures.append(f"proc_samples do not show the browser and a renderer: {last}")
     shot = result.get("screenshot_b64")
     try:
         raw = base64.b64decode(shot or "")
@@ -242,6 +261,8 @@ def _finish(log: LogRing, failures: list, result: Dict[str, Any], chromium=None)
         "bytes_received": result.get("bytes_received"),
         "request_count": result.get("request_count"),
         "screenshot_bytes": len(result.get("screenshot_b64") or "") * 3 // 4,
+        "guestd_cpu_ms": result.get("guestd_cpu_ms"),
+        "proc_samples": len(result.get("proc_samples") or []),
     }
     log.info("selftest result", **summary)
     print("SELFTEST " + ("PASS" if not failures else "FAIL") + ": " + json.dumps(summary, default=str), file=sys.stderr, flush=True)

@@ -12,7 +12,7 @@ from guestd.clock import Deadline, DeadlineExpired, never
 from guestd.faults import Fault, parse_fault
 from guestd.log import LogRing
 from guestd.selftest import HOME_PAGE_BYTES, SiteServer
-from guestd.task import FAILURE_CATEGORIES, STEP_NAMES, TaskRequest
+from guestd.task import FAILURE_CATEGORIES, STEP_NAMES, StepRecord, TaskRequest, TaskResult, split_counters
 
 
 def test_parse_fault_closed_set():
@@ -90,6 +90,71 @@ def test_task_request_schema_and_defaults():
             TaskRequest.from_dict(bad)
 
 
+def test_task_request_sampling_and_screenshot_fields():
+    base = {"task_id": "t", "fixture_base_url": "http://f", "product_id": "p", "query": "q", "expected_title": "T"}
+    req = TaskRequest.from_dict(base)
+    assert (req.sample_interval_ms, req.screenshot_each_step) == (200, False)
+    req = TaskRequest.from_dict(dict(base, sample_interval_ms=None, screenshot_each_step=None))
+    assert (req.sample_interval_ms, req.screenshot_each_step) == (200, False)
+    for value, expected in ((0, 0), (10, 10), (250, 250), (500.0, 500)):
+        assert TaskRequest.from_dict(dict(base, sample_interval_ms=value)).sample_interval_ms == expected
+    assert TaskRequest.from_dict(dict(base, screenshot_each_step=True)).screenshot_each_step is True
+    for bad in (
+        {"sample_interval_ms": -1},
+        {"sample_interval_ms": 9},  # 0 disables; below 10 ms is refused
+        {"sample_interval_ms": 12.5},
+        {"sample_interval_ms": float("inf")},
+        {"sample_interval_ms": float("nan")},
+        {"sample_interval_ms": True},
+        {"sample_interval_ms": "200"},
+        {"screenshot_each_step": 1},
+        {"screenshot_each_step": "true"},
+    ):
+        with pytest.raises(ValueError):
+            TaskRequest.from_dict(dict(base, **bad))
+
+
+def _steps(n):
+    return [StepRecord(name, i * 100, i * 100 + 50, 0.05) for i, name in enumerate(STEP_NAMES[:n])]
+
+
+def test_per_step_counter_windows_sum_to_the_totals():
+    # cumulative (bytes, requests) at each dispatch; tab creation happens inside home,
+    # so the counters are (0, 0) at home's dispatch and home owns that traffic
+    marks = [(0, 0), (215_000, 6), (218_000, 9), (226_000, 12), (226_500, 13)]
+    end = (231_000, 16)
+    steps = _steps(5)
+    split_counters(steps, marks, end)
+    assert [s.bytes_received for s in steps] == [215_000, 3_000, 8_000, 500, 4_500]
+    assert [s.request_count for s in steps] == [6, 3, 3, 1, 3]
+    assert sum(s.bytes_received for s in steps) == end[0] and sum(s.request_count for s in steps) == end[1]
+    d = steps[0].as_dict()
+    assert d["bytes_received"] == 215_000 and d["request_count"] == 6
+
+    # a failure in the third step: two steps listed, three dispatches marked; the failed
+    # step's traffic is the totals minus the listed steps
+    marks = [(0, 0), (215_000, 6), (218_000, 9)]
+    end = (219_000, 10)
+    steps = _steps(2)
+    split_counters(steps, marks, end)
+    assert [(s.bytes_received, s.request_count) for s in steps] == [(215_000, 6), (3_000, 3)]
+    assert end[0] - sum(s.bytes_received for s in steps) == 1_000
+
+    # a failure before any step completed
+    split_counters([], [(0, 0)], (500, 2))
+
+
+def test_task_result_shape():
+    r = TaskResult("t", True, "ok", _steps(5), 4.5, 10, 2, "AAAA")
+    d = r.as_dict()
+    assert d["proc_samples"] == [] and d["timing_valid"] is True and d["guestd_cpu_ms"] is None and d["sample_interval_ms"] is None
+    assert "step_screenshots" not in d  # absent unless screenshot_each_step
+    r.step_screenshots = [{"step": "home", "b64": "x"}]
+    r.timing_valid = False
+    d = r.as_dict()
+    assert d["step_screenshots"] == [{"step": "home", "b64": "x"}] and d["timing_valid"] is False
+
+
 def test_closed_sets_match_design():
     assert STEP_NAMES == ("home", "search", "open_product", "add_to_cart", "verify_cart")
     assert set(FAILURE_CATEGORIES) == {
@@ -133,3 +198,26 @@ def test_selftest_site_serves_over_http():
             await site.stop()
 
     asyncio.run(go())
+
+
+def test_log_hold_queues_console_writes_until_release():
+    import io
+    from guestd.log import LogRing
+
+    out = io.StringIO()
+    ring = LogRing(stream=out)
+    ring.info("before")
+    ring.hold()
+    ring.info("during 1")
+    ring.hold()
+    ring.info("during 2")
+    assert "during" not in out.getvalue()
+    assert [r["msg"] for r in ring.since(0)] == ["before", "during 1", "during 2"]
+    ring.release()
+    assert "during" not in out.getvalue()
+    ring.release()
+    lines = out.getvalue().splitlines()
+    assert [l.split('"msg": "')[1].split('"')[0] for l in lines] == ["before", "during 1", "during 2"]
+    ring.release()  # an extra release is harmless
+    ring.info("after")
+    assert out.getvalue().splitlines()[-1].count("after") == 1

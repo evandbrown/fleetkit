@@ -10,22 +10,33 @@ TASKS_COLUMNS = [
     "product_id", "dispatch_ts", "task_ms", "wall_ms", "ok", "failure_category", "failed_step",
     "bytes_received", "request_count", "guest_mem_available", "chromium_rss", "screenshot_path",
     "trace_id", "clock_offset_ns", "error",
+    # capacity experiment additions, appended so older readers keep their column positions
+    "timing_valid", "guestd_cpu_ms", "kind",
 ]
 
 # steps.csv
 STEPS_COLUMNS = [
     "run_id", "trial_id", "task_id", "step_index", "name", "dispatch_ts", "settle_ts",
     "duration_ms", "error",
+    "bytes_received", "request_count",
 ]
 
 # sessions.csv
 SESSIONS_COLUMNS = [
     "run_id", "trial_id", "session_id", "slot", "backend", "vcpus", "mem_mib", "created_ts",
     "process_started_ts", "ready_ts", "destroyed_ts", "startup_ms", "cleanup_ms", "outcome", "error",
+    # boot phases on the host clock, from the guest's /health at readiness (null when the guest lacks them)
+    "kernel_start_ts", "guestd_start_ts", "chromium_launch_ts", "chromium_ready_ts",
 ]
 
-# host_metrics.csv (long format; session_id is a session id or the literal ``host``)
+# host_metrics.csv (long format; session_id is a session id, the literal ``host``, ``driver`` for the
+# driver's own CPU and RSS, or ``fixture`` for the fixture probe's fixture_rtt_ms)
 HOST_METRICS_COLUMNS = ["ts", "session_id", "metric", "value"]
+
+# guest_metrics.csv (long format): the guest's proc_samples, one row per sample and metric. ``ts`` is on
+# the host clock: (guest_clock_ns + t_ns + clock_offset_ns) / 1e9. Metrics: cpu_total_ms, cpu_idle_ms,
+# mem_available, psi_cpu_some_total_us, and per process group cpu_ms.<group>, rss_bytes.<group>, procs.<group>.
+GUEST_METRICS_COLUMNS = ["ts", "trial_id", "session_id", "task_id", "metric", "value"]
 
 STEP_NAMES = ("home", "search", "open_product", "add_to_cart", "verify_cart")
 
@@ -43,6 +54,14 @@ SESSION_STATES = ("creating", "booting", "ready", "busy", "destroying", "destroy
 TERMINAL_STATES = ("destroyed", "failed")
 
 TRIAL_STATUSES = ("ok", "degraded", "failed")
+
+# Trial kinds (trial.json ``kind``, tasks.csv ``kind``). Only ladder and confirm trials count toward
+# level verdicts and the headline; smoke level trials count too, so a smoke run's report keeps its levels.
+TRIAL_KINDS = ("ladder", "confirm", "warmup", "illustration", "fault", "smoke")
+LEVEL_KINDS = ("ladder", "confirm", "smoke")
+
+# Guest process groups in proc_samples (guest daemon, /proc/<pid>/cmdline)
+GUEST_GROUPS = ("browser", "renderer", "gpu", "network", "utility", "zygote", "chromium_other", "guestd", "other")
 
 BACKENDS = ("docker", "firecracker")
 

@@ -1,8 +1,10 @@
-"""Host metrics sampler: GET /host/metrics shape, sampled every second into gauges.
+"""Host metrics sampler: GET /host/metrics shape, sampled every `period` seconds into gauges.
 
 Linux reads /proc directly (meminfo, stat, pressure/*). macOS has no PSI and no
 steal; memory and CPU come from psutil when it is installed, else null. Per-
 session figures come from the backend (Engine API stats or the VM's cgroup).
+The sample also carries the daemon's own cost (hostd_cpu_usec, hostd_rss_bytes)
+so a reader can subtract it; the period is --metrics-period (default 1 s).
 """
 from __future__ import annotations
 
@@ -12,7 +14,9 @@ import threading
 import time
 from typing import Any, Dict, List, Optional
 
+from .backends.base import SESSION_FIGURES
 from .model import Defaults, State
+from .procfs import PROC_ROOT, parse_pressure, read_text, status_rss_bytes
 
 try:  # optional, only needed off-Linux
     import psutil  # type: ignore
@@ -20,16 +24,8 @@ except Exception:  # pragma: no cover
     psutil = None
 
 
-def _read(path: str) -> Optional[str]:
-    try:
-        with open(path) as f:
-            return f.read()
-    except OSError:
-        return None
-
-
-def read_meminfo() -> Dict[str, Optional[int]]:
-    text = _read("/proc/meminfo")
+def read_meminfo(proc_root: str = PROC_ROOT) -> Dict[str, Optional[int]]:
+    text = read_text(os.path.join(proc_root, "meminfo"))
     if text is None:
         if psutil is not None:
             vm = psutil.virtual_memory()
@@ -44,9 +40,9 @@ def read_meminfo() -> Dict[str, Optional[int]]:
     return {"mem_total": vals.get("MemTotal"), "mem_available": vals.get("MemAvailable")}
 
 
-def read_cpu_counters() -> Optional[Dict[str, int]]:
-    text = _read("/proc/stat")
-    if text is None:
+def read_cpu_counters(proc_root: str = PROC_ROOT) -> Optional[Dict[str, int]]:
+    text = read_text(os.path.join(proc_root, "stat"))
+    if not text:
         return None
     first = text.splitlines()[0].split()
     if first[0] != "cpu":
@@ -58,25 +54,34 @@ def read_cpu_counters() -> Optional[Dict[str, int]]:
     return {"idle": idle + iowait, "steal": steal, "total": sum(nums[:8])}
 
 
-def read_psi() -> Optional[Dict[str, Dict[str, Optional[float]]]]:
+def read_psi(proc_root: str = PROC_ROOT) -> Optional[Dict[str, Dict[str, Optional[float]]]]:
     out: Dict[str, Dict[str, Optional[float]]] = {}
     any_found = False
     for res in ("cpu", "memory", "io"):
-        text = _read("/proc/pressure/%s" % res)
-        entry: Dict[str, Optional[float]] = {"some_avg10": None, "some_total": None, "full_avg10": None, "full_total": None}
+        text = read_text(os.path.join(proc_root, "pressure", res))
         if text:
             any_found = True
-            for line in text.splitlines():
-                parts = line.split()
-                if not parts:
-                    continue
-                kind = parts[0]
-                kv = dict(p.split("=", 1) for p in parts[1:] if "=" in p)
-                if kind in ("some", "full"):
-                    entry[kind + "_avg10"] = float(kv.get("avg10", "nan")) if "avg10" in kv else None
-                    entry[kind + "_total"] = float(kv["total"]) if "total" in kv else None
-        out[res] = entry
+        out[res] = parse_pressure(text)
     return out if any_found else None
+
+
+def hostd_cpu_usec() -> int:
+    """This process's cumulative user+system CPU time (all threads), microseconds."""
+    t = os.times()
+    return int((t.user + t.system) * 1_000_000)
+
+
+def hostd_rss_bytes(proc_root: str = PROC_ROOT) -> Optional[int]:
+    """This process's resident set: VmRSS on Linux, psutil elsewhere, else None."""
+    rss = status_rss_bytes(proc_root, "self")
+    if rss is not None:
+        return rss
+    if psutil is not None:
+        try:
+            return int(psutil.Process().memory_info().rss)
+        except Exception:
+            pass
+    return None
 
 
 def _drop_none(attrs: Dict[str, Any]) -> Dict[str, Any]:
@@ -87,11 +92,12 @@ class HostSampler:
     """Samples host and per-session metrics every `period` seconds on a daemon thread."""
 
     def __init__(self, manager: Any, telemetry: Any, period: float = Defaults.METRICS_PERIOD_S,
-                 host_id: str = ""):
+                 host_id: str = "", proc_root: str = PROC_ROOT):
         self.manager = manager
         self.telemetry = telemetry
         self.period = period
         self.host_id = host_id
+        self.proc_root = proc_root
         self.latest: Optional[Dict[str, Any]] = None
         self._prev_cpu: Optional[Dict[str, int]] = None
         self._stop = threading.Event()
@@ -110,7 +116,7 @@ class HostSampler:
         self._stop.set()
 
     def _cpu(self) -> Dict[str, Optional[float]]:
-        counters = read_cpu_counters()
+        counters = read_cpu_counters(self.proc_root)
         if counters is None:
             if psutil is not None:
                 try:
@@ -131,9 +137,12 @@ class HostSampler:
     def sample_once(self) -> Dict[str, Any]:
         ts = time.time()
         sample: Dict[str, Any] = {"ts": ts}
-        sample.update(read_meminfo())
+        sample.update(read_meminfo(self.proc_root))
         sample.update(self._cpu())
-        sample["psi"] = read_psi()
+        sample["psi"] = read_psi(self.proc_root)
+        sample["cpu_count"] = os.cpu_count()
+        sample["hostd_cpu_usec"] = hostd_cpu_usec()
+        sample["hostd_rss_bytes"] = hostd_rss_bytes(self.proc_root)
         sessions: List[Dict[str, Any]] = []
         # Correlation keys per session (section 8) for the exported points; kept out of the
         # GET /host/metrics shape, which section 4 fixes to {id, rss_bytes, ...}.
@@ -142,9 +151,9 @@ class HostSampler:
             try:
                 figures = self.manager.backend.sample(s)
             except Exception:
-                figures = {"rss_bytes": None, "cgroup_memory_current": None,
-                           "cgroup_memory_peak": None, "cpu_usage_usec": None}
-            sessions.append({"id": s.id, **figures})
+                figures = {}
+            # Every key of SESSION_FIGURES on every session, whatever the backend returned.
+            sessions.append({"id": s.id, **{k: figures.get(k) for k in SESSION_FIGURES}})
             keys[s.id] = {"fleetkit.run_id": s.run_id, "fleetkit.trial_id": s.trial_id,
                           "fleetkit.backend": s.backend}
         sample["sessions"] = sessions
@@ -161,7 +170,8 @@ class HostSampler:
         backend = getattr(getattr(self.manager, "backend", None), "name", None)
         host_attrs = _drop_none({"fleetkit.host_id": self.host_id, "fleetkit.backend": backend})
         points = [{"name": "fleetkit.host.%s" % k, "value": sample.get(k), "attributes": host_attrs}
-                  for k in ("mem_total", "mem_available", "cpu_util", "steal")]
+                  for k in ("mem_total", "mem_available", "cpu_util", "steal", "cpu_count",
+                            "hostd_cpu_usec", "hostd_rss_bytes")]
         psi = sample.get("psi") or {}
         for res, entry in psi.items():
             for k, v in entry.items():
@@ -169,7 +179,7 @@ class HostSampler:
         for s in sample["sessions"]:
             attrs = _drop_none({**host_attrs, **(session_keys or {}).get(s["id"], {}),
                                 "fleetkit.session_id": s["id"]})
-            for k in ("rss_bytes", "cgroup_memory_current", "cgroup_memory_peak", "cpu_usage_usec"):
+            for k in SESSION_FIGURES:
                 points.append({"name": "fleetkit.session.%s" % k, "value": s.get(k), "attributes": attrs})
         self.telemetry.gauges([p for p in points if p["value"] is not None], ts_ns=int(sample["ts"] * 1e9))
 

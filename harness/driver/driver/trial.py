@@ -1,15 +1,18 @@
 """The trial protocol (design sections 4, 5, 6 and 11).
 
-One trial: fixture check, create N sessions, wait until all are ready or failed, release a barrier
-so N tasks start together (or spaced by launch_interval_ms), collect rows as they return, destroy
-every session, verify-clean, write trial.json. Every CSV row is appended as it arrives and
-trial.json is rewritten at each phase, so the run directory is valid after any interruption.
+One trial: optional settle wait, fixture check, create N sessions, wait until all are ready or
+failed, release a barrier so N tasks start together (or spaced by launch_interval_ms), collect rows
+as they return, destroy every session, verify-clean, write trial.json with the trial's ``kind`` and
+its ``evaluation`` against the criteria (driver/criteria.py). Every CSV row is appended as it
+arrives and trial.json is rewritten at each phase, so the run directory is valid after any
+interruption.
 """
 from __future__ import annotations
 
 import base64
 import collections
 import json
+import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -18,6 +21,7 @@ from pathlib import Path
 
 from . import schemas
 from .config import DESTROY_GRACE_S, READY_GRACE_S, READY_POLL_INTERVAL_S, TrialConfig
+from .criteria import evaluate_trial
 from .hostclient import HostClient, HostError
 from .outputs import RunDir, Writers, write_json_atomic
 from .products import FixtureCheckError, Product, assign, fixture_check, load_products
@@ -49,12 +53,13 @@ class SessionRec:
 
 class TrialRunner:
     def __init__(self, cfg: TrialConfig, client: HostClient, rundir: RunDir, writers: Writers,
-                 tracer: Tracer, seq: int | None = None):
+                 tracer: Tracer, seq: int | None = None, metrics=None):
         self.cfg = cfg
         self.client = client
         self.rundir = rundir
         self.w = writers
         self.tr = tracer
+        self.metrics = metrics  # HostMetricsSampler, for the settle wait's cpu_util; polled directly if None
         seq = seq if seq is not None else rundir.next_trial_seq()
         label = cfg.trial_label or f"{cfg.backend}-n{cfg.level_n}-r{cfg.repeat}"
         self.trial_id = f"t{seq:03d}-{label}"
@@ -73,6 +78,10 @@ class TrialRunner:
         self.span: Span | None = None
         self._lock = threading.Lock()
         self._interrupted = False
+        self.pre_trial: dict | None = None
+        # this trial's rows as written, for evaluate_trial (the report reads the same rows from the CSVs)
+        self.task_rows: list[dict] = []
+        self.step_rows: list[dict] = []
 
     # ---- helpers -----------------------------------------------------------------------
     def _log(self, level: str, msg: str, **attrs):
@@ -90,11 +99,17 @@ class TrialRunner:
             "fleetkit.run_id": cfg.run_id, "fleetkit.trial_id": self.trial_id,
             "fleetkit.backend": cfg.backend, "fleetkit.level_n": cfg.level_n,
             "fleetkit.repeat": cfg.repeat, "fleetkit.fault": cfg.fault or "",
-            "fleetkit.host_id": cfg.host_id})
-        self._log("INFO", f"trial {self.trial_id} starting", fault=cfg.fault or "", trace_id=self.span.trace_id)
+            "fleetkit.host_id": cfg.host_id, "fleetkit.trial_kind": cfg.kind})
+        self._log("INFO", f"trial {self.trial_id} starting", fault=cfg.fault or "", kind=cfg.kind,
+                  trace_id=self.span.trace_id)
         self._write_trial_json()
         created = False
         try:
+            if cfg.settle_s and cfg.settle_s > 0:
+                self.phase = "settle"
+                self._settle()
+                self._write_trial_json()
+
             self.phase = "fixture_check"
             self._fixture_check_and_products()
             self._write_trial_json()
@@ -160,6 +175,34 @@ class TrialRunner:
         if self._interrupted:
             raise KeyboardInterrupt
         return result
+
+    def _settle(self) -> None:
+        """Wait settle_s before the trial and record the host cpu_util seen meanwhile (pre_trial)."""
+        wait_s = float(self.cfg.settle_s)
+        values: list[float] = []
+        with self.tr.start_span("settle", self.span, {"fleetkit.settle_s": wait_s}) as sp:
+            t0 = time.time()
+            if self.metrics is not None:
+                time.sleep(wait_s)
+                values = self.metrics.cpu_util_between(t0, time.time())
+            else:
+                deadline = time.monotonic() + wait_s
+                while True:
+                    try:
+                        m = self.client.host_metrics(timeout_s=1.0)
+                        v = m.get("cpu_util") if isinstance(m, dict) else None
+                        if isinstance(v, (int, float)) and not isinstance(v, bool):
+                            values.append(float(v))
+                    except HostError:
+                        pass
+                    left = deadline - time.monotonic()
+                    if left <= 0:
+                        break
+                    time.sleep(min(1.0, left))
+            self.pre_trial = {"settle_s": wait_s, "cpu_util_mean": mean(values),
+                              "cpu_util_max": max(values) if values else None, "samples": len(values)}
+            sp.set(**{"fleetkit.cpu_util_mean": self.pre_trial["cpu_util_mean"]})
+        self._log("INFO", "settled", **{k: v for k, v in self.pre_trial.items() if v is not None})
 
     def _fixture_check_and_products(self) -> None:
         with self.tr.start_span("fixture_check", self.span) as sp:
@@ -251,6 +294,7 @@ class TrialRunner:
             "product_id": product.product_id, "query": product.query,
             "expected_title": product.expected_title,
             "step_timeout_ms": t.step_timeout_ms, "task_timeout_ms": t.task_timeout_ms,
+            "sample_interval_ms": cfg.sample_interval_ms, "screenshot_each_step": bool(cfg.screenshot_each_step),
         }
         span = self.tr.start_span("task", self.span, {
             "fleetkit.session_id": s.session_id, "fleetkit.task_id": task_id,
@@ -276,6 +320,7 @@ class TrialRunner:
                 screenshot_path = str(p.relative_to(self.rundir.root))
             except Exception as exc:
                 self._log("WARN", f"screenshot for {task_id} not saved: {exc}")
+        step_shots = self._save_step_screenshots(task_id, body.get("step_screenshots"))
 
         # guest log tail
         log_tail = body.get("log_tail")
@@ -307,8 +352,12 @@ class TrialRunner:
             "chromium_rss": _pick(body, "chromium_rss", "guest_metrics.chromium_rss", "guest.chromium_rss"),
             "screenshot_path": screenshot_path, "trace_id": self.span.trace_id,
             "clock_offset_ns": clock_offset_ns, "error": error,
+            "timing_valid": body.get("timing_valid") if isinstance(body.get("timing_valid"), bool) else None,
+            "guestd_cpu_ms": to_float(body.get("guestd_cpu_ms")), "kind": cfg.kind,
         }
         self.w.tasks.append(row)
+        with self._lock:
+            self.task_rows.append(row)
         steps = body.get("steps") if isinstance(body.get("steps"), list) else []
         failed_step = str(body.get("failed_step") or "")
         step_rows = []
@@ -323,6 +372,7 @@ class TrialRunner:
                 "settle_ts": _step_ts(st.get("settle_ns"), guest_clock_ns, clock_offset_ns),
                 "duration_ms": st.get("duration_ms"),
                 "error": error if (not ok and failed_step == name) else "",
+                "bytes_received": st.get("bytes_received"), "request_count": st.get("request_count"),
             })
         if not ok and failed_step and not any(r["name"] == failed_step for r in step_rows):
             # The guest returns only the steps completed so far (design section 4), so the step
@@ -336,10 +386,17 @@ class TrialRunner:
             })
         for r in step_rows:
             self.w.steps.append(r)
+        with self._lock:
+            self.step_rows.extend(step_rows)
+        samples = body.get("proc_samples") if isinstance(body.get("proc_samples"), list) else []
+        self.w.guest_metrics.append_many(
+            guest_metric_rows(samples, self.trial_id, s.session_id, task_id, guest_clock_ns, clock_offset_ns))
         s.task = {"task_id": task_id, "ok": ok, "failure_category": category, "failed_step": row["failed_step"],
                   "task_ms": row["task_ms"], "wall_ms": row["wall_ms"], "http_status": reply.status,
                   "steps": len(steps), "error": error, "screenshot_path": screenshot_path,
-                  "dispatch_ts": reply.send_ts, "return_ts": reply.recv_ts}
+                  "dispatch_ts": reply.send_ts, "return_ts": reply.recv_ts,
+                  "timing_valid": row["timing_valid"], "guestd_cpu_ms": row["guestd_cpu_ms"],
+                  "proc_samples": len(samples), "step_screenshots": step_shots}
         span.set(**{"fleetkit.failure_category": category, "fleetkit.wall_ms": row["wall_ms"],
                     "fleetkit.task_ms": row["task_ms"], "http.status_code": reply.status})
         if not ok:
@@ -353,6 +410,24 @@ class TrialRunner:
         self._log("INFO" if ok else "WARN", f"task {task_id} {category}", session_id=s.session_id,
                   wall_ms=row["wall_ms"], task_ms=row["task_ms"], failed_step=row["failed_step"],
                   state_after=s.state_after_task, error=error if not ok else "")
+
+    def _save_step_screenshots(self, task_id: str, shots) -> list[str]:
+        """screenshots/<task_id>-<step>.jpg for each untimed per-step screenshot (illustration trial)."""
+        saved: list[str] = []
+        if not isinstance(shots, list):
+            return saved
+        for i, shot in enumerate(shots):
+            if not isinstance(shot, dict) or not shot.get("b64"):
+                continue
+            step = re.sub(r"[^A-Za-z0-9_.-]", "_", str(shot.get("step") or f"step{i}"))
+            try:
+                self.rundir.screenshots_dir.mkdir(parents=True, exist_ok=True)
+                p = self.rundir.screenshots_dir / f"{task_id}-{step}.jpg"
+                p.write_bytes(base64.b64decode(shot["b64"]))
+                saved.append(str(p.relative_to(self.rundir.root)))
+            except Exception as exc:
+                self._log("WARN", f"step screenshot {step} for {task_id} not saved: {exc}")
+        return saved
 
     def _cleanup(self) -> None:
         with self.tr.start_span("cleanup", self.span, {"fleetkit.count": len(self.sessions)}) as sp:
@@ -403,6 +478,8 @@ class TrialRunner:
             "ready_ts": i.get("ready_ts"), "destroyed_ts": i.get("destroyed_ts"),
             "startup_ms": i.get("startup_ms"), "cleanup_ms": i.get("cleanup_ms"),
             "outcome": outcome, "error": err,
+            "kernel_start_ts": i.get("kernel_start_ts"), "guestd_start_ts": i.get("guestd_start_ts"),
+            "chromium_launch_ts": i.get("chromium_launch_ts"), "chromium_ready_ts": i.get("chromium_ready_ts"),
         })
         s.info["outcome"] = outcome
 
@@ -477,12 +554,15 @@ class TrialRunner:
 
         doc = {
             "run_id": cfg.run_id, "trial_id": self.trial_id, "trace_id": self.span.trace_id if self.span else "",
+            "kind": cfg.kind,
             "backend": cfg.backend, "level_n": n, "repeat": cfg.repeat, "fault": cfg.fault,
             "vcpus": cfg.vcpus, "mem_mib": cfg.mem_mib, "host_id": cfg.host_id,
             "timeouts": cfg.timeouts.as_dict(),
             "fixture": {"check_url": cfg.fixture_check_url, "guest_base_url": cfg.guest_fixture_base_url(),
                         "products_source": self.products_source, "products": len(self.products)},
             "timestamps": dict(self.timestamps),
+            "pre_trial": self.pre_trial,
+            "sample_interval_ms": cfg.sample_interval_ms, "screenshot_each_step": bool(cfg.screenshot_each_step),
             "counts": {
                 "sessions_requested": n, "sessions_created": len(self.sessions),
                 "sessions_ready": sessions_ready, "sessions_failed_startup": sessions_failed,
@@ -513,6 +593,12 @@ class TrialRunner:
             } for s in self.sessions],
             "written_at": time.time(),
         }
+        doc["criteria"] = cfg.criteria
+        doc["evaluation"] = None
+        if final:
+            with self._lock:
+                task_rows, step_rows = list(self.task_rows), list(self.step_rows)
+            doc["evaluation"] = evaluate_trial(doc, task_rows, step_rows, cfg.criteria)
         write_json_atomic(self.rundir.trial_json_path(self.trial_id), doc)
         return doc
 
@@ -535,6 +621,38 @@ def categorize(status: int, body, transport_error: str | None) -> tuple[str, str
     if status == 0 or status >= 500:
         return "guest_unreachable", err or f"HTTP {status}: {_short(body)}"
     return "guest_unreachable", err or f"HTTP {status} with unknown failure_category {cat!r}: {_short(body)}"
+
+
+GUEST_SAMPLE_SCALARS = ("cpu_total_ms", "cpu_idle_ms", "mem_available", "psi_cpu_some_total_us")
+GUEST_GROUP_FIELDS = ("cpu_ms", "rss_bytes", "procs")
+
+
+def guest_metric_rows(samples, trial_id: str, session_id: str, task_id: str,
+                      guest_clock_ns, clock_offset_ns) -> list[dict]:
+    """guest_metrics.csv rows (long format) from a task result's ``proc_samples``. ``t_ns`` shares the
+    steps' zero (task receipt), so ts = (guest_clock_ns + t_ns + clock_offset_ns) / 1e9. Nulls are skipped."""
+    rows: list[dict] = []
+    for smp in samples or []:
+        if not isinstance(smp, dict):
+            continue
+        ts = _step_ts(smp.get("t_ns"), guest_clock_ns, clock_offset_ns)
+        base = {"ts": ts, "trial_id": trial_id, "session_id": session_id, "task_id": task_id}
+        for k in GUEST_SAMPLE_SCALARS:
+            v = smp.get(k)
+            if _is_num(v):
+                rows.append({**base, "metric": k, "value": v})
+        groups = smp.get("groups") if isinstance(smp.get("groups"), dict) else {}
+        for g in sorted(groups):
+            vals = groups[g] if isinstance(groups[g], dict) else {}
+            for f in GUEST_GROUP_FIELDS:
+                v = vals.get(f)
+                if _is_num(v):
+                    rows.append({**base, "metric": f"{f}.{g}", "value": v})
+    return rows
+
+
+def _is_num(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
 
 
 def _pick(body: dict, *paths):

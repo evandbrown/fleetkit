@@ -106,6 +106,13 @@ class HostClient:
     def host_metrics(self, timeout_s: float = 1.0) -> dict:
         return self.request("GET", "/host/metrics", timeout_s=timeout_s).body
 
+    def host_info(self, timeout_s: float = 10.0) -> dict | None:
+        """GET /host/info (static host facts); None when the daemon lacks it or does not answer."""
+        reply = self.request("GET", "/host/info", timeout_s=timeout_s, raise_on_error=False)
+        if reply.transport_error or reply.status != 200 or not isinstance(reply.body, dict):
+            return None
+        return reply.body
+
     def verify_clean(self) -> dict:
         body = self.request("GET", "/host/verify-clean", timeout_s=30.0).body
         if not isinstance(body, dict):

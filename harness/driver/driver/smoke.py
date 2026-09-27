@@ -119,7 +119,7 @@ class SmokeSuite:
                           timeouts=timeouts or copy.deepcopy(self.o.timeouts), vcpus=self.o.vcpus,
                           mem_mib=self.o.mem_mib, fault=fault, fixture_check_url=self.o.fixture_check_url,
                           fixture_base_url=self.o.fixture_base_url, products_source=self.o.products_source,
-                          host_id=self.o.host_id, trial_label=label)
+                          host_id=self.o.host_id, trial_label=label, kind="fault" if fault else "smoke")
         return TrialRunner(cfg, self.client, self.rundir, self.w, self.tr).run()
 
     def _record(self, index: str, name: str, passed: bool, detail: str, t0: float, trial_id: str = "") -> None:
@@ -294,6 +294,8 @@ class SmokeSuite:
             "ready_ts": info.get("ready_ts"), "destroyed_ts": info.get("destroyed_ts"),
             "startup_ms": info.get("startup_ms"), "cleanup_ms": info.get("cleanup_ms"),
             "outcome": outcome, "error": info.get("error") or "",
+            "kernel_start_ts": info.get("kernel_start_ts"), "guestd_start_ts": info.get("guestd_start_ts"),
+            "chromium_launch_ts": info.get("chromium_launch_ts"), "chromium_ready_ts": info.get("chromium_ready_ts"),
         })
         detail = f"outcome {outcome} after {elapsed:.1f} s (idle {idle_s} s, lifetime {life_s} s)"
         if problems:

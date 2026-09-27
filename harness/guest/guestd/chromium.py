@@ -69,6 +69,10 @@ class Chromium:
         self.version: Dict[str, Any] = {}
         self.launches = 0
         self.unexpected_exits = 0
+        # time.monotonic() at which the current process was launched / became ready;
+        # None before that and once it is gone (the daemon reports them in /health).
+        self.launch_mono: Optional[float] = None
+        self.ready_mono: Optional[float] = None
         self._stopping = False
         self._supervisor: Optional[asyncio.Task] = None
         self._ready = asyncio.Event()
@@ -86,6 +90,11 @@ class Chromium:
     @property
     def pid(self) -> Optional[int]:
         return self.proc.pid if self.proc is not None else None
+
+    @property
+    def flags(self) -> List[str]:
+        """The flag list this supervisor launches Chromium with."""
+        return chromium_flags(self.port, self.user_data_dir)
 
     def rss_bytes(self) -> Optional[int]:
         return metrics.rss_of_processes(self.binary)
@@ -163,6 +172,7 @@ class Chromium:
             self._log.error("chromium exited unexpectedly", returncode=rc, stderr_tail=self._stderr_tail(20))
             await self._teardown_connection()
             self.proc = None
+            self.launch_mono = self.ready_mono = None
             await asyncio.sleep(0.5)
 
     async def _launch(self) -> None:
@@ -170,7 +180,7 @@ class Chromium:
             raise FileNotFoundError(f"chromium binary not found at {self.binary}")
         shutil.rmtree(self.user_data_dir, ignore_errors=True)
         os.makedirs(self.user_data_dir, exist_ok=True)
-        argv = [self.binary] + chromium_flags(self.port, self.user_data_dir)
+        argv = [self.binary] + self.flags
         env = dict(os.environ)
         env.setdefault("HOME", "/tmp")
         try:
@@ -178,6 +188,7 @@ class Chromium:
         except OSError:
             stderr = asyncio.subprocess.DEVNULL  # type: ignore[assignment]
         self.launches += 1
+        self.ready_mono = None
         t0 = time.monotonic()
         self.proc = await asyncio.create_subprocess_exec(
             *argv,
@@ -191,6 +202,7 @@ class Chromium:
             stderr.close()
         self._log.info("chromium launched", pid=self.proc.pid, launch=self.launches, argv=argv)
         self._launch_t0 = t0
+        self.launch_mono = t0
 
     async def _await_devtools(self) -> None:
         """Poll /json/version on loopback until it answers, then connect the browser socket."""
@@ -215,6 +227,7 @@ class Chromium:
         info = await asyncio.wait_for(client.send("Browser.getVersion"), 10.0)
         self.version.setdefault("Browser", info.get("product"))
         self.client = client
+        self.ready_mono = time.monotonic()
         self._ready.set()
         self._log.info(
             "chromium ready",
@@ -231,6 +244,7 @@ class Chromium:
 
     async def _kill_process(self) -> None:
         proc, self.proc = self.proc, None
+        self.launch_mono = self.ready_mono = None
         if proc is None or proc.returncode is not None:
             return
         try:

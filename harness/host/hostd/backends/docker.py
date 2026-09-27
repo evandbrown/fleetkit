@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional
 
 from ..model import Session
 from ..runner import CommandError, Runner
-from .base import Backend, BackendError
+from .base import Backend, BackendError, empty_sample
 
 PORT_BASE = 18080
 PORT_LAST = 18199
@@ -174,8 +174,8 @@ class DockerBackend(Backend):
 
     # --- sampling ----------------------------------------------------------
     def sample(self, session: Session) -> Dict[str, Optional[int]]:
-        out: Dict[str, Optional[int]] = {"rss_bytes": None, "cgroup_memory_current": None,
-                                         "cgroup_memory_peak": None, "cpu_usage_usec": None}
+        # The Firecracker-only figures (vCPU/VMM split, throttling, cgroup pressure) stay None.
+        out = empty_sample()
         name = session.handle.get("container")
         sock = docker_socket_path()
         if not name or not sock or self.runner.dry_run:

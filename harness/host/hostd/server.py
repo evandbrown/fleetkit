@@ -6,8 +6,9 @@ import re
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
+from .hostinfo import collect_host_info
 from .manager import ApiError, RequestContext, SessionManager
 from .metrics import HostSampler
 from .telemetry import Telemetry, parse_baggage, parse_traceparent
@@ -20,13 +21,24 @@ class HostdApp:
     """Routes requests to the manager; shared by every handler thread."""
 
     def __init__(self, manager: SessionManager, telemetry: Telemetry, sampler: Optional[HostSampler],
-                 host_id: str, dry_run: bool = False):
+                 host_id: str, dry_run: bool = False, host_info: Optional[Callable[[], Dict[str, Any]]] = None):
         self.manager = manager
         self.tel = telemetry
         self.sampler = sampler
         self.host_id = host_id
         self.dry_run = dry_run
         self.started = time.time()
+        # GET /host/info is static: computed on first use (or by warm-up at startup), then cached.
+        self._host_info_fn = host_info or (lambda: collect_host_info(
+            manager.backend, host_id, sampler.period if sampler is not None else None))
+        self._host_info: Optional[Dict[str, Any]] = None
+        self._host_info_lock = threading.Lock()
+
+    def host_info(self) -> Dict[str, Any]:
+        with self._host_info_lock:
+            if self._host_info is None:
+                self._host_info = self._host_info_fn()
+            return self._host_info
 
     def handle(self, method: str, path: str, body: Optional[Dict[str, Any]], ctx: RequestContext) -> Tuple[int, Any]:
         path = path.split("?", 1)[0].rstrip("/") or "/"
@@ -54,6 +66,8 @@ class HostdApp:
                 return 503, {"error": "metrics sampler disabled"}
             latest = self.sampler.latest or self.sampler.sample_once()
             return 200, latest
+        if method == "GET" and path == "/host/info":
+            return 200, self.host_info()
         if method == "GET" and path == "/host/verify-clean":
             leftovers = m.backend.verify_clean()
             return 200, {"clean": not leftovers, "leftovers": leftovers, "backend": m.backend.name}

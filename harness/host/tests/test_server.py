@@ -123,6 +123,60 @@ def test_session_task_and_cleanup_over_http(stack):
     assert clean["clean"] is True
 
 
+def test_boot_phases_and_guest_info_over_http(tel):
+    """The real guest client against the stub guest's /health: phases in boot order, on the host clock."""
+    guest = StubGuest(fault=None, ready_after_s=0.3, chromium_launch_s=0.05, kernel_boot_s=0.4).start()
+    backend = StubBackend(guest.address)
+    manager = SessionManager(backend, tel, poll_interval=0.05, host_id="test")
+    server = Server(HostdApp(manager, tel, None, "test"), port=0)
+    server.start_background()
+    base = "http://127.0.0.1:%d" % server.port
+    try:
+        t0 = time.time()
+        sid = _call(base, "POST", "/sessions", {"count": 1})[1][0]["id"]
+        rec = _wait(base, sid, ("ready",))
+        k, g, cl, cr = rec["kernel_start_ts"], rec["guestd_start_ts"], rec["chromium_launch_ts"], rec["chromium_ready_ts"]
+        assert None not in (k, g, cl, cr)
+        assert k < g < cl < cr <= rec["ready_ts"] + 0.05
+        assert g - k == pytest.approx(0.4, abs=0.01)       # stub: kernel ran 0.4 s before the daemon
+        assert cr - cl == pytest.approx(0.25, abs=0.01)
+        assert g < t0 + 0.05                               # the stub daemon started before the session
+        info = rec["guest_info"]
+        assert info["guestd_version"] == "stub-0" and info["chromium_version"] == "stub-0"
+        assert isinstance(info["chromium_flags"], list) and info["kernel_cmdline"].startswith("console=ttyS0")
+        assert info["vcpus"] >= 1 and info["mem_total"] == 2 ** 31
+    finally:
+        manager.destroy_all()
+        server.shutdown()
+        guest.stop()
+
+
+def test_host_info_route_is_cached(tel):
+    from hostd.hostinfo import collect_host_info
+    backend = FakeBackend()
+    manager = SessionManager(backend, tel, host_id="test")
+    sampler = HostSampler(manager, tel, period=0.2, host_id="test")
+    calls = []
+
+    def info():
+        calls.append(1)
+        # IMDS at a closed local port: off-EC2 behaviour without touching the network
+        return collect_host_info(backend, "test", sampler.period, imds_url="http://127.0.0.1:9")
+
+    server = Server(HostdApp(manager, tel, sampler, "test", host_info=info), port=0)
+    server.start_background()
+    base = "http://127.0.0.1:%d" % server.port
+    try:
+        status, body = _call(base, "GET", "/host/info")
+        assert status == 200
+        assert body["host_id"] == "test" and body["backend"] == "docker" and body["metrics_period_s"] == 0.2
+        assert body["ec2"] is None and body["firecracker"] is None
+        assert _call(base, "GET", "/host/info") == (200, body)
+        assert len(calls) == 1
+    finally:
+        server.shutdown()
+
+
 def test_hang_task_over_http(tel):
     guest = StubGuest(fault="hang_task").start()
     backend = StubBackend(guest.address)

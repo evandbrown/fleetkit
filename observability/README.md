@@ -67,6 +67,13 @@ Two choices to know about:
 - **`append: true`, no rotation.** A collector restart mid-run never truncates evidence.
   The files grow for the life of the stack; `make clean-lgtm` removes them.
 
+### Deviation from the design
+
+The design (docs/harness-design.md, section 8) says file exporters are appended to every
+pipeline; that does not hold for metrics, whose file copy comes from a separate `metrics/file`
+pipeline fed by the `otlp` receiver only, because appending to the default metrics pipeline
+would also write the collector's once-a-second self-scrape (56 MB an hour that no bundle keeps).
+
 `make lgtm-check` validates the whole path with the standard library only
 (`observability/check.py`): POST one OTLP-JSON span to `:4318/v1/traces`, wait for it in
 `traces.jsonl`, `GET :3000/api/health`. The override itself can be validated without
@@ -97,6 +104,22 @@ docker compose -f observability/compose.yaml start lgtm
 ```
 
 Re-mount: extract into an empty `results/lgtm/data` and `make up`.
+
+## On AWS: the support host
+
+On the Mac and in the validation run the stack runs next to the host daemon, as above. In the
+capacity run (`bash images/host/run-validation.sh <run-id> --plan capacity`) it does not run on
+the worker at all: it runs on a separate support host (`aws_instance.support` in
+`infra/experiments`, provisioned by `images/support/cloud-config.yaml`) together with the
+fixture, so neither competes with the microVMs for the worker's CPU. There both containers are
+started with plain `docker run` by cloud-init: `fleetkit-fixture` on `0.0.0.0:8081` pinned to
+CPU 0, `fleetkit-lgtm` pinned to the remaining CPUs with OTLP on `0.0.0.0:4317/4318` and
+Grafana on `127.0.0.1:3000` only, the same collector override, and state under
+`/var/lib/fleetkit/lgtm/{data,otlp}`. The security group admits only the experiment hosts
+(their guests arrive NATed from the host). The worker's host daemon and driver export to
+`http://<support-ip>:4318`; `images/support/sync.sh` stops `fleetkit-lgtm` with a 60 s grace at
+the end of the run and uploads `otlp/` and the support host's own 1 Hz metrics
+(`support-metrics.csv`) to `runs/<run-id>/support/` in the results bucket.
 
 ## Hosts without docker compose
 

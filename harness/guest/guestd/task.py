@@ -13,7 +13,21 @@ failure categories (a closed set) and how time is measured:
   fixed sleeps in the timed region; DOM conditions are awaited with MutationObserver
   promises.
 - ``bytes_received`` sums ``Network.loadingFinished.encodedDataLength`` for the task's tab
-  and ``request_count`` counts ``Network.requestWillBeSent``.
+  and ``request_count`` counts ``Network.requestWillBeSent``. Each step carries its share:
+  the counts between its dispatch and the next step's dispatch (the last step's window ends
+  at the end of the timed region), so tab creation belongs to ``home`` and the steps of an
+  ok task sum exactly to the task's totals. On a failure the failed step is not in
+  ``steps``; its window's traffic is the totals minus the sum of the listed steps.
+- the end of the timed region, for the counters, the final proc sample and
+  ``guestd_cpu_ms``, is the point after the last step (its assertion included) or the
+  failure, before the screenshot.
+- ``proc_samples`` (see :mod:`guestd.procstat`) samples the guest every
+  ``sample_interval_ms`` from receipt to the end of the timed region; ``guestd_cpu_ms`` is
+  the daemon's own CPU time (user + system, all threads) over the same span.
+- with ``screenshot_each_step`` a screenshot is taken right after each step settles and
+  its assertion passes, inside the task's wall time (bounded by the task deadline) but
+  outside every step's duration; ``task_ms`` then includes them, so ``timing_valid`` is
+  false. Without it ``timing_valid`` is true.
 - the screenshot (``Page.captureScreenshot`` JPEG quality 60) is taken after the timed
   region, for failures too when the tab still exists.
 """
@@ -22,13 +36,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from .cdp import BrowserGone, CDPClient, CDPError, EventQueue
 from .clock import Deadline, DeadlineExpired, never
 from .faults import FAULT_STEP, Fault
+from .procstat import ProcSampler, TaskSampling
 
 STEP_NAMES = ("home", "search", "open_product", "add_to_cart", "verify_cart")
 
@@ -45,6 +61,9 @@ FAILURE_CATEGORIES = (
 
 DEFAULT_STEP_TIMEOUT_MS = 10000
 DEFAULT_TASK_TIMEOUT_MS = 45000
+DEFAULT_SAMPLE_INTERVAL_MS = 200
+# A shorter non-zero interval would spend more of the event loop on /proc than on the task.
+MIN_SAMPLE_INTERVAL_MS = 10
 
 # Budgets outside the timed region: the screenshot and closing the tab.
 SCREENSHOT_TIMEOUT_S = 10.0
@@ -82,6 +101,8 @@ class TaskRequest:
     expected_title: str
     step_timeout_ms: int = DEFAULT_STEP_TIMEOUT_MS
     task_timeout_ms: int = DEFAULT_TASK_TIMEOUT_MS
+    sample_interval_ms: int = DEFAULT_SAMPLE_INTERVAL_MS
+    screenshot_each_step: bool = False
 
     @classmethod
     def from_dict(cls, d: Any) -> "TaskRequest":
@@ -105,6 +126,20 @@ class TaskRequest:
                 raise ValueError(f"{name} must be a positive number of milliseconds")
             return int(v)
 
+        interval = d.get("sample_interval_ms", DEFAULT_SAMPLE_INTERVAL_MS)
+        if interval is None:
+            interval = DEFAULT_SAMPLE_INTERVAL_MS
+        if isinstance(interval, bool) or not isinstance(interval, (int, float)) or not math.isfinite(interval) or interval != int(interval):
+            raise ValueError("sample_interval_ms must be an integer number of milliseconds")
+        interval = int(interval)
+        if interval != 0 and interval < MIN_SAMPLE_INTERVAL_MS:
+            raise ValueError(f"sample_interval_ms must be 0 (no sampling) or at least {MIN_SAMPLE_INTERVAL_MS}")
+        each = d.get("screenshot_each_step", False)
+        if each is None:
+            each = False
+        if not isinstance(each, bool):
+            raise ValueError("screenshot_each_step must be a boolean")
+
         return cls(
             task_id=d["task_id"],
             fixture_base_url=base,
@@ -113,6 +148,8 @@ class TaskRequest:
             expected_title=d["expected_title"],
             step_timeout_ms=_ms("step_timeout_ms", DEFAULT_STEP_TIMEOUT_MS),
             task_timeout_ms=_ms("task_timeout_ms", DEFAULT_TASK_TIMEOUT_MS),
+            sample_interval_ms=interval,
+            screenshot_each_step=each,
         )
 
 
@@ -122,9 +159,18 @@ class StepRecord:
     dispatch_ns: int
     settle_ns: int
     duration_ms: float
+    bytes_received: Optional[int] = None
+    request_count: Optional[int] = None
 
     def as_dict(self) -> Dict[str, Any]:
-        return {"name": self.name, "dispatch_ns": self.dispatch_ns, "settle_ns": self.settle_ns, "duration_ms": self.duration_ms}
+        return {
+            "name": self.name,
+            "dispatch_ns": self.dispatch_ns,
+            "settle_ns": self.settle_ns,
+            "duration_ms": self.duration_ms,
+            "bytes_received": self.bytes_received,
+            "request_count": self.request_count,
+        }
 
 
 @dataclass
@@ -150,6 +196,11 @@ class TaskResult:
     screenshot_b64: Optional[str]
     failed_step: Optional[str] = None
     error: Optional[str] = None
+    proc_samples: List[Dict[str, Any]] = field(default_factory=list)
+    sample_interval_ms: Optional[int] = None
+    guestd_cpu_ms: Optional[float] = None
+    timing_valid: bool = True
+    step_screenshots: Optional[List[Dict[str, Any]]] = None
     extra: Dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> Dict[str, Any]:
@@ -164,7 +215,13 @@ class TaskResult:
             "bytes_received": self.bytes_received,
             "request_count": self.request_count,
             "screenshot_b64": self.screenshot_b64,
+            "proc_samples": self.proc_samples,
+            "sample_interval_ms": self.sample_interval_ms,
+            "guestd_cpu_ms": self.guestd_cpu_ms,
+            "timing_valid": self.timing_valid,
         }
+        if self.step_screenshots is not None:
+            d["step_screenshots"] = self.step_screenshots
         d.update(self.extra)
         return d
 
@@ -269,16 +326,45 @@ def _js(template: str, _raw: Optional[Dict[str, str]] = None, **kw: Any) -> str:
 class TaskRunner:
     """Runs one task on one browser connection. Not reentrant: the server serializes tasks."""
 
-    def __init__(self, client: CDPClient, log, fault: Optional[Fault] = None) -> None:
+    def __init__(self, client: CDPClient, log, fault: Optional[Fault] = None, sampler: Optional[ProcSampler] = None) -> None:
         self._client = client
         self._log = log
         self._fault = fault
+        self._sampler = sampler
 
-    async def run(self, req: TaskRequest, t0_ns: int) -> TaskResult:
-        """``t0_ns`` is ``time.monotonic_ns()`` at request receipt: the task clock's zero."""
+    async def run(self, req: TaskRequest, t0_ns: int, cpu0_ns: Optional[int] = None) -> TaskResult:
+        """``t0_ns`` is ``time.monotonic_ns()`` at request receipt: the task clock's zero;
+        ``cpu0_ns`` is ``time.process_time_ns()`` at the same moment (now if not given)."""
+        if cpu0_ns is None:
+            cpu0_ns = time.process_time_ns()
+        sampling = TaskSampling(self._sampler, req.sample_interval_ms, t0_ns, self._log)
+        sampling.start()
+        try:
+            result, tab, marks = await self._timed(req, t0_ns)
+            # The end of the timed region: counters, the final sample, guestd's own CPU.
+            end = _counters(tab)
+            result.proc_samples = await sampling.stop()
+            result.guestd_cpu_ms = round((time.process_time_ns() - cpu0_ns) / 1e6, 3)
+        finally:
+            sampling.cancel()
+        result.bytes_received, result.request_count = end
+        split_counters(result.steps, marks, end)
+        result.sample_interval_ms = req.sample_interval_ms
+        result.timing_valid = not req.screenshot_each_step
+        # Outside the timed region: screenshot, then close the tab and its context.
+        if tab is not None:
+            result.screenshot_b64 = await self._screenshot(tab, req.task_id)
+            await self._close_tab(tab, req.task_id)
+        return result
+
+    async def _timed(self, req: TaskRequest, t0_ns: int) -> Tuple[TaskResult, Optional[Tab], List[Tuple[int, int]]]:
+        """The five steps. Returns the result, the tab (if one was created) and the
+        (bytes, requests) counters at every step's dispatch."""
         t0_mono = t0_ns / 1e9
         task_deadline = Deadline.after_ms(req.task_timeout_ms, "task", start=t0_mono)
         steps: List[StepRecord] = []
+        marks: List[Tuple[int, int]] = []
+        shots: Optional[List[Dict[str, Any]]] = [] if req.screenshot_each_step else None
         tab: Optional[Tab] = None
         result: TaskResult
         current_step: Optional[str] = None
@@ -287,6 +373,7 @@ class TaskRunner:
                 current_step = name
                 step_deadline = Deadline.earliest([Deadline.after_ms(req.step_timeout_ms, "step"), task_deadline])
                 dispatch_ns = time.monotonic_ns() - t0_ns
+                marks.append(_counters(tab))
                 if name == "home":
                     tab = await self._open_tab(step_deadline)
                     settle_ns = await self._step_home(tab, req, step_deadline, t0_ns)
@@ -301,6 +388,9 @@ class TaskRunner:
                 rec = StepRecord(name, dispatch_ns, settle_ns, round((settle_ns - dispatch_ns) / 1e6, 3))
                 steps.append(rec)
                 self._log.info("step ok", task_id=req.task_id, step=name, duration_ms=rec.duration_ms)
+                if shots is not None:
+                    dl = Deadline.earliest([Deadline.after(SCREENSHOT_TIMEOUT_S, "screenshot"), task_deadline])
+                    shots.append({"step": name, "b64": await self._screenshot(tab, req.task_id, dl)})
             task_ms = round(steps[-1].settle_ns / 1e6, 3)
             result = TaskResult(req.task_id, True, "ok", steps, task_ms, 0, 0, None)
         except DeadlineExpired as e:
@@ -313,13 +403,8 @@ class TaskRunner:
         except CDPError as e:
             category = "browser_crashed" if _looks_like_crash(e) else "assertion_failed"
             result = self._failure(req, category, current_step, f"devtools: {e}", steps, t0_ns)
-        # Outside the timed region: screenshot, then close the tab and its context.
-        if tab is not None:
-            result.bytes_received = tab.bytes_received
-            result.request_count = tab.request_count
-            result.screenshot_b64 = await self._screenshot(tab, req.task_id)
-            await self._close_tab(tab, req.task_id)
-        return result
+        result.step_screenshots = shots
+        return result, tab, marks
 
     # -- steps ------------------------------------------------------------------------
 
@@ -446,10 +531,11 @@ class TaskRunner:
             self._log.warning("fault: slow step", step=FAULT_STEP, ms=f.ms)
             await dl.wait(asyncio.sleep(f.ms / 1000.0), f"fault slow_step:{f.ms} in {FAULT_STEP}")
 
-    async def _screenshot(self, tab: Tab, task_id: str) -> Optional[str]:
+    async def _screenshot(self, tab: Tab, task_id: str, dl: Optional[Deadline] = None) -> Optional[str]:
         if self._client.closed:
             return None
-        dl = Deadline.after(SCREENSHOT_TIMEOUT_S, "screenshot")
+        if dl is None:
+            dl = Deadline.after(SCREENSHOT_TIMEOUT_S, "screenshot")
         try:
             r = await dl.wait(
                 self._client.send("Page.captureScreenshot", {"format": "jpeg", "quality": 60}, session_id=tab.session_id),
@@ -481,6 +567,22 @@ class TaskRunner:
         elapsed_ms = round((time.monotonic_ns() - t0_ns) / 1e6, 3)
         self._log.error("task failed", task_id=req.task_id, failure_category=category, failed_step=step, error=error, elapsed_ms=elapsed_ms)
         return TaskResult(req.task_id, False, category, steps, elapsed_ms, 0, 0, None, failed_step=step, error=error)
+
+
+def _counters(tab: Optional[Tab]) -> Tuple[int, int]:
+    return (tab.bytes_received, tab.request_count) if tab is not None else (0, 0)
+
+
+def split_counters(steps: List[StepRecord], marks: List[Tuple[int, int]], end: Tuple[int, int]) -> None:
+    """Give each step the (bytes, requests) between its dispatch mark and the next one.
+
+    ``marks[i]`` is the cumulative count at step i's dispatch; the window of the last
+    dispatched step closes at ``end``. For an ok task the steps sum exactly to ``end``.
+    """
+    for i, rec in enumerate(steps):
+        nxt = marks[i + 1] if i + 1 < len(marks) else end
+        rec.bytes_received = nxt[0] - marks[i][0]
+        rec.request_count = nxt[1] - marks[i][1]
 
 
 def _looks_like_crash(e: CDPError) -> bool:

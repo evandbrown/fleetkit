@@ -22,16 +22,27 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import parse_qs, urlparse
 
 STEPS = ["home", "search", "open_product", "add_to_cart", "verify_cart"]
+STUB_VERSION = "stub-0"
+# What the real guest reports as chromium_flags and kernel_cmdline; the values only need the right types.
+STUB_FLAGS = ["--headless=new", "--no-sandbox", "--remote-debugging-port=9222", "--user-data-dir=/tmp/chromium"]
+STUB_CMDLINE = "console=ttyS0 reboot=k panic=1 pci=off ip=10.200.0.10::10.200.0.1:255.255.255.0:vm0:eth0:off"
 # 1x1 white JPEG so screenshot_b64 is a decodable image.
 TINY_JPEG_B64 = ("/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////"
                  "////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=")
 
 
 class StubState:
-    def __init__(self, fault: Optional[str] = None, ready_after_s: float = 0.0, step_ms: float = 20.0):
+    def __init__(self, fault: Optional[str] = None, ready_after_s: float = 0.0, step_ms: float = 20.0,
+                 kernel_boot_s: float = 0.4, chromium_launch_s: float = 0.0):
         self.fault = fault or None
         self.started = time.monotonic()
         self.ready_at = self.started + ready_after_s
+        # Boot phases as the real guest reports them: the kernel ran kernel_boot_s before the
+        # daemon started; Chromium launched chromium_launch_s and was ready ready_after_s into
+        # the daemon's uptime (guestd-uptime seconds).
+        self.kernel_boot_s = kernel_boot_s
+        self.chromium_launch_s = min(chromium_launch_s, ready_after_s)
+        self.chromium_ready_s = ready_after_s
         self.step_ms = step_ms
         self.lock = threading.Lock()
         self.busy = False
@@ -51,6 +62,16 @@ class StubState:
         if self.fault == "never_ready":
             return False
         return time.monotonic() >= self.ready_at
+
+    def health(self) -> Dict[str, Any]:
+        """The ready /health body: section 4's fields plus the guest's self-description."""
+        uptime = time.monotonic() - self.started
+        return {"ready": True, "chromium_version": "stub-0", "uptime_s": uptime,
+                "guestd_version": STUB_VERSION, "guestd_uptime_s": uptime,
+                "kernel_uptime_s": uptime + self.kernel_boot_s,
+                "chromium_launch_s": self.chromium_launch_s, "chromium_ready_s": self.chromium_ready_s,
+                "chromium_flags": list(STUB_FLAGS), "kernel_cmdline": STUB_CMDLINE,
+                "vcpus": os.cpu_count(), "mem_total": 2 ** 31}
 
     def run_task(self, req: Dict[str, Any], traceparent: Optional[str]) -> Dict[str, Any]:
         t_recv = time.monotonic_ns()
@@ -117,7 +138,7 @@ def make_handler(state: StubState):
             url = urlparse(self.path)
             if url.path == "/health":
                 if state.ready():
-                    self._send(200, {"ready": True, "chromium_version": "stub-0", "uptime_s": time.monotonic() - state.started})
+                    self._send(200, state.health())
                 else:
                     self._send(503, {"ready": False, "error": "chromium not up"})
             elif url.path == "/metrics":

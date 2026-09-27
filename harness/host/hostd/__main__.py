@@ -1,4 +1,4 @@
-"""python3 -m hostd --backend docker|firecracker --port 8090 [--dry-run] [--render ...]"""
+"""python3 -m hostd --backend docker|firecracker --port 8090 [--metrics-period 1.0] [--dry-run] [--render ...]"""
 from __future__ import annotations
 
 import argparse
@@ -14,7 +14,7 @@ from .backends.docker import DockerBackend
 from .backends.firecracker import DEFAULT_FIRECRACKER, DEFAULT_KERNEL, DEFAULT_ROOTFS, FirecrackerBackend
 from .manager import SessionManager
 from .metrics import HostSampler
-from .model import Session, validate_fault
+from .model import Defaults, Session, validate_fault
 from .runner import Runner
 from .server import HostdApp, Server
 from .telemetry import Telemetry
@@ -35,7 +35,9 @@ def build_parser() -> argparse.ArgumentParser:
                         "never the hostname, which can carry the operator's name into a shared bundle)")
     p.add_argument("--dry-run", action="store_true",
                    help="render every command and config instead of executing; sessions become ready at once")
-    p.add_argument("--no-metrics", action="store_true", help="disable the one-second host metrics sampler")
+    p.add_argument("--no-metrics", action="store_true", help="disable the host metrics sampler")
+    p.add_argument("--metrics-period", type=float, default=Defaults.METRICS_PERIOD_S,
+                   help="seconds between host metrics samples (default %(default)s; 0.2 gives 5 Hz)")
     # docker
     p.add_argument("--image", default=os.environ.get("FLEETKIT_GUEST_IMAGE", "fleetkit-guest:dev"))
     p.add_argument("--network", default="fleetkit")
@@ -90,7 +92,10 @@ def display_path(path: str) -> str:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if not args.metrics_period > 0:
+        parser.error("--metrics-period must be greater than 0")
     if args.render:
         return render(args)
 
@@ -112,7 +117,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             return 2
 
     manager = SessionManager(backend, tel, dry_run=args.dry_run, host_id=args.host_id)
-    sampler = None if args.no_metrics else HostSampler(manager, tel, host_id=args.host_id)
+    sampler = None if args.no_metrics else HostSampler(manager, tel, period=args.metrics_period, host_id=args.host_id)
     app = HostdApp(manager, tel, sampler, args.host_id, dry_run=args.dry_run)
     try:
         server = Server(app, bind=args.bind, port=args.port)
@@ -127,9 +132,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     # hostd.log and logs.jsonl end up in the evidence bundle, so the log dir is shown relative to
     # the working directory (its basename when it lies outside): an absolute --log-dir would
     # otherwise carry the operator's home directory into a bundle that gets shared.
-    tel.log("hostd %s listening on http://%s:%d backend=%s dry_run=%s log_dir=%s otlp=%s" % (
+    tel.log("hostd %s listening on http://%s:%d backend=%s dry_run=%s log_dir=%s otlp=%s metrics_period=%s" % (
         __version__, args.bind, server.port, args.backend, args.dry_run, display_path(args.log_dir),
-        "off" if args.no_otlp else args.otlp_endpoint))
+        "off" if args.no_otlp else args.otlp_endpoint, "off" if sampler is None else "%gs" % sampler.period))
 
     stop = threading.Event()
 
@@ -137,9 +142,20 @@ def main(argv: Optional[List[str]] = None) -> int:
         tel.log("signal %d: destroying live sessions and exiting" % signum, severity="WARN")
         stop.set()
 
+    def warm_host_info() -> None:
+        # GET /host/info is cached; computing it early keeps the IMDS lookup (up to 1 s off
+        # EC2) and `firecracker --version` off the first request's latency.
+        try:
+            info = app.host_info()
+            tel.log("host info cached: cpu_count=%s kvm=%s ec2=%s" % (
+                info.get("cpu_count"), info.get("kvm"), "yes" if info.get("ec2") else "no"))
+        except Exception as e:
+            tel.log("host info failed: %s: %s" % (type(e).__name__, e), severity="WARN")
+
     signal.signal(signal.SIGTERM, on_signal)
     signal.signal(signal.SIGINT, on_signal)
     server.start_background()
+    threading.Thread(target=warm_host_info, name="host-info", daemon=True).start()
     try:
         while not stop.wait(0.5):
             pass

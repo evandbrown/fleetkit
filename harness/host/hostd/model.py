@@ -137,6 +137,14 @@ class Session:
     outcome: Optional[str] = None
     error: Optional[str] = None
     console_log: Optional[str] = None
+    # Boot phases on the host clock, from the /health answer that found the session ready
+    # (guest.boot_phases): kernel start, guest daemon start, Chromium launched, Chromium ready.
+    kernel_start_ts: Optional[float] = None
+    guestd_start_ts: Optional[float] = None
+    chromium_launch_ts: Optional[float] = None
+    chromium_ready_ts: Optional[float] = None
+    # What the guest said about itself in that answer (guest.guest_info).
+    guest_info: Optional[Dict[str, Any]] = None
     # Backend-private handles (container name, tap, pid...). Never exposed verbatim.
     handle: Dict[str, Any] = field(default_factory=dict)
     # Trace context of the session's create span (parent of every record about it).
@@ -196,4 +204,9 @@ class Session:
             "trial_id": self.trial_id,
             "console_log": self.console_log,
             "trace_id": self.trace.trace_id if self.trace else None,
+            "kernel_start_ts": self.kernel_start_ts,
+            "guestd_start_ts": self.guestd_start_ts,
+            "chromium_launch_ts": self.chromium_launch_ts,
+            "chromium_ready_ts": self.chromium_ready_ts,
+            "guest_info": dict(self.guest_info) if self.guest_info is not None else None,
         }

@@ -1,0 +1,78 @@
+#cloud-config
+# Support host for the capacity experiment: the fixture web server and the
+# observability backend (LGTM), off the experiment host so neither competes with
+# the microVMs for CPU. Rendered by infra/experiments/support.tf with
+# templatefile(), so the dollar-brace references below are Terraform template
+# variables, filled from the stack's variables and from images/lock.env. Shell
+# code in this file uses $VAR and $(...) without braces, which Terraform leaves
+# alone. The rendered user data carries the results bucket name and is never
+# committed. Everything the support host does happens here; the only later step
+# is images/support/sync.sh at the end of a run.
+
+bootcmd:
+  # The hard stop on cost, armed before anything else and on every boot. The
+  # instance terminates on shutdown (support.tf), so this ends the instance.
+  - shutdown -h +${shutdown_after_minutes}
+
+# The AMI's frozen package snapshot is what the pin in ami.lock.json means.
+# curl-minimal, not curl: AL2023 ships curl-minimal and the two conflict.
+package_update: false
+packages:
+  - docker
+  - git
+  - python3.12
+  - jq
+  - curl-minimal
+
+write_files:
+  # 1 Hz host and container CPU sampler (images/support/support-metrics.py,
+  # standard library only), started once the repository and containers exist.
+  - path: /etc/systemd/system/fleetkit-support-metrics.service
+    owner: root:root
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=fleetkit support host metrics sampler (1 Hz)
+      After=docker.service
+
+      [Service]
+      Type=simple
+      ExecStart=/usr/bin/python3.12 /opt/fleetkit/images/support/support-metrics.py --out /var/lib/fleetkit/support-metrics.csv
+      Restart=on-failure
+      RestartSec=2
+
+      [Install]
+      WantedBy=multi-user.target
+
+# cloud-init joins these into one shell script, run once, in order. The first
+# line makes a failing step stop it, so the done marker at the end only exists
+# after a complete run and `cloud-init status` reports the failure.
+runcmd:
+  - set -eux
+  - systemctl enable --now docker
+  - mkdir -p /var/lib/fleetkit/lgtm/data /var/lib/fleetkit/lgtm/otlp /var/log/fleetkit
+  # Where images/support/sync.sh uploads the support host's evidence.
+  - echo "${results_bucket}" > /var/lib/fleetkit/results-bucket
+  # This repository, at the ref the stack was applied with: the fixture sources,
+  # the collector configuration and the sampler come from here.
+  - git clone https://github.com/evandbrown/fleetkit /opt/fleetkit
+  - git -C /opt/fleetkit checkout ${repo_ref}
+  - cd /opt/fleetkit
+  - python3.12 fixture/build.py
+  # The fixture on every interface, port 8081; the security group admits only
+  # the experiment hosts (and their guests, NATed by the host). One CPU of its own.
+  - docker rm -f fleetkit-fixture >/dev/null 2>&1 || true
+  - docker run -d --name fleetkit-fixture --restart unless-stopped --label fleetkit.role=fixture --cpuset-cpus 0 -p 0.0.0.0:8081:80 -v /opt/fleetkit/fixture/dist:/usr/share/nginx/html:ro ${NGINX_IMAGE}
+  # The observability stack on the remaining CPUs (1-3 on an xlarge): OTLP open to
+  # the experiment hosts, Grafana on loopback only. The file exporters write
+  # /var/lib/fleetkit/lgtm/otlp; the 60 s stop timeout lets them flush.
+  - docker rm -f fleetkit-lgtm >/dev/null 2>&1 || true
+  - docker run -d --name fleetkit-lgtm --restart unless-stopped --label fleetkit.role=observability --cpuset-cpus 1-$(( $(nproc) - 1 )) --stop-timeout 60 -e ENABLE_LOGS_OTELCOL=true -p 0.0.0.0:4317:4317 -p 0.0.0.0:4318:4318 -p 127.0.0.1:3000:3000 -v /var/lib/fleetkit/lgtm/data:/data -v /var/lib/fleetkit/lgtm/otlp:/otlp -v /opt/fleetkit/observability/otelcol-config.yaml:/otel-lgtm/otelcol-config.yaml:ro ${LGTM_IMAGE}
+  - for i in $(seq 1 30); do curl -fsS -m 2 -o /dev/null http://127.0.0.1:8081/ && break; sleep 1; done
+  - curl -fsS -m 2 -o /dev/null -w 'fixture HTTP %%{http_code}\n' http://127.0.0.1:8081/manifest.json
+  # /tmp/ready is written by the image once every component answers.
+  - for i in $(seq 1 60); do docker exec fleetkit-lgtm test -f /tmp/ready && break; sleep 3; done
+  - docker exec fleetkit-lgtm test -f /tmp/ready
+  - systemctl daemon-reload
+  - systemctl enable --now fleetkit-support-metrics
+  - touch /var/lib/fleetkit/cloud-init-done

@@ -49,14 +49,36 @@ variable "instance_type" {
   }
 }
 
+variable "support_count" {
+  description = "Number of support hosts (fixture web server and observability backend, reached by the experiment hosts over their private IPs). 0, the default, runs no support host; the capacity plan of images/host/run-validation.sh applies 1."
+  type        = number
+  default     = 0
+
+  validation {
+    condition     = var.support_count >= 0 && floor(var.support_count) == var.support_count
+    error_message = "support_count must be a whole number of hosts, 0 or more."
+  }
+}
+
+variable "support_instance_type" {
+  description = "Instance type of the support hosts. No nested virtualization is needed, but the same instance-type guardrail applies: m8i, c8i, m7i or c7i, large through 4xlarge."
+  type        = string
+  default     = "m8i.xlarge"
+
+  validation {
+    condition     = can(regex("^(m8i|c8i|m7i|c7i)\\.(large|xlarge|2xlarge|4xlarge)$", var.support_instance_type))
+    error_message = "The instance-type guardrail only allows m8i, c8i, m7i and c7i at large, xlarge, 2xlarge or 4xlarge."
+  }
+}
+
 variable "root_volume_gib" {
-  description = "Size of each host's root volume in GiB (gp3, encrypted). Firecracker artefacts, guest images and rootfs files live on it."
+  description = "Size of each host's root volume in GiB (gp3, encrypted), support hosts included. Firecracker artefacts, guest images and rootfs files live on it."
   type        = number
   default     = 60
 }
 
 variable "shutdown_after_minutes" {
-  description = "Minutes after boot at which a host shuts itself down, which terminates it. Armed by cloud-init before anything else: the hard stop on cost."
+  description = "Minutes after boot at which a host (experiment or support) shuts itself down, which terminates it. Armed by cloud-init before anything else: the hard stop on cost."
   type        = number
   default     = 240
 

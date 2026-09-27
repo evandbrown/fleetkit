@@ -6,10 +6,30 @@ the backend creates, checks, samples and destroys the thing behind a slot.
 """
 from __future__ import annotations
 
+import os
 from typing import Any, Dict, List, Optional
 
 from ..model import Session
 from ..runner import Runner
+
+# Per-session figures in GET /host/metrics, in export order. The first four are section 4's;
+# the rest are the Firecracker CPU split, cgroup throttling and cgroup pressure (null elsewhere).
+SESSION_FIGURES = ("rss_bytes", "cgroup_memory_current", "cgroup_memory_peak", "cpu_usage_usec",
+                   "cpu_vcpu_usec", "cpu_vmm_usec", "cpu_throttled_usec", "cpu_nr_throttled",
+                   "cpu_pressure_some_total_us", "cpu_pressure_full_total_us", "memory_pressure_some_total_us")
+
+
+def empty_sample() -> Dict[str, Optional[int]]:
+    """Every per-session figure, unknown."""
+    return {k: None for k in SESSION_FIGURES}
+
+
+def public_path(path: str) -> str:
+    """`path` with the operator's home directory shown as `~`, for records that get bundled."""
+    home = os.path.expanduser("~")
+    if home and home != os.sep and (path == home or path.startswith(home + os.sep)):
+        return "~" + path[len(home):]
+    return path
 
 
 class BackendError(Exception):
@@ -68,8 +88,12 @@ class Backend:
 
     # --- sampling --------------------------------------------------------
     def sample(self, session: Session) -> Dict[str, Optional[int]]:
-        """{rss_bytes, cgroup_memory_current, cgroup_memory_peak, cpu_usage_usec}; None where unknown."""
-        return {"rss_bytes": None, "cgroup_memory_current": None, "cgroup_memory_peak": None, "cpu_usage_usec": None}
+        """Every key of SESSION_FIGURES; None where unknown."""
+        return empty_sample()
+
+    def info(self) -> Optional[Dict[str, Any]]:
+        """Static facts about this backend's setup for GET /host/info (None when there are none)."""
+        return None
 
     def verify_clean(self) -> List[str]:
         """Leftovers this backend can see on the host; empty means clean."""

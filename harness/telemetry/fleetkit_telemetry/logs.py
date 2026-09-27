@@ -104,17 +104,29 @@ def log_session_state(
 ) -> None:
     """Emit the ``session.state`` record of design section 4 with trace context.
 
-    Field names are namespaced (``session.from``, ``session.to``, ``session.ts``,
-    ``session.outcome``) so they never collide with the record's own ``ts``.
+    Design section 4 names the fields ``{session_id, from, to, ts, outcome}``, and the host
+    daemon emits exactly those. This record carries the same names so a reader can use either
+    source: ``session_id``, ``from``, ``to`` and ``outcome`` as they are, and the transition
+    time as ``state_ts``, because ``ts`` is the log record's own emission time (the JSON
+    formatter writes it at the top level) and would be overwritten. The earlier namespaced
+    fields (``session.from``, ``session.to``, ``session.ts``, ``session.outcome``) stay for
+    compatibility. Log attributes cannot be null, so an initial transition has ``from`` = ""
+    (hostd writes null) and a transition without an outcome has no ``outcome`` field.
     """
+    from_value = from_state if from_state is not None else ""
     fields: dict[str, Any] = {
         "event.name": EVENT_SESSION_STATE,
         ATTR_SESSION_ID: session_id,
-        "session.from": from_state if from_state is not None else "",
+        "session_id": session_id,
+        "from": from_value,
+        "to": to_state,
+        "state_ts": float(ts),
+        "session.from": from_value,
         "session.to": to_state,
         "session.ts": float(ts),
     }
     if outcome is not None:
+        fields["outcome"] = outcome
         fields["session.outcome"] = outcome
     fields.update(extra)
     logger.info("%s %s %s -> %s", EVENT_SESSION_STATE, session_id, from_state, to_state, extra=fields)

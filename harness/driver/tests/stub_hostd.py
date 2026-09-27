@@ -3,7 +3,14 @@ session model, the five faults, the idle and lifetime reapers, verify-clean, hos
 own spans.jsonl/logs.jsonl (services ``hostd`` and ``guest-daemon``, log records in the shape of
 hostd/telemetry.py) plus sessions/<id>/console.log, so the trace assertion and the bundle inventory
 can be exercised offline. Like the real guest, a failed task's reply carries only the steps
-completed so far. No Docker, no Chromium. Also runnable by hand::
+completed so far. No Docker, no Chromium.
+
+Capacity-experiment fields (contract section 1 and 2): ``GET /host/info``; boot phases and
+``guest_info`` on the session record once ready; ``cpu_count``/``hostd_*`` and, for sessions created
+with backend ``firecracker``, the per-VM CPU/throttle/pressure counters on ``/host/metrics``; per-step
+``bytes_received``/``request_count``, ``proc_samples``, ``timing_valid``, ``guestd_cpu_ms`` and
+``step_screenshots`` on the task result. ``step_ms_per_n`` makes each step take longer with the
+number of live sessions, so a ladder finds a limit. Also runnable by hand::
 
     python3 -m tests.stub_hostd --port 8090 --telemetry-dir results/hostd
 
@@ -40,6 +47,10 @@ class StubOptions:
         self.host_id = kw.get("host_id", "stub-host")
         self.jitter_ms = kw.get("jitter_ms", 10)
         self.crash_slots = set(kw.get("crash_slots", ()))  # slots that crash on start regardless of fault
+        self.step_ms_per_n = kw.get("step_ms_per_n", 0)  # extra ms per step per live session beyond the first
+        self.host_info = kw.get("host_info", True)  # False: GET /host/info answers 404 (an older daemon)
+        self.ec2 = kw.get("ec2")  # the /host/info ec2 object (None off EC2)
+        self.cpu_count = kw.get("cpu_count", 16)
 
 
 class Session:
@@ -65,6 +76,8 @@ class Session:
         self.tasks_run = 0
         self.tasks_failed = 0
         self.container_present = False
+        self.boot: dict = {"kernel_start_ts": None, "guestd_start_ts": None, "chromium_launch_ts": None,
+                           "chromium_ready_ts": None, "guest_info": None}
 
     def view(self) -> dict:
         return {"id": self.id, "state": self.state, "backend": self.backend, "slot": self.slot,
@@ -72,7 +85,7 @@ class Session:
                 "process_started_ts": self.process_started_ts, "ready_ts": self.ready_ts,
                 "destroyed_ts": self.destroyed_ts, "last_activity_ts": self.last_activity_ts,
                 "startup_ms": self.startup_ms, "cleanup_ms": self.cleanup_ms, "outcome": self.outcome,
-                "error": self.error}
+                "error": self.error, **self.boot}
 
 
 class StubHost:
@@ -87,6 +100,8 @@ class StubHost:
         self._reaper = threading.Thread(target=self._reap, daemon=True)
         self._reaper.start()
         self.tel = _Telemetry(opts.telemetry_dir) if opts.telemetry_dir else None
+        self.started = time.time()
+        self.task_payloads: list[dict] = []
 
     # ---- lifecycle -----------------------------------------------------------------------
     def create(self, spec: dict, traceparent: str | None, run_id: str | None) -> list[dict]:
@@ -147,6 +162,14 @@ class StubHost:
             s.ready_ts = time.time()
             s.startup_ms = (s.ready_ts - s.created_ts) * 1000.0
             s.last_activity_ts = s.ready_ts
+            p0 = s.process_started_ts
+            s.boot = {"kernel_start_ts": p0 + 0.002, "guestd_start_ts": p0 + 0.004,
+                      "chromium_launch_ts": p0 + 0.006, "chromium_ready_ts": s.ready_ts - 0.001,
+                      "guest_info": {"guestd_version": "stub", "chromium_version": "154.0.0.0-stub",
+                                     "chromium_flags": ["--headless=new", "--remote-debugging-port=9222"],
+                                     "kernel_cmdline": "console=ttyS0 reboot=k panic=1 fleetkit.stub=1",
+                                     "vcpus": int(s.spec.get("vcpus", 2)),
+                                     "mem_total": int(s.spec.get("mem_mib", 2048)) * 1024 * 1024}}
             self._transition(s, "ready", traceparent=traceparent, run_id=run_id)
         if self.tel:
             self.tel.span("hostd", "session.create", traceparent, span_start, time.time_ns(),
@@ -231,8 +254,13 @@ class StubHost:
         return status, body
 
     def _guest(self, s: Session, payload: dict, traceparent, run_id) -> tuple[int, dict]:
+        self.task_payloads.append(dict(payload))
         step_timeout = int(payload.get("step_timeout_ms", 10000))
         task_timeout = int(payload.get("task_timeout_ms", 45000))
+        interval_ms = int(payload.get("sample_interval_ms", 200))
+        shots = bool(payload.get("screenshot_each_step"))
+        live = sum(1 for x in list(self.sessions.values()) if x.state in ("ready", "busy"))
+        step_ms = self.o.step_ms + self.o.step_ms_per_n * max(0, live - 1)
         guest_clock_ns = time.time_ns()
         t0 = time.monotonic_ns()
         fault = s.fault or ""
@@ -241,6 +269,7 @@ class StubHost:
             return 504, {"ok": False, "failure_category": "guest_unreachable",
                          "error": "proxy deadline exceeded (stub hang_task)", "task_id": payload.get("task_id")}
         steps = []
+        step_shots: list[dict] = []
         failed_step = None
         error = ""
         category = "ok"
@@ -251,10 +280,15 @@ class StubHost:
                 # like guestd: the step that timed out never settled, so it gets no step record
                 failed_step, category, error = name, "step_timeout", f"step {name} exceeded {step_timeout} ms ({fault})"
                 break
-            time.sleep((self.o.step_ms + random.uniform(0, self.o.jitter_ms)) / 1000.0)
+            time.sleep((step_ms + random.uniform(0, self.o.jitter_ms)) / 1000.0)
             d1 = time.monotonic_ns() - t0
-            steps.append({"name": name, "dispatch_ns": d0, "settle_ns": d1, "duration_ms": (d1 - d0) / 1e6})
-        task_ms = (time.monotonic_ns() - t0) / 1e6
+            steps.append({"name": name, "dispatch_ns": d0, "settle_ns": d1, "duration_ms": (d1 - d0) / 1e6,
+                          "bytes_received": STEP_BYTES[i] + (s.slot * 10 if i == 0 else 0),
+                          "request_count": STEP_REQUESTS[i]})
+            if shots:
+                step_shots.append({"step": name, "b64": base64.b64encode(TINY_JPEG).decode()})
+        task_ns = time.monotonic_ns() - t0
+        task_ms = task_ns / 1e6
         if self.tel:
             self.tel.span("guest-daemon", "task", traceparent, guest_clock_ns, time.time_ns(),
                           {"fleetkit.task_id": payload.get("task_id", ""), "fleetkit.run_id": run_id or ""})
@@ -267,24 +301,40 @@ class StubHost:
             self.tel.log("hostd", "task proxied", {"task_id": payload.get("task_id"), "session_id": s.id,
                                                     "failure_category": category}, traceparent, run_id)
         body = {"ok": category == "ok", "failure_category": category, "steps": steps, "task_ms": task_ms,
-                "bytes_received": 48_000 + s.slot * 10, "request_count": 12, "guest_clock_ns": guest_clock_ns,
+                "bytes_received": sum(st["bytes_received"] for st in steps),
+                "request_count": sum(st["request_count"] for st in steps), "guest_clock_ns": guest_clock_ns,
                 "traceparent": traceparent or "", "task_id": payload.get("task_id"),
                 "log_tail": [{"ts": time.time(), "level": "INFO", "msg": f"task {payload.get('task_id')} {category}"}],
-                "screenshot_b64": base64.b64encode(TINY_JPEG).decode()}
+                "screenshot_b64": base64.b64encode(TINY_JPEG).decode(),
+                "sample_interval_ms": interval_ms, "proc_samples": _proc_samples(task_ns, interval_ms),
+                "guestd_cpu_ms": round(task_ms * 0.02, 3), "timing_valid": not shots}
+        if shots:
+            body["step_screenshots"] = step_shots
         if category != "ok":
             body.update({"failed_step": failed_step, "error": error})
         return 200, body
 
     # ---- host ------------------------------------------------------------------------------
     def metrics(self) -> dict:
-        return {"ts": time.time(), "mem_total": 8_000_000_000, "mem_available": 5_000_000_000,
-                "cpu_util": round(random.uniform(0.05, 0.4), 3), "steal": None,
-                "psi": {"cpu": {"some_avg10": 0.1, "some_total": 1234, "full_avg10": None, "full_total": None},
+        now = time.time()
+        up_us = (now - self.started) * 1e6
+        live = [s for s in list(self.sessions.values()) if s.state in ("ready", "busy", "booting")]
+        busy = sum(1 for s in live if s.state == "busy")
+        return {"ts": now, "mem_total": 8_000_000_000, "mem_available": 5_000_000_000,
+                "cpu_util": round(5.0 + 10.0 * busy + random.uniform(0, 1), 3), "steal": None,
+                "cpu_count": self.o.cpu_count, "hostd_cpu_usec": int(up_us * 0.02), "hostd_rss_bytes": 60_000_000,
+                "psi": {"cpu": {"some_avg10": 0.1, "some_total": int(up_us * 0.01), "full_avg10": None, "full_total": None},
                         "memory": {"some_avg10": 0.0, "some_total": 0, "full_avg10": 0.0, "full_total": 0},
                         "io": {"some_avg10": 0.0, "some_total": 0, "full_avg10": 0.0, "full_total": 0}},
                 "sessions": [{"id": s.id, "rss_bytes": 240_000_000, "cgroup_memory_current": 300_000_000,
-                              "cgroup_memory_peak": 310_000_000, "cpu_usage_usec": 123456}
-                             for s in self.sessions.values() if s.state in ("ready", "busy", "booting")]}
+                              "cgroup_memory_peak": 310_000_000, "cpu_usage_usec": 123456, **_vm_counters(s, now)}
+                             for s in live]}
+
+    def info(self) -> dict:
+        return {"host_id": self.o.host_id, "backend": "docker", "hostd_version": "stub", "kernel_release": "stub-kernel",
+                "cpu_model": "Stub CPU @ 3.00GHz", "cpu_count": self.o.cpu_count, "threads_per_core": 1,
+                "cores_per_socket": self.o.cpu_count, "sockets": 1, "mem_total": 8_000_000_000,
+                "virtualized": True, "kvm": False, "ec2": self.o.ec2, "metrics_period_s": 1.0, "firecracker": None}
 
     def verify_clean(self) -> dict:
         leftovers = [f"container for session {s.id}" for s in self.sessions.values() if s.container_present]
@@ -295,6 +345,41 @@ class StubHost:
         self._stop.set()
         if self.tel:
             self.tel.close()
+
+
+STEP_BYTES = (20_000, 9_000, 10_000, 2_000, 7_000)  # sums to 48,000 (plus slot * 10 on home)
+STEP_REQUESTS = (4, 2, 3, 1, 2)  # sums to 12
+GROUP_SHARES = {"renderer": 0.5, "browser": 0.2, "gpu": 0.1, "network": 0.05, "guestd": 0.05, "other": 0.1}
+
+
+def _proc_samples(task_ns: int, interval_ms: int) -> list[dict]:
+    """Samples every interval_ms over the task, plus one at its end: 2 vCPUs, 75% busy."""
+    if interval_ms <= 0:
+        return []
+    step = interval_ms * 1_000_000
+    points = list(range(step, task_ns, step)) + [task_ns]
+    out, prev = [], 0
+    for i, t in enumerate(points):
+        wall_ms = (t - prev) / 1e6
+        busy = wall_ms * 2 * 0.75
+        out.append({"t_ns": t, "cpu_total_ms": busy, "cpu_idle_ms": wall_ms * 2 - busy,
+                    "mem_available": 1_500_000_000 - i * 1_000_000, "psi_cpu_some_total_us": 1000 * (i + 1),
+                    "groups": {g: {"cpu_ms": busy * sh, "rss_bytes": int(100_000_000 * sh), "procs": 1}
+                               for g, sh in GROUP_SHARES.items()}})
+        prev = t
+    return out
+
+
+def _vm_counters(s: "Session", now: float) -> dict:
+    """Per-VM counters hostd reports on the firecracker backend (null elsewhere)."""
+    keys = ("cpu_vcpu_usec", "cpu_vmm_usec", "cpu_throttled_usec", "cpu_nr_throttled", "cpu_pressure_some_total_us",
+            "cpu_pressure_full_total_us", "memory_pressure_some_total_us")
+    if s.backend != "firecracker" or not s.process_started_ts:
+        return dict.fromkeys(keys)
+    up = (now - s.process_started_ts) * 1e6
+    return {"cpu_vcpu_usec": int(up * 0.8), "cpu_vmm_usec": int(up * 0.05), "cpu_throttled_usec": int(up * 0.01),
+            "cpu_nr_throttled": int(up / 100_000), "cpu_pressure_some_total_us": int(up * 0.02),
+            "cpu_pressure_full_total_us": int(up * 0.01), "memory_pressure_some_total_us": 0}
 
 
 class _Telemetry:
@@ -380,6 +465,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"ok": True, "backends": ["docker"], "stub": True, "host_id": h.o.host_id})
         if p == "/host/metrics":
             return self._send(200, h.metrics())
+        if p == "/host/info":
+            return self._send(200, h.info()) if h.o.host_info else self._send(404, {"error": "not found"})
         if p == "/host/verify-clean":
             return self._send(200, h.verify_clean())
         if p == "/sessions":

@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .backends.base import Backend, BackendError
-from .guest import GuestClient, GuestError
+from .guest import GuestClient, GuestError, boot_phases, guest_info
 from .model import Defaults, FailureCategory, Outcome, Session, State, TraceContext, validate_fault
 from .telemetry import Telemetry
 
@@ -247,16 +247,23 @@ class SessionManager:
                 if s.state != State.BOOTING:      # destroyed underneath us
                     return None
             ready = False
+            r = None
             try:
                 r = self.guest.health(s.address, timeout=1.0)
                 ready = r.status == 200 and isinstance(r.body, dict) and bool(r.body.get("ready"))
             except GuestError:
                 pass
             now = self.clock()
-            if ready:
+            if ready and r is not None:
+                phases = boot_phases(r)
                 with s.lock:
                     if s.state != State.BOOTING:
                         return None
+                    s.kernel_start_ts = phases["kernel_start_ts"]
+                    s.guestd_start_ts = phases["guestd_start_ts"]
+                    s.chromium_launch_ts = phases["chromium_launch_ts"]
+                    s.chromium_ready_ts = phases["chromium_ready_ts"]
+                    s.guest_info = guest_info(r.body)
                     s.ready_ts = now
                     s.startup_ms = (now - s.created_ts) * 1000.0
                     s.last_activity_ts = now
