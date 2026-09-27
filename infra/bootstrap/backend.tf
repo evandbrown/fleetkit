@@ -12,6 +12,6 @@
 # The block stays partial on purpose: the bucket name carries the account id,
 # which never goes in the repo.
 #
-# terraform {
-#   backend "s3" {}
-# }
+terraform {
+  backend "s3" {}
+}
