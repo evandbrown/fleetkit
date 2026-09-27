@@ -197,3 +197,13 @@ Accepted from the integration reviewer: the results bucket needs its own instanc
 Accepted from the delivery reviewer: Stage 0 first; the instance role; no Session Manager; the teardown guarantee and the Mac-side backstop; incremental evidence and partial bundles; cloud-init kept minimal with `make` targets over Run Command; Lima as fallback only; the observability stack optional with direct JSONL; the 90-second AWS readiness timeout then 3x observed; init console markers; the hard schedule against the session expiry; the local three-hour budget; the fixture port moved to 8081 and session ports from a fixed range.
 
 Not accepted: none. One clarification: the reviewers' "expected bytes with tolerance" check is a report-time flag, not a task failure category, so a heavier-than-expected page never masquerades as a browser problem.
+
+## 14. Changes for the capacity experiment (revision 3)
+
+The capacity experiment ([capacity-experiment.md](capacity-experiment.md)) extends this harness rather than adding a subsystem. What changed:
+
+- **One run is one invocation.** `driver trial` gained a stop-at-first-miss ladder, boundary repeats with a walk-down rule, warm-up and illustration trials (excluded from results), a settle period before each trial, and pass criteria evaluated per trial by one function shared with the report. A level passes only if every one of its trials passes.
+- **Attribution.** The host daemon splits each VM's CPU into its vCPU threads and its VMM threads and reports cgroup throttling and per-VM pressure. The guest daemon samples CPU and memory by process group during each task. The report computes a rule-based verdict per trial from thresholds fixed in the pre-registration.
+- **Resolution.** Host metrics at 5 Hz on capacity runs. Startup split into phases from the guest's own uptimes. Bytes and requests per step. The run's inputs, including the host's facts from `GET /host/info`, are recorded in `run.json` when the run starts.
+- **Off the worker.** On AWS the fixture and the observability backend run on a support host. The worker runs only the host daemon, the driver and the microVMs. This supersedes decision 7 in section 12 for capacity runs; the validation plan still serves the fixture on the bridge.
+- **Closed gaps from the validation run.** The guest's egress through NAT is checked in hostcheck with a new `/egress-check` endpoint. The observability pipeline runs on AWS. `make host-setup` exists. The telemetry package's `session.state` fields match the host daemon's. The collector's metrics pipeline deviates from "every pipeline", as documented in `observability/README.md`.
