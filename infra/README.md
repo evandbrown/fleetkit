@@ -5,7 +5,7 @@ Every AWS resource fleetkit uses is defined in Terraform under this directory. T
 - The **management account** of the AWS Organization holds only what has to live there: the organization settings, the Terraform state bucket, the roles GitHub Actions assumes, and the budgets. No project workload runs in it.
 - The **fleetkit member account**, created by Terraform inside a `fleetkit` organizational unit (OU), holds every project resource. Service control policies (SCPs) attached to the OU are the guardrails. They bind every principal in the account, including its root user, and never bind the management account.
 
-Account IDs, role ARNs, organization IDs and email addresses never appear in the repository. Each is a Terraform variable with no default, supplied from gitignored files when running locally (`terraform.tfvars` and `backend.hcl`; every stack ships a `*.example` to copy) or from GitHub repository variables in CI.
+Account IDs, role ARNs, organization IDs and email addresses never appear in the repository. Each is a Terraform variable with no default, supplied from gitignored files when running locally (`terraform.tfvars` and `backend.hcl`; every stack ships a `*.example` to copy) or from GitHub repository secrets in CI.
 
 ## Layout
 
@@ -40,7 +40,7 @@ Prerequisites: Terraform 1.16, the AWS CLI logged in to the management account a
    terraform state list        # verify, then delete the local terraform.tfstate*
    ```
 
-5. Copy the outputs `state_bucket`, `plan_role_arn` and `apply_role_arn` into the GitHub repository variables below.
+5. Copy the outputs `state_bucket`, `plan_role_arn` and `apply_role_arn` into the GitHub repository secrets below.
 
 The two CI roles trust GitHub's OIDC provider for this repository only, using the immutable subject format that embeds the numeric owner and repository IDs (`github_owner_id`, `github_repository_id`). The plan role accepts pull-request runs and the `main` branch; the apply role accepts only jobs bound to the `aws` environment. If the roles are ever created for another repository, set those variables from `gh api repos/OWNER/REPO --jq '[.owner.id, .id]'`.
 
@@ -58,7 +58,7 @@ The two CI roles trust GitHub's OIDC provider for this repository only, using th
 
 The only plain variable is `AWS_REGION`, optional, defaulting to `us-east-1`, the one region the guardrails allow.
 
-Every repository (or `aws` environment) secret named `TF_VAR_<name>` reaches Terraform as the input variable `<name>`, so a stack can gain a variable without a workflow change. GitHub stores secret names in upper case and Terraform's are case-sensitive, so the workflow lowers the part after `TF_VAR_`; stack variable names are all lower case.
+The workflow maps each secret to its Terraform input variable by name in its top-level `env` block (GitHub stores secret names in upper case; Terraform's are case-sensitive). A stack that gains an account-specific variable needs one line added there. The workflow deliberately never reads the whole secrets context at once: GitHub treats that pattern as possible exfiltration and holds the run for manual approval.
 
 **Environment `aws`** (Settings, Environments, New environment): name it exactly `aws`, add yourself as a required reviewer, and restrict deployment branches to `main`. Leave "Prevent self-review" off when the same person pushes and approves. Nothing else in the workflow can assume the apply role: the role's trust policy only matches the OIDC subject a job bound to this environment presents.
 

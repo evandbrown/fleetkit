@@ -48,6 +48,10 @@ env:
   TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
   # The project stack reads the org stack's outputs from the same bucket.
   TF_VAR_state_bucket: ${{ secrets.TF_STATE_BUCKET }}
+  # Terraform input variables that carry account-specific values. Each secret is
+  # named explicitly here: adding one is a one-line change to this block.
+  TF_VAR_account_email: ${{ secrets.TF_VAR_ACCOUNT_EMAIL }}
+  TF_VAR_alert_email: ${{ secrets.TF_VAR_ALERT_EMAIL }}
   # sed program applied to every line of Terraform output that reaches the log.
   # (No \b: it is not portable across sed implementations, so boundaries are spelled out.)
   REDACT: 's/(^|[^0-9])[0-9]{12}([^0-9]|$)/\1<account-id>\2/g; s/(^|[^a-z0-9-])o-[a-z0-9]{10}([^a-z0-9]|$)/\1o-<redacted>\2/g; s/(^|[^a-z0-9-])ou-[a-z0-9]+-[a-z0-9]+([^a-z0-9-]|$)/\1ou-<redacted>\2/g; s/(^|[^a-z0-9-])r-[a-z0-9]{4,5}([^a-z0-9-]|$)/\1r-<redacted>\2/g'
@@ -116,17 +120,6 @@ jobs:
           role-session-name: fleetkit-plan-${{ matrix.stack }}-${{ github.run_id }}
           aws-region: ${{ env.AWS_REGION }}
           mask-aws-account-id: true
-      - name: Export TF_VAR_* repository secrets
-        # Every repository (or `aws` environment) secret named TF_VAR_<name> becomes
-        # the Terraform input variable <name>, so adding a variable to a stack never
-        # requires editing this workflow. GitHub stores secret names in upper case
-        # and Terraform variable names are case-sensitive, so the suffix is lowered;
-        # every stack variable is therefore lower case.
-        env:
-          GITHUB_SECRETS: ${{ toJSON(secrets) }}
-        run: |
-          jq -r 'to_entries[] | select(.key | startswith("TF_VAR_"))
-                 | "TF_VAR_\(.key[7:] | ascii_downcase)<<__TF_VAR__\n\(.value)\n__TF_VAR__"' <<< "$GITHUB_SECRETS" >> "$GITHUB_ENV"
       - name: terraform init
         run: |
           terraform init \
@@ -195,12 +188,6 @@ jobs:
           role-session-name: fleetkit-apply-${{ github.run_id }}
           aws-region: ${{ env.AWS_REGION }}
           mask-aws-account-id: true
-      - name: Export TF_VAR_* repository secrets
-        env:
-          GITHUB_SECRETS: ${{ toJSON(secrets) }}
-        run: |
-          jq -r 'to_entries[] | select(.key | startswith("TF_VAR_"))
-                 | "TF_VAR_\(.key[7:] | ascii_downcase)<<__TF_VAR__\n\(.value)\n__TF_VAR__"' <<< "$GITHUB_SECRETS" >> "$GITHUB_ENV"
 
       # The plan file stays on the runner: it embeds variable values and is never
       # uploaded as an artifact. Applying the saved plan guarantees that what was
