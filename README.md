@@ -1,0 +1,5 @@
+# Fleetkit
+
+Fleetkit is an experiment in AI-assisted design to rapidly prototype complex proofs-of-concept that yield useful data to advance production development. When you're trying to design a complex slice of an even more complex distributed system and nothing exists, you work with a team of agents to scaffold the rest of the system so that you can design your slice, and your design is more than just a doc - it's a highly functional prototype with production-grade artifacts that is easily reproducible and reviewers receive it as an interactive experience that is delightful, engaging, and drives decision making.
+
+Fleetkit's first example of this approach will explore how a compute infrastructure team would recommend a design for efficiently serving a fleet of headless Chrome workers that will serve as the web browser interface for the company's AI agent consumer product. In a nutshell: millions of agents need Chrome, how do we do it efficiently?! 
