@@ -46,19 +46,19 @@ The two CI roles trust GitHub's OIDC provider for this repository only, using th
 
 ## GitHub configuration
 
-**Repository variables** (Settings, Secrets and variables, Actions, Variables; or `gh variable set NAME --body VALUE`). All are plain variables, not secrets: account IDs and ARNs are not credentials. The workflow log is public, so the workflow keeps them out of it anyway: the credentials step masks the management account ID, the member account ID and the ARNs that embed it are `sensitive` outputs, every line of plan and apply output passes through a filter that replaces 12-digit account IDs and organization, root and OU IDs before it reaches the log or the step summary, and the optional `AWS_MEMBER_ACCOUNT_ID` variable registers the member account ID as a masked value for anything the filter doesn't see.
+**Repository secrets** (Settings, Secrets and variables, Actions, Secrets; or `gh secret set NAME --body VALUE`). None of these is a credential; they are secrets because the workflow log is public and GitHub masks secret values everywhere in it, including the environment block the runner prints at the start of every step, where a plain repository variable would appear before any mask could apply. On top of that, every line of plan and apply output passes through a filter that replaces 12-digit account IDs and organization, root and OU IDs, which covers the member account and organization resources that Terraform itself prints.
 
-| Variable | Value |
+| Secret | Value |
 |---|---|
 | `TF_STATE_BUCKET` | Bootstrap output `state_bucket` |
 | `AWS_PLAN_ROLE_ARN` | Bootstrap output `plan_role_arn` |
 | `AWS_APPLY_ROLE_ARN` | Bootstrap output `apply_role_arn` |
-| `AWS_REGION` | Optional; defaults to `us-east-1`, the only region the guardrails allow |
 | `TF_VAR_account_email` | Root email of the member account. It must not belong to any other AWS account and cannot change without recreating the account |
 | `TF_VAR_alert_email` | Address that receives every budget notification |
-| `AWS_MEMBER_ACCOUNT_ID` | Optional; the `org` output `account_id` once it exists, so the log masks it everywhere |
 
-Every repository (or `aws` environment) variable named `TF_VAR_<name>` reaches Terraform as the input variable `<name>`, so a stack can gain a variable without a workflow change. GitHub stores variable names in upper case and Terraform's are case-sensitive, so the workflow lowers the part after `TF_VAR_`; stack variable names are all lower case. The email variables are marked `sensitive` in the stacks, so Terraform redacts them in plan output; the repository and its workflow logs are public, so keep anything else you would not publish out of these variables.
+The only plain variable is `AWS_REGION`, optional, defaulting to `us-east-1`, the one region the guardrails allow.
+
+Every repository (or `aws` environment) secret named `TF_VAR_<name>` reaches Terraform as the input variable `<name>`, so a stack can gain a variable without a workflow change. GitHub stores secret names in upper case and Terraform's are case-sensitive, so the workflow lowers the part after `TF_VAR_`; stack variable names are all lower case.
 
 **Environment `aws`** (Settings, Environments, New environment): name it exactly `aws`, add yourself as a required reviewer, and restrict deployment branches to `main`. Leave "Prevent self-review" off when the same person pushes and approves. Nothing else in the workflow can assume the apply role: the role's trust policy only matches the OIDC subject a job bound to this environment presents.
 

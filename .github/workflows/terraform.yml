@@ -13,12 +13,14 @@
 # Credentials come from GitHub's OIDC token: the AWS roles trust this repository's
 # pull requests, its main branch and the `aws` environment, so no AWS keys are
 # stored anywhere. Every account-specific value (state bucket, role ARNs, emails)
-# is a GitHub repository variable; see infra/README.md for the list.
+# is a GitHub repository *secret*, not because it is a credential but because the
+# log is public and GitHub masks secrets everywhere in it, including the env block
+# the runner prints at the start of every step (a plain variable there would be
+# printed before any mask could apply). See infra/README.md for the list.
 #
-# The log is public, so plan and apply output is piped through REDACT, which masks
-# account IDs and organization, root and OU IDs before they reach the log or the
-# step summary. The member account ID is also registered as a masked value when
-# the optional AWS_MEMBER_ACCOUNT_ID variable is set.
+# Plan and apply output is additionally piped through REDACT, which masks account
+# IDs and organization, root and OU IDs that Terraform prints for resources it
+# creates, such as the member account.
 name: terraform
 
 on:
@@ -43,9 +45,9 @@ env:
   TF_IN_AUTOMATION: "true"
   TF_INPUT: "false"
   AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
-  TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+  TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
   # The project stack reads the org stack's outputs from the same bucket.
-  TF_VAR_state_bucket: ${{ vars.TF_STATE_BUCKET }}
+  TF_VAR_state_bucket: ${{ secrets.TF_STATE_BUCKET }}
   # sed program applied to every line of Terraform output that reaches the log.
   # (No \b: it is not portable across sed implementations, so boundaries are spelled out.)
   REDACT: 's/(^|[^0-9])[0-9]{12}([^0-9]|$)/\1<account-id>\2/g; s/(^|[^a-z0-9-])o-[a-z0-9]{10}([^a-z0-9]|$)/\1o-<redacted>\2/g; s/(^|[^a-z0-9-])ou-[a-z0-9]+-[a-z0-9]+([^a-z0-9-]|$)/\1ou-<redacted>\2/g; s/(^|[^a-z0-9-])r-[a-z0-9]{4,5}([^a-z0-9-]|$)/\1r-<redacted>\2/g'
@@ -96,40 +98,35 @@ jobs:
       run:
         working-directory: infra/${{ matrix.stack }}
     env:
-      AWS_ROLE_ARN: ${{ vars.AWS_PLAN_ROLE_ARN }}
+      AWS_ROLE_ARN: ${{ secrets.AWS_PLAN_ROLE_ARN }}
     steps:
       - uses: actions/checkout@v6
       - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: ${{ env.TF_VERSION }}
           terraform_wrapper: false
-      - name: Require repository variables
+      - name: Require repository secrets
         run: |
           for name in TF_STATE_BUCKET AWS_ROLE_ARN; do
-            [ -n "${!name}" ] || { echo "::error::repository variable for $name is not set; see infra/README.md"; exit 1; }
+            [ -n "${!name}" ] || { echo "::error::repository secret for $name is not set; see infra/README.md"; exit 1; }
           done
-      - name: Mask known IDs
-        env:
-          AWS_MEMBER_ACCOUNT_ID: ${{ vars.AWS_MEMBER_ACCOUNT_ID }}
-        run: |
-          [ -z "$AWS_MEMBER_ACCOUNT_ID" ] || echo "::add-mask::$AWS_MEMBER_ACCOUNT_ID"
       - uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ env.AWS_ROLE_ARN }}
           role-session-name: fleetkit-plan-${{ matrix.stack }}-${{ github.run_id }}
           aws-region: ${{ env.AWS_REGION }}
           mask-aws-account-id: true
-      - name: Export TF_VAR_* repository variables
-        # Every repository (or `aws` environment) variable named TF_VAR_<name> becomes
+      - name: Export TF_VAR_* repository secrets
+        # Every repository (or `aws` environment) secret named TF_VAR_<name> becomes
         # the Terraform input variable <name>, so adding a variable to a stack never
-        # requires editing this workflow. GitHub stores variable names in upper case
+        # requires editing this workflow. GitHub stores secret names in upper case
         # and Terraform variable names are case-sensitive, so the suffix is lowered;
         # every stack variable is therefore lower case.
         env:
-          GITHUB_VARS: ${{ toJSON(vars) }}
+          GITHUB_SECRETS: ${{ toJSON(secrets) }}
         run: |
           jq -r 'to_entries[] | select(.key | startswith("TF_VAR_"))
-                 | "TF_VAR_\(.key[7:] | ascii_downcase)<<__TF_VAR__\n\(.value)\n__TF_VAR__"' <<< "$GITHUB_VARS" >> "$GITHUB_ENV"
+                 | "TF_VAR_\(.key[7:] | ascii_downcase)<<__TF_VAR__\n\(.value)\n__TF_VAR__"' <<< "$GITHUB_SECRETS" >> "$GITHUB_ENV"
       - name: terraform init
         run: |
           terraform init \
@@ -180,35 +177,30 @@ jobs:
       group: terraform-apply
       cancel-in-progress: false
     env:
-      AWS_ROLE_ARN: ${{ vars.AWS_APPLY_ROLE_ARN }}
+      AWS_ROLE_ARN: ${{ secrets.AWS_APPLY_ROLE_ARN }}
     steps:
       - uses: actions/checkout@v6
       - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: ${{ env.TF_VERSION }}
           terraform_wrapper: false
-      - name: Require repository variables
+      - name: Require repository secrets
         run: |
           for name in TF_STATE_BUCKET AWS_ROLE_ARN; do
-            [ -n "${!name}" ] || { echo "::error::repository variable for $name is not set; see infra/README.md"; exit 1; }
+            [ -n "${!name}" ] || { echo "::error::repository secret for $name is not set; see infra/README.md"; exit 1; }
           done
-      - name: Mask known IDs
-        env:
-          AWS_MEMBER_ACCOUNT_ID: ${{ vars.AWS_MEMBER_ACCOUNT_ID }}
-        run: |
-          [ -z "$AWS_MEMBER_ACCOUNT_ID" ] || echo "::add-mask::$AWS_MEMBER_ACCOUNT_ID"
       - uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ env.AWS_ROLE_ARN }}
           role-session-name: fleetkit-apply-${{ github.run_id }}
           aws-region: ${{ env.AWS_REGION }}
           mask-aws-account-id: true
-      - name: Export TF_VAR_* repository variables
+      - name: Export TF_VAR_* repository secrets
         env:
-          GITHUB_VARS: ${{ toJSON(vars) }}
+          GITHUB_SECRETS: ${{ toJSON(secrets) }}
         run: |
           jq -r 'to_entries[] | select(.key | startswith("TF_VAR_"))
-                 | "TF_VAR_\(.key[7:] | ascii_downcase)<<__TF_VAR__\n\(.value)\n__TF_VAR__"' <<< "$GITHUB_VARS" >> "$GITHUB_ENV"
+                 | "TF_VAR_\(.key[7:] | ascii_downcase)<<__TF_VAR__\n\(.value)\n__TF_VAR__"' <<< "$GITHUB_SECRETS" >> "$GITHUB_ENV"
 
       # The plan file stays on the runner: it embeds variable values and is never
       # uploaded as an artifact. Applying the saved plan guarantees that what was
