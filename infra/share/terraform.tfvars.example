@@ -1,0 +1,2 @@
+# Copy to terraform.tfvars (gitignored).
+member_role_arn = "<ARN of the member account OrganizationAccountAccessRole>"
