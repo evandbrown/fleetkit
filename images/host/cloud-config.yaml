@@ -24,6 +24,8 @@ packages:
   - python3.12-pip
   - tar
   - curl-minimal
+  - make
+  - jq
 
 write_files:
   # Bridge and NAT for the Firecracker guests. Idempotent: rerun it after a

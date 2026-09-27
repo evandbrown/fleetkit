@@ -11,6 +11,7 @@ mkdir -p "$FK/runs" /var/log/fleetkit
 export PYTHONPATH=/opt/fleetkit/harness/host:/opt/fleetkit/harness/driver:/opt/fleetkit/harness/telemetry:/opt/fleetkit/harness/guest
 t() { printf '%s %s\n' "$(date '+%H:%M:%S')" "$*"; }
 
+command -v make >/dev/null 2>&1 || dnf -y -q install make jq >/dev/null
 t "commit $(git rev-parse --short HEAD)"
 TOKEN=$(curl -sfX PUT http://169.254.169.254/latest/api/token -H 'X-aws-ec2-metadata-token-ttl-seconds: 60')
 IID=$(curl -sf -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id)

@@ -98,11 +98,11 @@ done
 [ "$s" = "Online" ] || { log "host never registered with SSM"; exit 1; }
 
 run cloud-init 960 'timeout 900 cloud-init status --wait --long; echo EXIT=$?; cp /var/log/cloud-init-output.log /var/lib/fleetkit/ 2>/dev/null; true' || exit 1
-run host-setup 1800 "cd /opt/fleetkit && git fetch -q && git checkout -q $(git -C "$REPO" rev-parse HEAD) && FLEETKIT_RUN_ID=$RUN_ID bash images/host/setup.sh 2>&1 | tail -80" || exit 1
+run host-setup 1800 "cd /opt/fleetkit && git fetch -q && git checkout -q $(git -C "$REPO" rev-parse HEAD) && FLEETKIT_RUN_ID=$RUN_ID bash images/host/setup.sh 2>&1" || exit 1
 run hostcheck 400 "FLEETKIT_RUN_ID=$RUN_ID bash /opt/fleetkit/images/host/hostcheck.sh" || exit 1
-run trial-n1 1200 "FLEETKIT_RUN_ID=$RUN_ID bash /opt/fleetkit/images/host/stage.sh trial-n1 2>&1 | tail -60" || log "trial-n1 did not succeed; continuing to collect evidence"
-run trial-n24 1800 "FLEETKIT_RUN_ID=$RUN_ID bash /opt/fleetkit/images/host/stage.sh trial-n24 2>&1 | tail -60" || log "trial-n24 did not succeed; continuing"
-run smoke 2400 "FLEETKIT_RUN_ID=$RUN_ID bash /opt/fleetkit/images/host/stage.sh smoke 2>&1 | tail -80" || log "smoke did not succeed; continuing"
-run bundle 900 "FLEETKIT_RUN_ID=$RUN_ID bash /opt/fleetkit/images/host/stage.sh bundle 2>&1 | tail -40" || log "bundle reported problems; evidence synced anyway"
+run trial-n1 1200 "FLEETKIT_RUN_ID=$RUN_ID bash /opt/fleetkit/images/host/stage.sh trial-n1 2>&1" || log "trial-n1 did not succeed; continuing to collect evidence"
+run trial-n24 1800 "FLEETKIT_RUN_ID=$RUN_ID bash /opt/fleetkit/images/host/stage.sh trial-n24 2>&1" || log "trial-n24 did not succeed; continuing"
+run smoke 2400 "FLEETKIT_RUN_ID=$RUN_ID bash /opt/fleetkit/images/host/stage.sh smoke 2>&1" || log "smoke did not succeed; continuing"
+run bundle 900 "FLEETKIT_RUN_ID=$RUN_ID bash /opt/fleetkit/images/host/stage.sh bundle 2>&1" || log "bundle reported problems; evidence synced anyway"
 log "all stages attempted; tearing down"
 exit 0
