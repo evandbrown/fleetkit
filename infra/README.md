@@ -58,7 +58,7 @@ The two CI roles trust GitHub's OIDC provider for this repository only, using th
 | `TF_VAR_alert_email` | Address that receives every budget notification |
 | `AWS_MEMBER_ACCOUNT_ID` | Optional; the `org` output `account_id` once it exists, so the log masks it everywhere |
 
-Every repository (or `aws` environment) variable named `TF_VAR_<name>` reaches Terraform as the input variable `<name>`, so a stack can gain a variable without a workflow change. The email variables are marked `sensitive` in the stacks, so Terraform redacts them in plan output; the repository and its workflow logs are public, so keep anything else you would not publish out of these variables.
+Every repository (or `aws` environment) variable named `TF_VAR_<name>` reaches Terraform as the input variable `<name>`, so a stack can gain a variable without a workflow change. GitHub stores variable names in upper case and Terraform's are case-sensitive, so the workflow lowers the part after `TF_VAR_`; stack variable names are all lower case. The email variables are marked `sensitive` in the stacks, so Terraform redacts them in plan output; the repository and its workflow logs are public, so keep anything else you would not publish out of these variables.
 
 **Environment `aws`** (Settings, Environments, New environment): name it exactly `aws`, add yourself as a required reviewer, and restrict deployment branches to `main`. Leave "Prevent self-review" off when the same person pushes and approves. Nothing else in the workflow can assume the apply role: the role's trust policy only matches the OIDC subject a job bound to this environment presents.
 

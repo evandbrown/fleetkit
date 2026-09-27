@@ -122,12 +122,14 @@ jobs:
       - name: Export TF_VAR_* repository variables
         # Every repository (or `aws` environment) variable named TF_VAR_<name> becomes
         # the Terraform input variable <name>, so adding a variable to a stack never
-        # requires editing this workflow.
+        # requires editing this workflow. GitHub stores variable names in upper case
+        # and Terraform variable names are case-sensitive, so the suffix is lowered;
+        # every stack variable is therefore lower case.
         env:
           GITHUB_VARS: ${{ toJSON(vars) }}
         run: |
           jq -r 'to_entries[] | select(.key | startswith("TF_VAR_"))
-                 | "\(.key)<<__TF_VAR__\n\(.value)\n__TF_VAR__"' <<< "$GITHUB_VARS" >> "$GITHUB_ENV"
+                 | "TF_VAR_\(.key[7:] | ascii_downcase)<<__TF_VAR__\n\(.value)\n__TF_VAR__"' <<< "$GITHUB_VARS" >> "$GITHUB_ENV"
       - name: terraform init
         run: |
           terraform init \
@@ -206,7 +208,7 @@ jobs:
           GITHUB_VARS: ${{ toJSON(vars) }}
         run: |
           jq -r 'to_entries[] | select(.key | startswith("TF_VAR_"))
-                 | "\(.key)<<__TF_VAR__\n\(.value)\n__TF_VAR__"' <<< "$GITHUB_VARS" >> "$GITHUB_ENV"
+                 | "TF_VAR_\(.key[7:] | ascii_downcase)<<__TF_VAR__\n\(.value)\n__TF_VAR__"' <<< "$GITHUB_VARS" >> "$GITHUB_ENV"
 
       # The plan file stays on the runner: it embeds variable values and is never
       # uploaded as an artifact. Applying the saved plan guarantees that what was
