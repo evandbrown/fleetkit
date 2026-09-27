@@ -9,18 +9,18 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable, Dict, Optional, Tuple
 
 from .hostinfo import collect_host_info
-from .manager import ApiError, RequestContext, SessionManager
+from .manager import ApiError, Manager, RequestContext
 from .metrics import HostSampler
 from .telemetry import Telemetry, parse_baggage, parse_traceparent
 
-_SESSION = re.compile(r"^/sessions/([A-Za-z0-9_.-]+)$")
-_TASK = re.compile(r"^/sessions/([A-Za-z0-9_.-]+)/task$")
+_MICROVM = re.compile(r"^/microvms/([A-Za-z0-9_.-]+)$")
+_TASK = re.compile(r"^/microvms/([A-Za-z0-9_.-]+)/task$")
 
 
 class HostdApp:
     """Routes requests to the manager; shared by every handler thread."""
 
-    def __init__(self, manager: SessionManager, telemetry: Telemetry, sampler: Optional[HostSampler],
+    def __init__(self, manager: Manager, telemetry: Telemetry, sampler: Optional[HostSampler],
                  host_id: str, dry_run: bool = False, host_info: Optional[Callable[[], Dict[str, Any]]] = None):
         self.manager = manager
         self.tel = telemetry
@@ -45,17 +45,17 @@ class HostdApp:
         m = self.manager
         if method == "GET" and path == "/health":
             return 200, {"ok": True, "backend": m.backend.name, "dry_run": self.dry_run, "host_id": self.host_id,
-                         "uptime_s": time.time() - self.started, "sessions": m.counts(),
+                         "uptime_s": time.time() - self.started, "microvms": m.counts(),
                          "fixture_base_url": m.backend.fixture_base_url}
-        if path == "/sessions":
+        if path == "/microvms":
             if method == "GET":
                 return 200, m.list_records()
             if method == "POST":
-                return 200, m.create_sessions(body or {}, ctx)
+                return 200, m.create_microvms(body or {}, ctx)
         mt = _TASK.match(path)
         if mt and method == "POST":
             return m.run_task(mt.group(1), body or {}, ctx)
-        ms = _SESSION.match(path)
+        ms = _MICROVM.match(path)
         if ms:
             if method == "GET":
                 return 200, m.get(ms.group(1)).record()

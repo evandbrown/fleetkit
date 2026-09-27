@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-from driver.criteria import evaluate_trial, has_targets, level_passed, make_criteria, normalize
+from driver.criteria import density_passed, evaluate_trial, has_targets, make_criteria, normalize
 from driver.schemas import STEP_NAMES
 
 
-def _trial(n=2, ready=None, dispatched=None, ok=None, clean=True, complete=True, error=None, tid="t001-docker-n2-r1"):
-    return {"trial_id": tid, "level_n": n, "complete": complete, "error": error, "phase": "done",
-            "counts": {"sessions_ready": n if ready is None else ready,
+def _trial(n=2, ready=None, dispatched=None, ok=None, clean=True, complete=True, error=None, tid="d2-t1"):
+    return {"trial_id": tid, "density": n, "complete": complete, "error": error, "phase": "done",
+            "counts": {"microvms_ready": n if ready is None else ready,
                        "tasks_dispatched": n if dispatched is None else dispatched,
                        "tasks_ok": n if ok is None else ok},
             "verify_clean": {"clean": clean, "leftovers": []}}
 
 
-def _rows(durations_by_task: dict, task_ms: dict, ok: dict, tid="t001-docker-n2-r1", as_csv=False):
+def _rows(durations_by_task: dict, task_ms: dict, ok: dict, tid="d2-t1", as_csv=False):
     tasks, steps = [], []
     for task_id, durs in durations_by_task.items():
         tasks.append({"trial_id": tid, "task_id": task_id, "ok": ok[task_id], "task_ms": task_ms[task_id]})
@@ -63,10 +63,10 @@ def test_csv_rows_and_typed_rows_agree():
     assert typed == csvish
 
 
-def test_protocol_conditions():
+def test_protocol_rules():
     tasks, steps = _rows({"a": [1] * 5, "b": [1] * 5}, {"a": 5.0, "b": 5.0}, {"a": True, "b": True})
     assert evaluate_trial(_trial(), tasks, steps, None)["passed"]  # no criteria: protocol only
-    for kw, reason in ((dict(clean=False), "verify-clean not clean"), (dict(ready=1), "sessions ready 1/2"),
+    for kw, reason in ((dict(clean=False), "verify-clean not clean"), (dict(ready=1), "microVMs ready 1/2"),
                        (dict(dispatched=1), "tasks dispatched 1/2"), (dict(complete=False), "trial not complete"),
                        (dict(error="fixture check failed"), "trial error: fixture check failed")):
         ev = evaluate_trial(_trial(**kw), tasks, steps, None)
@@ -74,17 +74,19 @@ def test_protocol_conditions():
 
 
 def test_step_targets_without_step_rows_fail_and_rows_of_other_trials_are_ignored():
-    tasks, steps = _rows({"a": [1] * 5, "b": [1] * 5}, {"a": 5.0, "b": 5.0}, {"a": True, "b": True}, tid="t999-other")
+    tasks, steps = _rows({"a": [1] * 5, "b": [1] * 5}, {"a": 5.0, "b": 5.0}, {"a": True, "b": True}, tid="d9-t9")
     ev = evaluate_trial(_trial(), tasks, steps, make_criteria(step_p95_target_ms=100, task_p95_target_ms=100))
     assert not ev["targets_met"]
     assert {c["name"] for c in ev["checks"]} == {"steps", "task p95"}
     assert "task p95: no data from ok tasks" in ev["reasons"]
 
 
-def test_normalize_and_level_rule():
+def test_normalize_and_density_rule():
     assert normalize(None) == {"step_p50_target_ms": None, "step_p95_target_ms": None, "task_p95_target_ms": None}
     assert normalize({"step_p50_target_ms": "1000", "junk": 1})["step_p50_target_ms"] == 1000.0
     assert not has_targets(None) and has_targets({"task_p95_target_ms": 5})
-    assert not level_passed([])
-    assert level_passed([{"passed": True}, {"passed": True}])
-    assert not level_passed([{"passed": True}, {"passed": False}])
+    assert not density_passed([])
+    assert density_passed([{"passed": True}, {"passed": True}])
+    assert not density_passed([{"passed": True}, {"passed": False}])
+    ev = evaluate_trial({"trial_id": "x", "complete": True, "counts": {}, "verify_clean": {"clean": True}}, [], [], None)
+    assert "no density recorded" in ev["reasons"]

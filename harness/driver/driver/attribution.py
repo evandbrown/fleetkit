@@ -6,12 +6,12 @@ The window is the trial's task window, ``barrier_release`` to ``last_task_return
 guest_metrics.csv (the guests' proc_samples); the verdict is **rule-based, from measured signals**:
 
 * gauges (cpu_util, steal, mem_available) are summarized over the samples inside the window;
-* cumulative counters (PSI ``*_total`` µs, CPU µs of hostd, the driver and each VM's vCPU and VMM
-  threads, cgroup throttled µs and pressure) are read at both window edges by linear interpolation
+* cumulative counters (PSI ``*_total`` µs, CPU µs of hostd, the driver and each microVM's vCPU and
+  hypervisor threads, cgroup throttled µs and pressure) are read at both window edges by linear interpolation
   between the neighbouring samples, and their difference is divided by the window.
 
 Verdicts, most severe first (several can hold): ``host_cpu`` (host PSI cpu some >= 20% of the window
-or mean cpu_util >= 90%), ``vm_cpu_quota`` (mean per-VM throttled fraction >= 10%), ``host_memory``
+or mean cpu_util >= 90%), ``vm_cpu_quota`` (mean per-microVM throttled fraction >= 10%), ``host_memory``
 (min mem_available < 10% of mem_total, or memory PSI some >= 5%), ``io`` (io PSI some >= 10%),
 ``steal`` (mean steal >= 5%); else ``none``, or ``unknown`` when a signal a rule needs is missing
 (the docker backend, a host without PSI, a run from before these fields existed).
@@ -20,8 +20,6 @@ from __future__ import annotations
 
 import bisect
 import collections
-import csv
-from pathlib import Path
 
 from .stats import mean, to_float
 
@@ -43,29 +41,22 @@ VERDICTS = ("host_cpu", "vm_cpu_quota", "host_memory", "io", "steal")
 
 # ---- loading ------------------------------------------------------------------------------------
 
-def _iter_csv(path: Path):
-    path = Path(path)
-    if not path.exists():
-        return
-    with open(path, newline="", encoding="utf-8") as fh:
-        yield from csv.DictReader(fh)
-
-
 def index_host_metrics(rows) -> dict[tuple[str, str], list[tuple[float, float]]]:
-    """host_metrics rows -> {(session_id, metric): [(ts, value), ...] sorted by ts}."""
+    """host_metrics rows -> {(subject, metric): [(ts, value), ...] sorted by ts}. Pass rows from
+    ``RunDir.iter_rows("host_metrics")`` so a run directory from before the glossary reads the same."""
     out: dict[tuple[str, str], list[tuple[float, float]]] = collections.defaultdict(list)
     for r in rows:
         ts, v = to_float(r.get("ts")), to_float(r.get("value"))
         if ts is None or v is None:
             continue
-        out[(str(r.get("session_id") or ""), str(r.get("metric") or ""))].append((ts, v))
+        out[(str(r.get("subject") or ""), str(r.get("metric") or ""))].append((ts, v))
     for series in out.values():
         series.sort()
     return dict(out)
 
 
-def load_host_series(path: Path) -> dict:
-    return index_host_metrics(_iter_csv(path))
+def load_host_series(rundir) -> dict:
+    return index_host_metrics(rundir.iter_rows("host_metrics"))
 
 
 def sum_guest_metrics(rows) -> dict[str, dict[str, float]]:
@@ -85,8 +76,8 @@ def sum_guest_metrics(rows) -> dict[str, dict[str, float]]:
     return {k: dict(v) for k, v in out.items()}
 
 
-def load_guest_sums(path: Path) -> dict:
-    return sum_guest_metrics(_iter_csv(path))
+def load_guest_sums(rundir) -> dict:
+    return sum_guest_metrics(rundir.iter_rows("guest_metrics"))
 
 
 # ---- series helpers -------------------------------------------------------------------------------
@@ -135,22 +126,22 @@ def _pct(num, window_s):
 
 # ---- attribution ----------------------------------------------------------------------------------
 
-def attribute_trial(trial: dict, series: dict, guest: dict | None = None, session_ids=None,
+def attribute_trial(trial: dict, series: dict, guest: dict | None = None, microvm_ids=None,
                     cpu_count=None, mem_total=None) -> dict:
     """Attribution over one trial's task window; every number is null when its input is missing."""
     ts = trial.get("timestamps") or {}
     start, end = to_float(ts.get("barrier_release")), to_float(ts.get("last_task_return"))
     out = {"labels": {"numbers": NUMBERS_LABEL, "verdict": VERDICT_LABEL}, "thresholds": dict(THRESHOLDS)}
     if start is None or end is None or end <= start:
-        out.update({"window": {"start_ts": start, "end_ts": end, "seconds": None}, "host": {}, "sessions": [],
+        out.update({"window": {"start_ts": start, "end_ts": end, "seconds": None}, "host": {}, "microvms": [],
                     "guest": _guest(guest), "verdicts": ["unknown"], "verdict": "unknown",
                     "missing": ["task window"]})
         return out
     w = end - start
     series = series or {}
 
-    def s(sid, metric):
-        return series.get((sid, metric)) or []
+    def s(subject, metric):
+        return series.get((subject, metric)) or []
 
     cpu = gauge_values(s("host", "cpu_util"), start, end)
     steal = gauge_values(s("host", "steal"), start, end)
@@ -171,45 +162,46 @@ def attribute_trial(trial: dict, series: dict, guest: dict | None = None, sessio
     host["busy_cpu_s"] = (host["cpu_util_mean_pct"] / 100.0 * n_cpu * w
                           if host["cpu_util_mean_pct"] is not None and n_cpu else None)
 
-    if session_ids is None:
-        session_ids = [x.get("session_id") for x in trial.get("sessions") or [] if x.get("ready")]
-    sessions = []
-    for sid in [x for x in session_ids if x]:
-        vcpu = delta(s(sid, "cpu_vcpu_usec"), start, end)
-        vmm = delta(s(sid, "cpu_vmm_usec"), start, end)
-        thr = delta(s(sid, "cpu_throttled_usec"), start, end)
-        peak = gauge_values(s(sid, "cgroup_memory_peak"), start, end) or \
-            gauge_values(s(sid, "cgroup_memory_current"), start, end)
-        sessions.append({
-            "session_id": sid,
+    if microvm_ids is None:
+        microvm_ids = [x.get("microvm_id") for x in trial.get("microvms") or [] if x.get("ready")]
+    microvms = []
+    for mid in [x for x in microvm_ids if x]:
+        vcpu = delta(s(mid, "cpu_vcpu_usec"), start, end)
+        hyp = delta(s(mid, "cpu_hypervisor_usec"), start, end)
+        thr = delta(s(mid, "cpu_throttled_usec"), start, end)
+        peak = gauge_values(s(mid, "cgroup_memory_peak"), start, end) or \
+            gauge_values(s(mid, "cgroup_memory_current"), start, end)
+        microvms.append({
+            "microvm_id": mid,
             "vcpu_s": vcpu / 1e6 if vcpu is not None else None,
-            "vmm_s": vmm / 1e6 if vmm is not None else None,
-            "cpu_s": (vcpu + vmm) / 1e6 if vcpu is not None and vmm is not None else None,
+            "hypervisor_s": hyp / 1e6 if hyp is not None else None,
+            "cpu_s": (vcpu + hyp) / 1e6 if vcpu is not None and hyp is not None else None,
             "throttled_fraction": thr / (w * 1e6) if thr is not None else None,
-            "cgroup_cpu_pressure_some_pct": _pct(delta(s(sid, "cpu_pressure_some_total_us"), start, end), w),
+            "cgroup_cpu_pressure_some_pct": _pct(delta(s(mid, "cpu_pressure_some_total_us"), start, end), w),
             "cgroup_memory_peak_bytes": max(peak) if peak else None,
         })
-    thr_vals = [x["throttled_fraction"] for x in sessions if x["throttled_fraction"] is not None]
+    thr_vals = [x["throttled_fraction"] for x in microvms if x["throttled_fraction"] is not None]
     hostd = delta(s("host", "hostd_cpu_usec"), start, end)
     hostd_s = hostd / 1e6 if hostd is not None else None
     drv = delta(s("driver", "driver_cpu_usec"), start, end)
     drv_s = drv / 1e6 if drv is not None else None
-    cpu_s = [x["cpu_s"] for x in sessions]
-    sessions_cpu = sum(cpu_s) if sessions and all(v is not None for v in cpu_s) else None
-    parts = (host["busy_cpu_s"], sessions_cpu, hostd_s, drv_s)
+    cpu_s = [x["cpu_s"] for x in microvms]
+    microvms_cpu = sum(cpu_s) if microvms and all(v is not None for v in cpu_s) else None
+    parts = (host["busy_cpu_s"], microvms_cpu, hostd_s, drv_s)
     out.update({
         "window": {"start_ts": start, "end_ts": end, "seconds": w},
         "host": host,
-        "sessions": sessions,
-        "vm_throttled_fraction_mean": mean(thr_vals) if thr_vals and len(thr_vals) == len(sessions) else None,
-        "vcpu_s": sum(x["vcpu_s"] for x in sessions) if sessions and all(x["vcpu_s"] is not None for x in sessions) else None,
-        "vmm_s": sum(x["vmm_s"] for x in sessions) if sessions and all(x["vmm_s"] is not None for x in sessions) else None,
-        "sessions_cpu_s": sessions_cpu,
+        "microvms": microvms,
+        "vm_throttled_fraction_mean": mean(thr_vals) if thr_vals and len(thr_vals) == len(microvms) else None,
+        "vcpu_s": sum(x["vcpu_s"] for x in microvms) if microvms and all(x["vcpu_s"] is not None for x in microvms) else None,
+        "hypervisor_s": (sum(x["hypervisor_s"] for x in microvms)
+                         if microvms and all(x["hypervisor_s"] is not None for x in microvms) else None),
+        "microvms_cpu_s": microvms_cpu,
         "hostd_cpu_s": hostd_s,
         "driver_cpu_s": drv_s,
         "guest": _guest(guest),
     })
-    # busy host CPU that no VM, hostd or the driver accounts for: the kernel, other daemons, the
+    # busy host CPU that no microVM, hostd or the driver accounts for: the kernel, other daemons, the
     # fixture or collector if they share the host
     out["unattributed_cpu_s"] = (parts[0] - parts[1] - parts[2] - parts[3]
                                  if all(p is not None for p in parts) else None)
@@ -270,7 +262,7 @@ def _verdicts(host: dict, thr_mean) -> tuple[list[str], list[str]]:
 
 
 def summarize_verdicts(attributions) -> list[str]:
-    """Union of the trials' verdicts in severity order (for a level row)."""
+    """Union of the trials' verdicts in severity order (for a density's row)."""
     seen = {v for a in attributions for v in (a.get("verdicts") or [])}
     ordered = [v for v in VERDICTS if v in seen]
     if ordered:

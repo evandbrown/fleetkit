@@ -78,7 +78,7 @@ counts do not depend on the query.
 the same browser profile would find the first task's item still there and
 fail `verify_cart`'s "exactly one" assertion, so a guest that reuses a
 profile must clear storage between tasks (`Storage.clearDataForOrigin` or a
-fresh `--user-data-dir`). The design runs one task per session, which is a
+fresh `--user-data-dir`). The design runs one task per microVM, which is a
 fresh profile.
 
 ## What a page costs
@@ -107,7 +107,7 @@ from a shared pool of 64, home and search add eight tiles each.
 
 ### manifest.json
 
-Top level: `expected_bytes`, `expected_request_count` and `tolerance`
+At the root: `expected_bytes`, `expected_request_count` and `tolerance`
 (`{bytes_pct, requests_pct}`) for the whole five-step task, averaged over
 the 20 task products, with the exact per-product numbers under
 `task.per_product[<product_id>]`. Per page type under `pages.<home|search|
@@ -123,14 +123,14 @@ Definitions, chosen to match what Chromium reports over the DevTools protocol:
 - `expected_bytes` is the sum over the distinct URLs the four pages
   reference, each counted once. A browser fetches a shared asset (`styles.css`,
   `app.js`, `catalog.js`, a thumbnail that appears on two pages) once and
-  serves the repeats from cache, for which `Network.loadingFinished.encodedDataLength`
+  serves the later references from cache, for which `Network.loadingFinished.encodedDataLength`
   is 0. Headers add well under 1 percent; a server that gzips the text assets
   would take about 5 percent off; both sit inside `tolerance.bytes_pct`.
   `check.py` measures the same thing through Resource Timing `transferSize`
   and lands within 0.2 percent.
 - `expected_request_count` counts every reference on every page, because a
-  disk-cache hit still emits `Network.requestWillBeSent`. Repeats served from
-  the renderer's memory cache emit nothing, so `task.unique_request_count` is
+  disk-cache hit still emits `Network.requestWillBeSent`. Later references served
+  from the renderer's memory cache emit nothing, so `task.unique_request_count` is
   the floor; the gap is inside `tolerance.requests_pct`. The favicon is
   counted once (Chromium fetches it for the first page).
 

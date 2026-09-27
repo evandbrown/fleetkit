@@ -55,11 +55,11 @@ def test_guest_info_keys():
     assert guest_info(None) == {k: None for k in GUEST_INFO_KEYS}
 
 
-def test_session_record_carries_boot_phases(manager, guest, ctx):
+def test_microvm_record_carries_boot_phases(manager, guest, ctx):
     guest.ready.add("guest-0")
     guest.health_extra = {k: v for k, v in HEALTH.items() if k != "ready"}
     guest.health_send_ns, guest.health_rtt_ns = SEND_NS, RTT_NS
-    sid = manager.create_sessions({"count": 1}, ctx)[0]["id"]
+    sid = manager.create_microvms({"count": 1}, ctx)[0]["id"]
     rec = manager.get(sid).record()
     assert rec["state"] == "ready"
     assert rec["kernel_start_ts"] == pytest.approx(1_700_000_000.002 - 3.0, abs=1e-6)
@@ -72,10 +72,10 @@ def test_session_record_carries_boot_phases(manager, guest, ctx):
 
 
 def test_record_fields_are_null_before_ready_and_in_dry_run(backend, guest, clock, tel, ctx):
-    from hostd.manager import SessionManager
-    m = SessionManager(backend, tel, guest=guest, clock=clock.time, sleep=clock.sleep,
+    from hostd.manager import Manager
+    m = Manager(backend, tel, guest=guest, clock=clock.time, sleep=clock.sleep,
                        spawn=lambda fn, name: fn(), dry_run=True)
-    rec = m.get(m.create_sessions({"count": 1}, ctx)[0]["id"]).record()
+    rec = m.get(m.create_microvms({"count": 1}, ctx)[0]["id"]).record()
     assert rec["state"] == "ready"
     for k in ("kernel_start_ts", "guestd_start_ts", "chromium_launch_ts", "chromium_ready_ts", "guest_info"):
         assert k in rec and rec[k] is None, k

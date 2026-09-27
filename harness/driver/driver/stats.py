@@ -26,7 +26,7 @@ def mean(values):
 
 def summary(values) -> dict:
     vals = [float(v) for v in values if v is not None and v != ""]
-    return {"n": len(vals), "p50": percentile(vals, 50), "p95": percentile(vals, 95),
+    return {"count": len(vals), "p50": percentile(vals, 50), "p95": percentile(vals, 95),
             "mean": mean(vals), "min": min(vals) if vals else None, "max": max(vals) if vals else None}
 
 

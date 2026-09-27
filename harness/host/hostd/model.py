@@ -1,4 +1,4 @@
-"""Session model: states, outcomes, failure categories and the session record.
+"""MicroVM model: states, outcomes, failure categories and the microVM record.
 
 Everything here is the closed vocabulary from docs/harness-design.md section 4.
 """
@@ -22,7 +22,7 @@ class State:
     ALL = (CREATING, BOOTING, READY, BUSY, DESTROYING, DESTROYED, FAILED)
     # `failed` is terminal for the state machine; cleanup still runs and sets destroyed_ts.
     TERMINAL = (DESTROYED, FAILED)
-    # States in which a session holds resources and the reaper's lifetime rule applies.
+    # States in which a microVM holds resources and the reaper's lifetime rule applies.
     LIVE = (CREATING, BOOTING, READY, BUSY)
 
 
@@ -57,10 +57,10 @@ class FailureCategory:
     NAVIGATION_ERROR = "navigation_error"
     BROWSER_CRASHED = "browser_crashed"
     GUEST_UNREACHABLE = "guest_unreachable"
-    SESSION_NOT_READY = "session_not_ready"
+    MICROVM_NOT_READY = "microvm_not_ready"
 
     ALL = (OK, STEP_TIMEOUT, TASK_TIMEOUT, ASSERTION_FAILED, NAVIGATION_ERROR, BROWSER_CRASHED,
-           GUEST_UNREACHABLE, SESSION_NOT_READY)
+           GUEST_UNREACHABLE, MICROVM_NOT_READY)
 
 
 FAULTS = ("crash_on_start", "never_ready", "hang_task", "hang_step", "slow_step")
@@ -112,7 +112,7 @@ class TraceContext:
 
 
 @dataclass
-class Session:
+class MicroVM:
     id: str
     slot: int
     backend: str
@@ -137,7 +137,7 @@ class Session:
     outcome: Optional[str] = None
     error: Optional[str] = None
     console_log: Optional[str] = None
-    # Boot phases on the host clock, from the /health answer that found the session ready
+    # Boot phases on the host clock, from the /health answer that found the microVM ready
     # (guest.boot_phases): kernel start, guest daemon start, Chromium launched, Chromium ready.
     kernel_start_ts: Optional[float] = None
     guestd_start_ts: Optional[float] = None
@@ -147,7 +147,7 @@ class Session:
     guest_info: Optional[Dict[str, Any]] = None
     # Backend-private handles (container name, tap, pid...). Never exposed verbatim.
     handle: Dict[str, Any] = field(default_factory=dict)
-    # Trace context of the session's create span (parent of every record about it).
+    # Trace context of the microVM's create span (parent of every record about it).
     trace: Optional[TraceContext] = None
     lock: threading.RLock = field(default_factory=threading.RLock, repr=False, compare=False)
     destroy_done: threading.Event = field(default_factory=threading.Event, repr=False, compare=False)
@@ -163,21 +163,21 @@ class Session:
     def transition(self, to: str, ts: float, outcome: Optional[str] = None) -> Dict[str, Any]:
         """Move to `to`, raising TransitionError if the state machine forbids it.
 
-        Returns the `session.state` record (section 4) for the caller to log.
+        Returns the `microvm.state` record (section 4) for the caller to log.
         """
         if not self.can_transition(to):
-            raise TransitionError("session %s: %s -> %s is not allowed" % (self.id, self.state, to))
+            raise TransitionError("microVM %s: %s -> %s is not allowed" % (self.id, self.state, to))
         if outcome is not None:
             if outcome not in Outcome.ALL:
                 raise ValueError("unknown outcome %r" % outcome)
             self.outcome = outcome
-        record = {"session_id": self.id, "from": self.state, "to": to, "ts": ts, "outcome": self.outcome}
+        record = {"microvm_id": self.id, "from": self.state, "to": to, "ts": ts, "outcome": self.outcome}
         self.state = to
         self.transitions.append(record)
         return record
 
     def record(self) -> Dict[str, Any]:
-        """The public GET /sessions/{id} shape (section 4) plus identifying extras."""
+        """The public GET /microvms/{id} shape (section 4) plus identifying extras."""
         return {
             "id": self.id,
             "state": self.state,

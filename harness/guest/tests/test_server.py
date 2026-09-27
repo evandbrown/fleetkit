@@ -41,7 +41,7 @@ class StubRunner:
 
     gate: asyncio.Event | None = None
     result_ok = True
-    last = None  # (req, sampler, cpu0_ns) of the last run
+    last = None  # (req, sampler, cpu0_ns) of the last call
 
     def __init__(self, client, log, fault=None, sampler=None) -> None:
         self.log = log
@@ -84,9 +84,9 @@ def test_health_metrics_logs_and_errors(monkeypatch):
             assert chromium.started == 1
             status, body = await minihttp.request_json("127.0.0.1", port, "GET", "/health")
             assert status == 503 and body["ready"] is False and body["chromium_version"] is None and "uptime_s" in body
-            # a task before readiness is session_not_ready, with the full failure shape
+            # a task before readiness is microvm_not_ready, with the full failure shape
             status, body = await minihttp.request_json("127.0.0.1", port, "POST", "/task", GOOD)
-            assert status == 503 and body["failure_category"] == "session_not_ready" and body["steps"] == [] and body["failed_step"] is None
+            assert status == 503 and body["failure_category"] == "microvm_not_ready" and body["steps"] == [] and body["failed_step"] is None
             assert body["proc_samples"] == [] and body["sample_interval_ms"] == 200 and body["timing_valid"] is True and body["guestd_cpu_ms"] is None
             chromium.ready = True
             chromium.product = "Chrome/154.0.0.0"

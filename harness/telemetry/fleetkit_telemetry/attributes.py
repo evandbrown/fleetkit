@@ -1,6 +1,6 @@
 """Attribute names shared by every span, log record and metric the harness emits.
 
-Design section 8: correlation keys on every signal are the run id, trial id, session id,
+Design section 8: correlation keys on every signal are the run id, trial id, microVM id,
 task id, backend and host id. All of them live under the ``fleetkit.`` namespace.
 """
 from __future__ import annotations
@@ -9,7 +9,7 @@ from typing import Any, Mapping
 
 ATTR_RUN_ID = "fleetkit.run_id"
 ATTR_TRIAL_ID = "fleetkit.trial_id"
-ATTR_SESSION_ID = "fleetkit.session_id"
+ATTR_MICROVM_ID = "fleetkit.microvm_id"
 ATTR_TASK_ID = "fleetkit.task_id"
 ATTR_BACKEND = "fleetkit.backend"
 ATTR_HOST_ID = "fleetkit.host_id"
@@ -17,7 +17,7 @@ ATTR_HOST_ID = "fleetkit.host_id"
 CORRELATION_KEYS: tuple[str, ...] = (
     ATTR_RUN_ID,
     ATTR_TRIAL_ID,
-    ATTR_SESSION_ID,
+    ATTR_MICROVM_ID,
     ATTR_TASK_ID,
     ATTR_BACKEND,
     ATTR_HOST_ID,
@@ -27,7 +27,7 @@ CORRELATION_KEYS: tuple[str, ...] = (
 SHORT_NAMES: Mapping[str, str] = {
     "run_id": ATTR_RUN_ID,
     "trial_id": ATTR_TRIAL_ID,
-    "session_id": ATTR_SESSION_ID,
+    "microvm_id": ATTR_MICROVM_ID,
     "task_id": ATTR_TASK_ID,
     "backend": ATTR_BACKEND,
     "host_id": ATTR_HOST_ID,
@@ -41,7 +41,7 @@ SERVICE_HOSTD = "hostd"
 SERVICE_GUEST = "guest-daemon"
 
 # Log event names.
-EVENT_SESSION_STATE = "session.state"
+EVENT_MICROVM_STATE = "microvm.state"
 
 # Guest span attribute names (set by ``emit_guest_task``).
 ATTR_STEP = "fleetkit.step"

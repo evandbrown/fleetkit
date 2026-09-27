@@ -8,7 +8,7 @@ import time
 from typing import Any, Dict, Optional, Tuple
 
 
-# The /health fields kept on the session as `guest_info`: what the guest is, not how it booted.
+# The /health fields kept on the microVM as `guest_info`: what the guest is, not how it booted.
 GUEST_INFO_KEYS = ("guestd_version", "chromium_version", "chromium_flags", "kernel_cmdline", "vcpus", "mem_total")
 
 
@@ -75,7 +75,7 @@ def _seconds(v: Any) -> Optional[float]:
 
 def boot_phases(resp: GuestResponse) -> Dict[str, Optional[float]]:
     """Host-clock timestamps of the guest's boot milestones, from the /health answer that found
-    the session ready.
+    the microVM ready.
 
     t_host, the host time at which the guest produced the answer, is the send time plus half the
     round trip (the same estimate as clock_offset_ns). Uptimes count back from it:

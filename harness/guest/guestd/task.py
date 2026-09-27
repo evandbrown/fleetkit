@@ -1,6 +1,6 @@
 """The one standard task: home, search, open_product, add_to_cart, verify_cart.
 
-Design section 4 defines each step's action, settle condition and assertion, the
+Design section 4 defines each step's action, the point it settles at, its assertion, the
 failure categories (a closed set) and how time is measured:
 
 - ``task_ms`` runs on the monotonic clock from receipt of ``POST /task`` to the settle of
@@ -10,7 +10,7 @@ failure categories (a closed set) and how time is measured:
   ``duration_ms`` is settle minus dispatch.
 - ``step_timeout_ms`` wraps every step and ``task_timeout_ms`` wraps the task, through the
   same :class:`~guestd.clock.Deadline` mechanism as every DevTools wait. There are no
-  fixed sleeps in the timed region; DOM conditions are awaited with MutationObserver
+  fixed sleeps in the timed region; DOM states are awaited with MutationObserver
   promises.
 - ``bytes_received`` sums ``Network.loadingFinished.encodedDataLength`` for the task's tab
   and ``request_count`` counts ``Network.requestWillBeSent``. Each step carries its share:
@@ -56,7 +56,7 @@ FAILURE_CATEGORIES = (
     "navigation_error",
     "browser_crashed",
     "guest_unreachable",
-    "session_not_ready",
+    "microvm_not_ready",
 )
 
 DEFAULT_STEP_TIMEOUT_MS = 10000
@@ -175,7 +175,7 @@ class StepRecord:
 
 @dataclass
 class Tab:
-    session_id: str
+    session_id: str  # the CDP session of the attached target (CDP's own term)
     target_id: str
     context_id: str
     events: EventQueue
@@ -419,10 +419,10 @@ class TaskRunner:
                 "creating tab",
             )
         )["targetId"]
-        session = (await dl.wait(c.send("Target.attachToTarget", {"targetId": target, "flatten": True}), "attaching tab"))[
+        cdp_session = (await dl.wait(c.send("Target.attachToTarget", {"targetId": target, "flatten": True}), "attaching tab"))[
             "sessionId"
         ]
-        tab = Tab(session, target, ctx, c.subscribe(session))
+        tab = Tab(cdp_session, target, ctx, c.subscribe(cdp_session))
 
         def on_event(method: str, params: Dict[str, Any]) -> None:
             if method == "Network.requestWillBeSent":
@@ -431,9 +431,9 @@ class TaskRunner:
                 tab.bytes_received += int(params.get("encodedDataLength") or 0)
 
         tab.listener = on_event
-        c.add_listener(session, on_event)
-        await dl.wait(c.send("Page.enable", session_id=session), "Page.enable")
-        await dl.wait(c.send("Network.enable", session_id=session), "Network.enable")
+        c.add_listener(cdp_session, on_event)
+        await dl.wait(c.send("Page.enable", session_id=cdp_session), "Page.enable")
+        await dl.wait(c.send("Network.enable", session_id=cdp_session), "Network.enable")
         return tab
 
     async def _step_home(self, tab: Tab, req: TaskRequest, dl: Deadline, t0_ns: int) -> int:

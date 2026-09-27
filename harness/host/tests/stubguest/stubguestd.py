@@ -52,10 +52,10 @@ class StubState:
         self.seq = 0
         self.log("stub guest started fault=%s" % self.fault)
 
-    def log(self, msg: str, level: str = "INFO") -> None:
+    def log(self, msg: str, severity: str = "INFO") -> None:
         with self.lock:
             self.seq += 1
-            self.logs.append({"seq": self.seq, "ts": time.time(), "level": level, "msg": msg})
+            self.logs.append({"seq": self.seq, "ts": time.time(), "severity": severity, "msg": msg})
             del self.logs[:-200]
 
     def ready(self) -> bool:

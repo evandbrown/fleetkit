@@ -5,9 +5,9 @@ Runs as the systemd unit fleetkit-support-metrics (images/support/cloud-config.y
 and appends to /var/lib/fleetkit/support-metrics.csv in the same long format as the
 driver's host_metrics.csv, so one reader handles both:
 
-    ts, session_id, metric, value
+    ts, subject, metric, value
 
-``session_id`` is ``support`` for host rows (``cpu_util`` and ``steal`` in percent over
+``subject`` is ``support`` for host rows (``cpu_util`` and ``steal`` in percent over
 the last interval, from /proc/stat like the host daemon; ``mem_available`` in bytes
 from /proc/meminfo) and the container name for container rows (``cpu_usage_usec``,
 the cumulative ``usage_usec`` from the container's cgroup v2 ``cpu.stat``). A value
@@ -27,7 +27,7 @@ import time
 from pathlib import Path
 
 CONTAINERS = ("fleetkit-fixture", "fleetkit-lgtm")
-COLUMNS = ["ts", "session_id", "metric", "value"]
+COLUMNS = ["ts", "subject", "metric", "value"]
 RESOLVE_EVERY_S = 10.0
 
 

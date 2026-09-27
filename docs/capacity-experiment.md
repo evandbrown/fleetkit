@@ -1,15 +1,15 @@
 # Capacity experiment: the baseline
 
-**Status:** pre-registered on 2026-09-27, before any capacity data existed. The commit that adds this file comes before the run, and the run records its own commit, so the order is checkable. The values the run reads are in [`experiments/capacity/baseline.env`](../experiments/capacity/baseline.env). Changing any of them after the run makes it a different experiment.
+**Status:** pre-registered on 2026-09-27, before any capacity data existed. The commit that adds this file comes before the run, and the run records its own commit, so the order is checkable. The values the run reads are in [`experiments/capacity/baseline.env`](../experiments/capacity/baseline.env). Changing any of them after the run makes it a different spec.
 
 ## The question
 
-On an m8i.4xlarge running Firecracker under nested virtualization, how many standard shopping tasks can run at once, one per 2 vCPU / 2 GiB microVM, with every task inside the targets? At that concurrency, what does a task cost, and which resource, used by which process, runs out first?
+On an m8i.4xlarge running Firecracker under nested virtualization, how many standard shopping tasks can run at once, one per 2 vCPU / 2 GiB microVM, with every task inside the targets? At that density, what does a task cost, and which resource, used by which process, runs out first?
 
 ## What the answer will not claim
 
 - **Nothing about bare metal.** Every number describes this nested-virtualization configuration as measured. Nested virtualization adds a layer of VM exits under every guest; we don't extrapolate past it.
-- **Not maximum capacity** unless the ladder finds a failing level and the extra trials at the boundary hold. Otherwise the result is "the highest concurrency tested successfully".
+- **Not maximum capacity** unless the ladder finds a failing density and the extra trials at the boundary hold. Otherwise the result is "the highest density tested successfully".
 - **Not an agent loop.** The driver dispatches a whole task and the guest runs all five steps inside the microVM. No observation goes back to the caller after each step, and there is no think time between steps. The first omission overstates density and the second understates it. Both are follow-ups, one variable at a time.
 
 ## Configuration
@@ -29,11 +29,11 @@ On an m8i.4xlarge running Firecracker under nested virtualization, how many stan
 
 One invocation of `driver trial` on one worker host, so one run:
 
-1. **Warm-up.** One trial at n=1, excluded from the results. The first boot after setup reads the root filesystem from disk. Later boots read it from the page cache.
-2. **Ladder.** Levels 1, 2, 4, 8, 12 and 16, one trial each. A trial creates N microVMs, waits until all are ready, releases N shopping tasks together, collects the results, and destroys the microVMs. Before every trial the host sits idle for 10 seconds, and its CPU during that wait is recorded.
-3. **Stop** at the first level that fails. No higher level runs.
-4. **Check the boundary.** Two more trials at the last passing level and two at the first failing level, for three trials at each. If one of the new trials at the last passing level fails, that level becomes a miss and the next lower passing level gets two more trials, and so on down.
-5. **Illustration.** One n=1 trial with a screenshot after every step, for the explorer's filmstrip. The screenshots take time inside the task, so this trial is excluded from the results.
+1. **Warm-up.** One trial at density 1, excluded from the results. The first boot after setup reads the root filesystem from disk. Later boots read it from the page cache.
+2. **Ladder.** Densities 1, 2, 4, 8, 12 and 16, one trial each. A trial creates N microVMs, waits until all are ready, releases N shopping tasks together, collects the results, and destroys the microVMs. Before every trial the host sits idle for 10 seconds, and its CPU during that wait is recorded.
+3. **Stop** at the first density that fails. No higher density runs.
+4. **Check the boundary.** Two more trials at the last passing density and two at the first failing density, for three trials at each. If one of the new trials at the last passing density fails, that density becomes a miss and the next lower passing density gets two more trials, and so on down.
+5. **Illustration.** One trial at density 1 with a screenshot after every step, for the explorer's filmstrip. The screenshots take time inside the task, so this trial is excluded from the results.
 
 ## Pass criteria
 
@@ -45,11 +45,11 @@ A **trial** passes only if all of these hold:
 4. The 95th percentile of task time is at most **5000 ms**. This is the completion target, set here.
 5. After cleanup, the host has no leftover microVM process, tap device, cgroup scope or run directory.
 
-A **level** passes only if every one of its trials passes. The **headline** is the highest level that passed with every lower level also passing.
+A **density** passes only if every trial at it passes. The **headline** is the highest density that passed with every lower density also passing.
 
-**Why 5000 ms for the task.** It's five steps at the 1-second median step target. It's also about four times the uncontended task time measured on the validation host, 1.25 seconds at n=1. So it bounds how much slower a user's whole task may get under load, which the per-step targets alone don't.
+**Why 5000 ms for the task.** It's five steps at the 1-second median step target. It's also about four times the uncontended task time measured on the validation host, 1.25 seconds at density 1. So it bounds how much slower a user's whole task may get under load, which the per-step targets alone don't.
 
-**Small samples.** With N tasks in a trial, the 95th percentile is in effect the slowest task for any N up to 20. The criteria are strict on purpose: one slow browser fails the level.
+**Small samples.** With N tasks in a trial, the 95th percentile is in effect the slowest task for any N up to 20. The criteria are strict on purpose: one slow browser fails the density.
 
 **Workload check, not a criterion.** If a trial's mean bytes per task are more than 15% from the fixture's expected bytes, or its mean requests more than 20% from the expected requests, it is flagged as not having run the standard workload.
 
@@ -89,7 +89,7 @@ The product requirements serve the fixture from S3. Here nginx serves it from a 
 - Per-step observations sent back to the caller, a screenshot and a DOM snapshot after each step.
 - Think time between steps.
 - A smaller microVM shape, if the verdict is CPU and the microVMs' own quota isn't the limit.
-- Extra levels between the last pass and the first miss.
+- Extra densities between the last pass and the first miss.
 - The fixture on S3.
 - Cloud Hypervisor in place of Firecracker.
 

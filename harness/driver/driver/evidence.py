@@ -5,13 +5,18 @@
 * the components' own flat JSONL: spans as ``{"service", "trace_id", "span_id", ...}``; log
   records in the host daemon's shape (hostd/telemetry.py ``log()``: ``{"ts", "severity",
   "service", "body", "trace_id", "span_id", "attributes"}``, with ``attributes.event`` naming a
-  structured event such as ``session.state``) or the older ``{"message" | "msg" | "event", ...}``
+  structured event such as ``microvm.state``) or the older ``{"message" | "msg" | "event", ...}``
   shape.
+
+Records written before the glossary (D56) use older event and attribute names; they are read
+through the alias map in driver/legacy.py.
 """
 from __future__ import annotations
 
 import json
 from pathlib import Path
+
+from . import legacy
 
 
 def _attr_map(attrs) -> dict:
@@ -88,8 +93,8 @@ def iter_logs(path: Path):
         elif "resourceMetrics" in obj:
             continue
         elif "body" in obj and ("severity" in obj or "trace_id" in obj):
-            # hostd's own logs.jsonl (hostd/telemetry.py log()): the event name, e.g. session.state,
-            # is the body and is repeated as attributes.event
+            # hostd's own logs.jsonl (hostd/telemetry.py log()): the event name, e.g. microvm.state,
+            # is the body and is echoed as attributes.event
             attrs = obj.get("attributes") or {}
             service = str(obj.get("service") or attrs.get("service.name") or "")
             body = obj.get("body")
@@ -152,21 +157,24 @@ def logs_for_trace(log_files: list[Path], trace_id: str) -> dict[str, int]:
     return out
 
 
-def is_session_state(lr: dict) -> bool:
-    """True for a ``session.state`` record (design section 4) in either log shape."""
+MICROVM_STATE = "microvm.state"
+
+
+def is_microvm_state(lr: dict) -> bool:
+    """True for a ``microvm.state`` record (design section 4) in either log shape, old names included."""
     attrs = lr.get("attributes") or {}
-    return lr.get("message") == "session.state" or attrs.get("event") == "session.state"
+    return MICROVM_STATE in (legacy.event_name(lr.get("message")), legacy.event_name(attrs.get("event")))
 
 
-def session_state_ids(log_files: list[Path], trace_id: str) -> set[str]:
-    """Session ids that have at least one ``session.state`` record carrying ``trace_id``."""
+def microvm_state_ids(log_files: list[Path], trace_id: str) -> set[str]:
+    """MicroVM ids that have at least one ``microvm.state`` record carrying ``trace_id``."""
     out: set[str] = set()
     for f in log_files:
         for lr in iter_logs(f):
-            if lr["trace_id"] != trace_id.lower() or not is_session_state(lr):
+            if lr["trace_id"] != trace_id.lower() or not is_microvm_state(lr):
                 continue
-            attrs = lr.get("attributes") or {}
-            sid = attrs.get("session_id") or attrs.get("fleetkit.session_id")
-            if sid:
-                out.add(str(sid))
+            attrs = legacy.log_attributes(lr.get("attributes"))
+            mid = attrs.get("microvm_id") or attrs.get("fleetkit.microvm_id")
+            if mid:
+                out.add(str(mid))
     return out

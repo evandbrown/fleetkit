@@ -53,7 +53,7 @@ class FakeBrowser:
         await self.server.wait_closed()
 
 
-def test_commands_sessions_events_and_errors():
+def test_commands_cdp_sessions_events_and_errors():
     async def go():
         fake = FakeBrowser()
         url = await fake.start()
@@ -71,7 +71,7 @@ def test_commands_sessions_events_and_errors():
                 await client.send("Fake.error")
             assert ei.value.code == -32000 and "nope" in str(ei.value)
 
-            # event queues: subscribe before acting, filter by session, predicate, drain
+            # event queues: subscribe before acting, filter by CDP session, predicate, drain
             q = client.subscribe(sid)
             other = client.subscribe("S2")
             seen = []

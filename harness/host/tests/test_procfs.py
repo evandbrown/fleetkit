@@ -1,12 +1,12 @@
-"""/proc and cgroup readers, and the Firecracker backend's per-session sample, on fake trees."""
+"""/proc and cgroup readers, and the Firecracker backend's per-microVM sample, on fake trees."""
 from __future__ import annotations
 
 import os
 
-from hostd.backends.base import SESSION_FIGURES
+from hostd.backends.base import MICROVM_FIGURES
 from hostd.backends.docker import DockerBackend
 from hostd.backends.firecracker import FirecrackerBackend
-from hostd.model import Session
+from hostd.model import MicroVM
 from hostd.procfs import (parse_flat_keyed, parse_pressure, stat_comm, stat_cpu_ticks, status_rss_bytes,
                           thread_cpu_split)
 from hostd.runner import Runner
@@ -51,7 +51,7 @@ def test_thread_cpu_split_by_comm(tmp_path):
     proc = str(tmp_path / "proc")
     pid = fake_firecracker(proc)
     split = thread_cpu_split([str(pid)], proc, tck=TCK)
-    # vCPU: (400+100) + (300+50) = 850 ticks; VMM: (30+20) + (1+1) = 52 ticks; 1 tick = 10 ms
+    # vCPU: (400+100) + (300+50) = 850 ticks; hypervisor: (30+20) + (1+1) = 52 ticks; 1 tick = 10 ms
     assert split == {"vcpu_usec": 850 * 10_000, "other_usec": 52 * 10_000}
 
 
@@ -89,8 +89,8 @@ def test_status_rss(tmp_path):
     assert status_rss_bytes(proc, "2") is None and status_rss_bytes(proc, "404") is None
 
 
-def _session(backend, slot=0):
-    return Session(id="s%03d-abcdef01" % slot, slot=slot, backend=backend.name, address=backend.address(slot),
+def _microvm(backend, slot=0):
+    return MicroVM(id="s%03d-abcdef01" % slot, slot=slot, backend=backend.name, address=backend.address(slot),
                    vcpus=2, mem_mib=2048, fault=None, ready_timeout_s=60, max_lifetime_s=600,
                    idle_timeout_s=120, fixture_base_url=backend.fixture_base_url)
 
@@ -118,15 +118,15 @@ def test_firecracker_sample_reads_the_scope_and_threads(tmp_path, monkeypatch):
     pid = fake_firecracker(proc)
     _scope(cgroot, 0, [pid])
     b = FirecrackerBackend(Runner(dry_run=False), str(tmp_path / "logs"), cgroup_root=cgroot, proc_root=proc)
-    out = b.sample(_session(b, 0))
-    assert set(out) == set(SESSION_FIGURES)
+    out = b.sample(_microvm(b, 0))
+    assert set(out) == set(MICROVM_FIGURES)
     assert out == {
         "rss_bytes": 2_100_000 * 1024,
         "cgroup_memory_current": 2254857830,
         "cgroup_memory_peak": 2300000000,
         "cpu_usage_usec": 9020000,
         "cpu_vcpu_usec": 850 * 10_000,
-        "cpu_vmm_usec": 52 * 10_000,
+        "cpu_hypervisor_usec": 52 * 10_000,
         "cpu_throttled_usec": 450000,
         "cpu_nr_throttled": 9,
         "cpu_pressure_some_total_us": 812345,
@@ -140,17 +140,17 @@ def test_firecracker_sample_without_pressure_files_or_threads(tmp_path):
     proc, cgroot = str(tmp_path / "proc"), str(tmp_path / "cgroup")
     _scope(cgroot, 1, ["5555"], cpu_pressure=False, memory_pressure=False)     # pid 5555 has no /proc entry
     b = FirecrackerBackend(Runner(dry_run=False), str(tmp_path / "logs"), cgroup_root=cgroot, proc_root=proc)
-    out = b.sample(_session(b, 1))
+    out = b.sample(_microvm(b, 1))
     assert out["cgroup_memory_current"] == 2254857830 and out["cpu_throttled_usec"] == 450000
-    for k in ("rss_bytes", "cpu_vcpu_usec", "cpu_vmm_usec", "cpu_pressure_some_total_us",
+    for k in ("rss_bytes", "cpu_vcpu_usec", "cpu_hypervisor_usec", "cpu_pressure_some_total_us",
               "cpu_pressure_full_total_us", "memory_pressure_some_total_us"):
         assert out[k] is None, k
 
 
 def test_every_backend_sample_has_every_key(tmp_path):
     fc = FirecrackerBackend(Runner(dry_run=True), str(tmp_path))
-    assert fc.sample(_session(fc)) == {k: None for k in SESSION_FIGURES}
+    assert fc.sample(_microvm(fc)) == {k: None for k in MICROVM_FIGURES}
     dk = DockerBackend(Runner(dry_run=True), str(tmp_path))
-    s = _session(dk)
-    s.handle["container"] = "fleetkit-session-x"
-    assert dk.sample(s) == {k: None for k in SESSION_FIGURES}
+    s = _microvm(dk)
+    s.handle["container"] = "fleetkit-microvm-x"
+    assert dk.sample(s) == {k: None for k in MICROVM_FIGURES}

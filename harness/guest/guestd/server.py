@@ -4,7 +4,7 @@
                     Chromium answers ``/json/version`` (and the browser socket is connected);
                     503 before, with the same fields.
 - ``POST /task``    runs the task; 409 while another task is running; 503 with
-                    ``failure_category: session_not_ready`` when Chromium is not ready.
+                    ``failure_category: microvm_not_ready`` when Chromium is not ready.
 - ``GET /metrics``  ``{mem_total, mem_available, cached, chromium_rss, tasks_run, tasks_failed}``
                     (bytes; null where the platform has no /proc).
 - ``GET /logs?since=<seq>``  the ring buffer of structured log lines after ``seq``.
@@ -217,7 +217,7 @@ class Daemon:
                     common,
                     ok=False,
                     task_id=task.task_id,
-                    failure_category="session_not_ready",
+                    failure_category="microvm_not_ready",
                     failed_step=None,
                     error="chromium is not ready",
                     steps=[],

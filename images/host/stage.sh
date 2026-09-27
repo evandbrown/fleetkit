@@ -41,21 +41,21 @@ run_unit() {
 
 summarize_trial() {
   local dir=$1
-  [ -f "$dir/sessions.csv" ] || { t "no sessions.csv in $dir"; return; }
+  [ -f "$dir/microvms.csv" ] || { t "no microvms.csv in $dir"; return; }
   $PY - "$dir" <<'EOF'
 import csv, json, glob, os, sys, statistics as st
 d = sys.argv[1]
-sess = list(csv.DictReader(open(os.path.join(d, "sessions.csv"))))
+microvms = list(csv.DictReader(open(os.path.join(d, "microvms.csv"))))
 tasks = list(csv.DictReader(open(os.path.join(d, "tasks.csv")))) if os.path.exists(os.path.join(d, "tasks.csv")) else []
-st_ms = [float(s["startup_ms"]) for s in sess if s.get("startup_ms")]
+st_ms = [float(m["startup_ms"]) for m in microvms if m.get("startup_ms")]
 ok = [t for t in tasks if t.get("ok") in ("True", "true", "1")]
-print(f"sessions {len(sess)} outcomes {sorted(set(s['outcome'] for s in sess))} startup_ms p50 {st.median(st_ms):.0f} max {max(st_ms):.0f}" if st_ms else f"sessions {len(sess)} no startup data")
+print(f"microVMs {len(microvms)} outcomes {sorted(set(m['outcome'] for m in microvms))} startup_ms p50 {st.median(st_ms):.0f} max {max(st_ms):.0f}" if st_ms else f"microVMs {len(microvms)} no startup data")
 if tasks:
     tm = [float(t["task_ms"]) for t in ok]
     print(f"tasks {len(tasks)} ok {len(ok)} categories {sorted(set(t['failure_category'] for t in tasks))}" + (f" task_ms p50 {st.median(tm):.0f} max {max(tm):.0f}" if tm else ""))
 for tj in sorted(glob.glob(os.path.join(d, "*trial*.json")) + glob.glob(os.path.join(d, "trials", "*.json"))):
     try:
-        j = json.load(open(tj)); print(os.path.basename(tj), "status", j.get("status"), "level_passed", j.get("level_passed"))
+        j = json.load(open(tj)); print(os.path.basename(tj), "status", j.get("status"), "passed", j.get("passed"))
     except Exception as e: print(tj, "unreadable", e)
 if st_ms: open(os.path.join(os.path.dirname(d.rstrip('/')), "startup_ms_p50"), "w").write(f"{st.median(st_ms):.0f}\n")
 EOF
@@ -63,28 +63,28 @@ EOF
 
 case "$STAGE" in
   trial-n1)
-    t "trial n=1 (ready timeout 90 s)"
-    run_unit trial-n1 1000 "$PY" -m driver trial "${COMMON[@]}" --n 1 --repeats 1 --ready-timeout-s 90 --out "$OUT/trial-n1"
+    t "trial at density 1 (ready timeout 90 s)"
+    run_unit trial-n1 1000 "$PY" -m driver trial "${COMMON[@]}" --densities 1 --trials-per-density 1 --ready-timeout-s 90 --out "$OUT/trial-n1"
     rc=$?; t "driver exit $rc"; summarize_trial "$OUT/trial-n1"; exit $rc ;;
   trial-n24)
     p50=$(cat "$OUT/startup_ms_p50" 2>/dev/null || echo 20000)
     rt=$(( p50 * 3 / 1000 )); [ "$rt" -lt 30 ] && rt=30; [ "$rt" -gt 180 ] && rt=180
-    t "trial n=2,4 (ready timeout ${rt}s = 3x observed startup)"
-    run_unit trial-n24 1600 "$PY" -m driver trial "${COMMON[@]}" --n 2,4 --repeats 1 --ready-timeout-s "$rt" --out "$OUT/trial-n24"
+    t "trials at densities 2 and 4 (ready timeout ${rt}s = 3x observed startup)"
+    run_unit trial-n24 1600 "$PY" -m driver trial "${COMMON[@]}" --densities 2,4 --trials-per-density 1 --ready-timeout-s "$rt" --out "$OUT/trial-n24"
     rc=$?; t "driver exit $rc"; summarize_trial "$OUT/trial-n24"; exit $rc ;;
   smoke)
     p50=$(cat "$OUT/startup_ms_p50" 2>/dev/null || echo 20000)
     rt=$(( p50 * 3 / 1000 )); [ "$rt" -lt 30 ] && rt=30; [ "$rt" -gt 180 ] && rt=180
-    t "smoke (one green run wanted, at most 2 attempts)"
-    run_unit smoke 2300 "$PY" -m driver smoke "${COMMON[@]}" --levels 2,4 --ready-timeout-s "$rt" --hostd-dir "$FK/runs/hostd" --until-green 1 --max-runs 2 --out "$OUT/smoke"
+    t "smoke (one green round wanted, at most 2 rounds)"
+    run_unit smoke 2300 "$PY" -m driver smoke "${COMMON[@]}" --densities 2,4 --ready-timeout-s "$rt" --hostd-dir "$FK/runs/hostd" --until-green 1 --max-rounds 2 --out "$OUT/smoke"
     rc=$?; t "driver exit $rc"; sed -n '1,40p' "$OUT/smoke/smoke-report.md" 2>/dev/null; exit $rc ;;
   capacity)
-    # One driver invocation walks the whole ladder (design: docs/capacity-experiment.md).
+    # One driver invocation is one run: it tests the spec's densities in order (design: docs/capacity-experiment.md).
     CFG=experiments/capacity/${CAPACITY_CONFIG:-baseline}.env
     [ -f "$CFG" ] || { t "CAPACITY CONFIG MISSING: $CFG"; exit 2; }
     # shellcheck disable=SC1090
     . "$CFG"
-    for v in LADDER INSTANCE_TYPE_EXPECTED PRICE_PER_HOUR; do
+    for v in DENSITIES INSTANCE_TYPE_EXPECTED PRICE_PER_HOUR; do
       [ -n "${!v:-}" ] || { t "CAPACITY CONFIG INCOMPLETE: $CFG does not set $v"; exit 2; }
     done
     ITYPE=$(imds instance-type)
@@ -97,9 +97,9 @@ case "$STAGE" in
     if [ -n "$hz_period" ] && [ -n "${METRICS_HZ:-}" ] && ! awk -v p="$hz_period" -v hz="$METRICS_HZ" 'BEGIN { d = p * hz - 1; exit !(d < 0.01 && d > -0.01) }'; then
       t "WARNING: host daemon samples every $hz_period s but METRICS_HZ=$METRICS_HZ; rows are deduplicated by ts"
     fi
-    args=(--n "$LADDER" --repeats "${REPEATS:-1}" --stop-at-first-miss)
+    args=(--densities "$DENSITIES" --trials-per-density "${TRIALS_PER_DENSITY:-1}" --stop-at-first-miss)
     opt() { [ -n "${2:-}" ] && args+=("$1" "$2"); return 0; }
-    opt --confirm-repeats "${CONFIRM_REPEATS:-}"
+    opt --boundary-trials "${BOUNDARY_TRIALS:-}"
     opt --warmup "${WARMUP:-}"
     opt --settle-s "${SETTLE_S:-}"
     opt --metrics-hz "${METRICS_HZ:-}"

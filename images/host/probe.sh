@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Stage 0 probe for an experiment host. Run as root over SSM Run Command once
+# Stage 0 probe for a worker host. Run as root over SSM Run Command once
 # cloud-init has finished, for example:
 #
 #   aws ssm send-command --profile fleetkit --region us-east-1 \

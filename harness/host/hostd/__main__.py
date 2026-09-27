@@ -12,21 +12,21 @@ from . import __version__
 from .backends import BACKENDS
 from .backends.docker import DockerBackend
 from .backends.firecracker import DEFAULT_FIRECRACKER, DEFAULT_KERNEL, DEFAULT_ROOTFS, FirecrackerBackend
-from .manager import SessionManager
+from .manager import Manager
 from .metrics import HostSampler
-from .model import Defaults, Session, validate_fault
+from .model import Defaults, MicroVM, validate_fault
 from .runner import Runner
 from .server import HostdApp, Server
 from .telemetry import Telemetry
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="hostd", description="fleetkit host daemon: session lifecycle for one host")
+    p = argparse.ArgumentParser(prog="hostd", description="fleetkit host daemon: microVM lifecycle for one host")
     p.add_argument("--backend", choices=sorted(BACKENDS), required=True)
     p.add_argument("--port", type=int, default=8090)
     p.add_argument("--bind", default="127.0.0.1", help="listen address (default 127.0.0.1)")
     p.add_argument("--log-dir", default=os.environ.get("FLEETKIT_HOSTD_LOG_DIR", "results/dev/hostd"),
-                   help="hostd.log, spans.jsonl, logs.jsonl, host_metrics.jsonl and sessions/<id>/console.log")
+                   help="hostd.log, spans.jsonl, logs.jsonl, host_metrics.jsonl and microvms/<id>/console.log")
     p.add_argument("--otlp-endpoint", default=os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:4318"),
                    help="OTLP/HTTP base URL; export is best-effort with a 2 s timeout")
     p.add_argument("--no-otlp", action="store_true", help="write JSONL only, never export")
@@ -34,7 +34,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="fleetkit.host_id correlation key on every record (default: $FLEETKIT_HOST_ID, else 'local'; "
                         "never the hostname, which can carry the operator's name into a shared bundle)")
     p.add_argument("--dry-run", action="store_true",
-                   help="render every command and config instead of executing; sessions become ready at once")
+                   help="render every command and config instead of executing; microVMs become ready at once")
     p.add_argument("--no-metrics", action="store_true", help="disable the host metrics sampler")
     p.add_argument("--metrics-period", type=float, default=Defaults.METRICS_PERIOD_S,
                    help="seconds between host metrics samples (default %(default)s; 0.2 gives 5 Hz)")
@@ -46,8 +46,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--kernel", default=os.environ.get("FLEETKIT_KERNEL", DEFAULT_KERNEL))
     p.add_argument("--rootfs", default=os.environ.get("FLEETKIT_ROOTFS", DEFAULT_ROOTFS))
     p.add_argument("--run-root", default="/run/fleetkit")
-    # render one session's plan and exit
-    p.add_argument("--render", action="store_true", help="print the commands and config for one session, then exit")
+    # render one microVM's plan and exit
+    p.add_argument("--render", action="store_true", help="print the commands and config for one microVM, then exit")
     p.add_argument("--slot", type=int, default=0)
     p.add_argument("--vcpus", type=int, default=2)
     p.add_argument("--mem-mib", type=int, default=2048)
@@ -66,10 +66,10 @@ def render(args: argparse.Namespace) -> int:
     runner = Runner(dry_run=True)
     backend = make_backend(args, runner)
     fault = validate_fault(args.fault)
-    s = Session(id=Session.new_id(args.slot), slot=args.slot, backend=backend.name, address=backend.address(args.slot),
+    s = MicroVM(id=MicroVM.new_id(args.slot), slot=args.slot, backend=backend.name, address=backend.address(args.slot),
                 vcpus=args.vcpus, mem_mib=args.mem_mib, fault=fault, ready_timeout_s=60, max_lifetime_s=600,
                 idle_timeout_s=120, fixture_base_url=backend.fixture_base_url)
-    sys.stdout.write("# %s backend, slot %d, session %s, address %s\n" % (backend.name, s.slot, s.id, s.address))
+    sys.stdout.write("# %s backend, slot %d, microVM %s, address %s\n" % (backend.name, s.slot, s.id, s.address))
     sys.stdout.write("# --- create ---\n")
     backend.create(s)
     created = runner.render_text()
@@ -116,7 +116,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             tel.close()
             return 2
 
-    manager = SessionManager(backend, tel, dry_run=args.dry_run, host_id=args.host_id)
+    manager = Manager(backend, tel, dry_run=args.dry_run, host_id=args.host_id)
     sampler = None if args.no_metrics else HostSampler(manager, tel, period=args.metrics_period, host_id=args.host_id)
     app = HostdApp(manager, tel, sampler, args.host_id, dry_run=args.dry_run)
     try:
@@ -139,7 +139,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     stop = threading.Event()
 
     def on_signal(signum: int, _frame) -> None:
-        tel.log("signal %d: destroying live sessions and exiting" % signum, severity="WARN")
+        tel.log("signal %d: destroying live microVMs and exiting" % signum, severity="WARN")
         stop.set()
 
     def warm_host_info() -> None:

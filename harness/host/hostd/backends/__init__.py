@@ -1,4 +1,4 @@
-"""Session backends: `docker` (development) and `firecracker` (measurement)."""
+"""MicroVM backends: `docker` (development) and `firecracker` (measurement)."""
 from __future__ import annotations
 
 from .base import Backend, BackendError

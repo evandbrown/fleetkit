@@ -25,31 +25,33 @@ def _otlp_line(run_id: str, kind: str = "spans") -> str:
 
 def test_bundle_partial_then_strict(hostd, fixture_site, tmp_path):
     out = tmp_path / "results" / "run-b"
-    assert run_cli("trial", *common(hostd, fixture_site, out), "--n", "2") == 0
+    assert run_cli("trial", *common(hostd, fixture_site, out), "--densities", "2") == 0
     # partial: no hostd.log yet -> non-strict succeeds and lists it, strict fails
     assert run_cli("bundle", "--run", str(out), "--quiet") == 0
     ev = (out / "evidence.md").read_text()
-    assert "MANDATORY: hostd.log" in ev and "## What ran" in ev and "t001-docker-n2-r1" in ev
+    assert "MANDATORY: hostd.log" in ev and "## What ran" in ev and "| d2-t1 | ladder | docker | 2 | 1 |" in ev
+    assert "highest density whose trials passed" in ev
     assert run_cli("bundle", "--run", str(out), "--strict", "--quiet") == 1
     # with the host daemon's files, strict passes
     rc = run_cli("bundle", "--run", str(out), "--strict", "--hostd-dir", str(hostd.telemetry_dir),
                  "--instance-type", "m8i.xlarge", "--vcpu-quota", "32", "--host-provisioning-s", "241.5", "--quiet")
     assert rc == 0
     assert (out / "hostd.log").exists() and (out / "hostd-spans.jsonl").exists()
-    # section 11: every VM console log and per-session guest log tail, copied from hostd
-    for s in read_csv(out / "sessions.csv"):
-        assert (out / "console-logs" / s["session_id"] / "console.log").exists()
-        assert (out / "guest-logs" / f"{s['session_id']}.jsonl").exists()
+    # section 11: every microVM's console log and guest log tail, copied from hostd
+    for s in read_csv(out / "microvms.csv"):
+        assert (out / "console-logs" / s["microvm_id"] / "console.log").exists()
+        assert (out / "guest-logs" / f"{s['microvm_id']}.jsonl").exists()
     m = read_json(out / "manifest.json")
     for k in ("git_commit", "guest_image_base_digest", "rootfs_sha256", "kernel_sha256", "firecracker_version",
               "ami_id", "instance_type", "vcpu_quota", "run_start_ts", "run_end_ts", "timeout_parameters"):
         assert k in m
     assert m["instance_type"] == "m8i.xlarge" and m["vcpu_quota"] == 32 and m["host_provisioning_s"] == 241.5
     assert m["timeout_parameters"]["task_timeout_ms"] == 1000 and m["run_start_ts"] < m["run_end_ts"]
-    assert m["trials"][0]["trial_id"] == "t001-docker-n2-r1"
+    assert m["trials"][0] == {"trial_id": "d2-t1", "sequence": 1, "backend": "docker", "density": 2, "trial_number": 1,
+                              "fault": None, "status": "ok", "trial_kind": "ladder", "passed": True}
     ev = (out / "evidence.md").read_text()
     assert "no mandatory item is missing" in ev and "MANDATORY: evidence.md" not in ev
-    # operator values survive a re-bundle that does not repeat them
+    # operator values survive a re-bundle that does not pass them again
     assert run_cli("bundle", "--run", str(out), "--strict", "--quiet") == 0
     assert read_json(out / "manifest.json")["instance_type"] == "m8i.xlarge"
     # the report works from the bundle alone
@@ -61,7 +63,7 @@ def test_bundle_partial_then_strict(hostd, fixture_site, tmp_path):
 
 def test_missing_screenshot_is_mandatory(hostd, fixture_site, tmp_path):
     out = tmp_path / "run-shot"
-    assert run_cli("trial", *common(hostd, fixture_site, out), "--n", "1") == 0
+    assert run_cli("trial", *common(hostd, fixture_site, out), "--densities", "1") == 0
     shot = next((out / "screenshots").iterdir())
     shot.unlink()
     res = run_bundle(str(out), hostd_dir=str(hostd.telemetry_dir))
@@ -69,15 +71,15 @@ def test_missing_screenshot_is_mandatory(hostd, fixture_site, tmp_path):
     assert res["inventory"]["screenshots_missing"] == [f"screenshots/{shot.name}"]
 
 
-def test_console_and_guest_logs_are_mandatory_per_session(hostd, fixture_site, tmp_path):
+def test_console_and_guest_logs_are_mandatory_per_microvm(hostd, fixture_site, tmp_path):
     out = tmp_path / "results" / "run-logs"  # no results/hostd sibling: bundle copies only with --hostd-dir
-    assert run_cli("trial", *common(hostd, fixture_site, out), "--n", "2") == 0
-    assert run_cli("trial", *common(hostd, fixture_site, out), "--n", "1", "--fault", "hang_task") == 1
-    sessions = read_csv(out / "sessions.csv")
+    assert run_cli("trial", *common(hostd, fixture_site, out), "--densities", "2") == 0
+    assert run_cli("trial", *common(hostd, fixture_site, out), "--densities", "1", "--fault", "hang_task") == 1
+    microvms = read_csv(out / "microvms.csv")
     tasks = read_csv(out / "tasks.csv")
-    unreachable = next(t for t in tasks if t["failure_category"] == "guest_unreachable")["session_id"]
-    ok_sid = next(t for t in tasks if t["ok"] == "true")["session_id"]
-    # the hang_task session answered nothing, so it owes no guest log tail; it still owes a console log
+    unreachable = next(t for t in tasks if t["failure_category"] == "guest_unreachable")["microvm_id"]
+    ok_mid = next(t for t in tasks if t["ok"] == "true")["microvm_id"]
+    # the hang_task microVM answered nothing, so it owes no guest log tail; it still owes a console log
     assert not (out / "guest-logs" / f"{unreachable}.jsonl").exists()
     res = run_bundle(str(out), hostd_dir=str(hostd.telemetry_dir), strict=True)
     inv = res["inventory"]
@@ -85,18 +87,18 @@ def test_console_and_guest_logs_are_mandatory_per_session(hostd, fixture_site, t
     assert inv["console_logs_missing"] == [] and inv["guest_logs_missing"] == []
     # remove one of each: strict fails and the ids are named
     (out / "console-logs" / unreachable / "console.log").unlink()
-    (out / "guest-logs" / f"{ok_sid}.jsonl").unlink()
+    (out / "guest-logs" / f"{ok_mid}.jsonl").unlink()
     res = run_bundle(str(out), strict=True)  # no --hostd-dir: nothing is copied back
     inv = res["inventory"]
-    assert not res["ok"] and inv["console_logs_missing"] == [unreachable] and inv["guest_logs_missing"] == [ok_sid]
+    assert not res["ok"] and inv["console_logs_missing"] == [unreachable] and inv["guest_logs_missing"] == [ok_mid]
     missing = "\n".join(inv["mandatory_missing"])
-    assert "console-logs/<session_id>/console.log" in missing and unreachable in missing
-    assert "guest-logs/<session_id>.jsonl" in missing and ok_sid in missing
+    assert "console-logs/<microvm_id>/console.log" in missing and unreachable in missing
+    assert "guest-logs/<microvm_id>.jsonl" in missing and ok_mid in missing
     ev = (out / "evidence.md").read_text()
-    assert f"sessions without a console log: {unreachable}" in ev and f"sessions without a guest log tail: {ok_sid}" in ev
+    assert f"microVMs without a console log: {unreachable}" in ev and f"microVMs without a guest log tail: {ok_mid}" in ev
     assert run_cli("bundle", "--run", str(out), "--strict", "--quiet") == 1
-    for s in sessions:
-        assert (out / "console-logs" / s["session_id"]).exists()
+    for s in microvms:
+        assert (out / "console-logs" / s["microvm_id"]).exists()
 
 
 def _rootfs_manifest_from_build_script(tmp_path: Path) -> Path:

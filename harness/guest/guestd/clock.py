@@ -47,7 +47,7 @@ class Deadline:
 
     @staticmethod
     def earliest(deadlines: Iterable["Deadline"]) -> "Deadline":
-        """The deadline that fires first; on a tie the task-level one wins."""
+        """The deadline that fires first; on a tie the task's own deadline wins."""
         best = None
         for d in deadlines:
             if best is None or d.at < best.at or (d.at == best.at and d.label == "task"):

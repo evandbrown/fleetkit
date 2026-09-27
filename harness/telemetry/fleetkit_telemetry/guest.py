@@ -84,7 +84,7 @@ def emit_guest_task(
     tracer: trace.Tracer,
     response: Mapping[str, Any],
     *,
-    session_id: str,
+    microvm_id: str,
     task_id: str,
     host_send_ns: int,
     rtt_ns: int,
@@ -100,7 +100,7 @@ def emit_guest_task(
     short round trip to the guest (see ``clock_offset_ns``). Step offsets are taken relative
     to request receipt; pass ``dispatch_base_ns`` if the guest reports absolute monotonic
     readings and the receipt reading is known. Correlation keys come from the current
-    baggage; ``session_id`` and ``task_id`` are always set explicitly.
+    baggage; ``microvm_id`` and ``task_id`` are always set explicitly.
     """
     guest_clock = int(guest_clock_ns if guest_clock_ns is not None else response["guest_clock_ns"])
     offset = clock_offset_ns(host_send_ns, rtt_ns, guest_clock)
@@ -124,7 +124,7 @@ def emit_guest_task(
     attrs: dict[str, Any] = dict(get_correlation(parent_ctx))
     attrs.update(
         {
-            A.ATTR_SESSION_ID: session_id,
+            A.ATTR_MICROVM_ID: microvm_id,
             A.ATTR_TASK_ID: task_id,
             A.ATTR_OK: ok,
             A.ATTR_FAILURE_CATEGORY: failure_category,
@@ -157,7 +157,7 @@ def emit_guest_task(
         start, end = bounds
         name = str(step.get("name") or f"step{index}")
         step_attrs: dict[str, Any] = {
-            A.ATTR_SESSION_ID: session_id,
+            A.ATTR_MICROVM_ID: microvm_id,
             A.ATTR_TASK_ID: task_id,
             A.ATTR_STEP: name,
             A.ATTR_STEP_INDEX: index,
@@ -202,7 +202,7 @@ def emit_guest_logs(
     logger: OtelLogger,
     log_tail: Sequence[Any] | None,
     *,
-    session_id: str,
+    microvm_id: str,
     task_id: str | None,
     clock_offset_ns: int,
     trace_id: str | None = None,
@@ -211,9 +211,11 @@ def emit_guest_logs(
 ) -> int:
     """Forward the guest's ``log_tail`` as OTLP log records under the guest-daemon resource.
 
-    Accepts structured lines (``{ts|time|timestamp, level|severity, msg|message|body, ...}``)
-    or plain strings. Guest timestamps are shifted by ``clock_offset_ns`` into host time;
-    lines without a timestamp get ``now_ns``. Returns the number of records emitted.
+    Accepts structured lines (``{ts|time|timestamp, severity|level, msg|message|body, ...}``)
+    or plain strings. guestd writes ``severity``; ``level`` is the logging-library name for
+    the same thing and is accepted too. Guest timestamps are shifted by ``clock_offset_ns``
+    into host time; lines without a timestamp get ``now_ns``. Returns the number of records
+    emitted.
     """
     if not log_tail:
         return 0
@@ -224,17 +226,17 @@ def emit_guest_logs(
     sid = int(span_id, 16) if span_id else None
     count = 0
     for line in log_tail:
-        attrs: dict[str, Any] = {A.ATTR_SESSION_ID: session_id}
+        attrs: dict[str, Any] = {A.ATTR_MICROVM_ID: microvm_id}
         if task_id:
             attrs[A.ATTR_TASK_ID] = task_id
         ts: int | None = None
-        level = "INFO"
+        severity = "INFO"
         if isinstance(line, Mapping):
             body = line.get("msg", line.get("message", line.get("body")))
-            level = str(line.get("level", line.get("severity", "INFO"))).upper()
+            severity = str(line.get("severity", line.get("level", "INFO"))).upper()
             ts = _guest_ts_ns(line.get("ts", line.get("time", line.get("timestamp"))))
             for key, value in line.items():
-                if key in ("msg", "message", "body", "level", "severity", "ts", "time", "timestamp"):
+                if key in ("msg", "message", "body", "severity", "level", "ts", "time", "timestamp"):
                     continue
                 if isinstance(value, (str, int, float, bool)):
                     attrs[f"guest.{key}"] = value
@@ -248,8 +250,8 @@ def emit_guest_logs(
             trace_id=tid,
             span_id=sid,
             trace_flags=trace.TraceFlags(0x01) if tid else None,
-            severity_text=level,
-            severity_number=_SEVERITY.get(level, SeverityNumber.INFO),
+            severity_text=severity,
+            severity_number=_SEVERITY.get(severity, SeverityNumber.INFO),
             body=body,
             attributes=attrs,
         )

@@ -20,9 +20,9 @@ make clean-lgtm         # stop and delete results/dev/lgtm/
 
 `mem_limit: 2g` and `stop_grace_period: 60s` on the LGTM container; its health is the
 `/tmp/ready` file the image writes once every component answers. Grafana is anonymous
-admin (the image default); the ports are bound to loopback. Session containers on the
-`fleetkit` network reach the fixture as `http://fixture`; the host daemon and driver on the
-host use `127.0.0.1`.
+admin (the image default); the ports are bound to loopback. MicroVM containers (the Docker
+backend's stand-ins for microVMs) on the `fleetkit` network reach the fixture as
+`http://fixture`; the host daemon and driver on the host use `127.0.0.1`.
 
 ## The collector override
 
@@ -115,7 +115,7 @@ fixture, so neither competes with the microVMs for the worker's CPU. There both 
 started with plain `docker run` by cloud-init: `fleetkit-fixture` on `0.0.0.0:8081` pinned to
 CPU 0, `fleetkit-lgtm` pinned to the remaining CPUs with OTLP on `0.0.0.0:4317/4318` and
 Grafana on `127.0.0.1:3000` only, the same collector override, and state under
-`/var/lib/fleetkit/lgtm/{data,otlp}`. The security group admits only the experiment hosts
+`/var/lib/fleetkit/lgtm/{data,otlp}`. The security group admits only the worker hosts
 (their guests arrive NATed from the host). The worker's host daemon and driver export to
 `http://<support-ip>:4318`; `images/support/sync.sh` stops `fleetkit-lgtm` with a 60 s grace at
 the end of the run and uploads `otlp/` and the support host's own 1 Hz metrics
@@ -133,6 +133,6 @@ when `docker compose version` fails.
 Explore, data source Tempo: search by service `driver`, `hostd` or `guest-daemon`, or paste
 the `trace_id` from `tasks.csv`. The trace of a trial shows the driver's `trial` span, the
 host daemon's server spans, and the guest's `task` span with its five step children,
-re-timed with the clock offset. Loki: `{service_name="hostd"} |= "session.state"` lists the
-state transitions; every record carries `fleetkit.run_id`, `trial_id`, `session_id`,
+re-timed with the clock offset. Loki: `{service_name="hostd"} |= "microvm.state"` lists the
+microVM state transitions; every record carries `fleetkit.run_id`, `trial_id`, `microvm_id`,
 `task_id`, `backend` and `host_id` as attributes.

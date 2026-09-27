@@ -1,7 +1,7 @@
-"""The backend interface the session manager drives.
+"""The backend interface the microVM manager drives.
 
-A backend owns the per-session resources of one isolation technology. It never
-touches session state: the manager transitions states and records timestamps;
+A backend owns the per-microVM resources of one isolation technology. It never
+touches microVM state: the manager transitions states and records timestamps;
 the backend creates, checks, samples and destroys the thing behind a slot.
 """
 from __future__ import annotations
@@ -9,19 +9,19 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, List, Optional
 
-from ..model import Session
+from ..model import MicroVM
 from ..runner import Runner
 
-# Per-session figures in GET /host/metrics, in export order. The first four are section 4's;
+# Per-microVM figures in GET /host/metrics, in export order. The first four are section 4's;
 # the rest are the Firecracker CPU split, cgroup throttling and cgroup pressure (null elsewhere).
-SESSION_FIGURES = ("rss_bytes", "cgroup_memory_current", "cgroup_memory_peak", "cpu_usage_usec",
-                   "cpu_vcpu_usec", "cpu_vmm_usec", "cpu_throttled_usec", "cpu_nr_throttled",
+MICROVM_FIGURES = ("rss_bytes", "cgroup_memory_current", "cgroup_memory_peak", "cpu_usage_usec",
+                   "cpu_vcpu_usec", "cpu_hypervisor_usec", "cpu_throttled_usec", "cpu_nr_throttled",
                    "cpu_pressure_some_total_us", "cpu_pressure_full_total_us", "memory_pressure_some_total_us")
 
 
 def empty_sample() -> Dict[str, Optional[int]]:
-    """Every per-session figure, unknown."""
-    return {k: None for k in SESSION_FIGURES}
+    """Every per-microVM figure, unknown."""
+    return {k: None for k in MICROVM_FIGURES}
 
 
 def public_path(path: str) -> str:
@@ -54,41 +54,41 @@ class Backend:
         """False when something outside this daemon holds the slot's resources (e.g. its host port)."""
         return True
 
-    def render(self, session: Session) -> str:
+    def render(self, microvm: MicroVM) -> str:
         """Everything create() would do, as a shell-like transcript, without doing it."""
         saved = self.runner
         self.runner = Runner(dry_run=True)
         try:
-            self.create(session)
-            self.destroy(session)
+            self.create(microvm)
+            self.destroy(microvm)
             return self.runner.render_text()
         finally:
             self.runner = saved
 
     # --- lifecycle -------------------------------------------------------
-    def create(self, session: Session) -> None:
+    def create(self, microvm: MicroVM) -> None:
         """Allocate and start. Raises BackendError on failure (-> startup_error).
 
-        Must fill session.handle with whatever destroy() needs and set
-        session.console_log to the path the console/log stream is written to.
+        Must fill microvm.handle with whatever destroy() needs and set
+        microvm.console_log to the path the console/log stream is written to.
         """
         raise NotImplementedError
 
-    def alive(self, session: Session) -> bool:
-        """False once the container/VMM process is gone (-> startup_error during boot)."""
+    def alive(self, microvm: MicroVM) -> bool:
+        """False once the container or hypervisor process is gone (-> startup_error during boot)."""
         raise NotImplementedError
 
-    def destroy(self, session: Session) -> None:
-        """Remove every per-session leftover. Idempotent; tolerates a partial create()."""
+    def destroy(self, microvm: MicroVM) -> None:
+        """Remove every per-microVM leftover. Idempotent; tolerates a partial create()."""
         raise NotImplementedError
 
-    def exit_info(self, session: Session) -> Optional[str]:
+    def exit_info(self, microvm: MicroVM) -> Optional[str]:
         """Short description of why the process is gone, for the error field."""
         return None
 
     # --- sampling --------------------------------------------------------
-    def sample(self, session: Session) -> Dict[str, Optional[int]]:
-        """Every key of SESSION_FIGURES; None where unknown."""
+    def sample(self, microvm: MicroVM) -> Dict[str, Optional[int]]:
+        """Every key of MICROVM_FIGURES; None where unknown."""
         return empty_sample()
 
     def info(self) -> Optional[Dict[str, Any]]:

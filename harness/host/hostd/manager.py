@@ -1,4 +1,4 @@
-"""Session lifecycle: create, readiness, task proxy, lifetime/idle reaper, destroy.
+"""MicroVM lifecycle: create, readiness, task proxy, lifetime/idle reaper, destroy.
 
 This is the state machine of section 4, independent of any backend and of the
 HTTP layer so it can be unit-tested with a fake backend, a fake guest and a
@@ -14,7 +14,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .backends.base import Backend, BackendError
 from .guest import GuestClient, GuestError, boot_phases, guest_info
-from .model import Defaults, FailureCategory, Outcome, Session, State, TraceContext, validate_fault
+from .model import Defaults, FailureCategory, MicroVM, Outcome, State, TraceContext, validate_fault
 from .telemetry import Telemetry
 
 
@@ -41,8 +41,8 @@ class RequestContext:
         return self.baggage.get("fleetkit.trial_id")
 
 
-def _num(spec: Dict[str, Any], key: str, default: Any, minimum: float = 0) -> float:
-    v = spec.get(key, default)
+def _num(body: Dict[str, Any], key: str, default: Any, minimum: float = 0) -> float:
+    v = body.get(key, default)
     if v is None:
         v = default
     try:
@@ -54,7 +54,9 @@ def _num(spec: Dict[str, Any], key: str, default: Any, minimum: float = 0) -> fl
     return v
 
 
-class SessionManager:
+class Manager:
+    """Every microVM on this host: slot allocation, lifecycle, the task proxy and the reaper."""
+
     def __init__(self, backend: Backend, telemetry: Telemetry, guest: Optional[GuestClient] = None,
                  clock: Callable[[], float] = time.time, sleep: Callable[[float], None] = time.sleep,
                  poll_interval: float = Defaults.READY_POLL_S, dry_run: bool = False, host_id: str = "",
@@ -67,7 +69,7 @@ class SessionManager:
         self.poll_interval = poll_interval
         self.dry_run = dry_run
         self.host_id = host_id
-        self.sessions: Dict[str, Session] = {}
+        self.microvms: Dict[str, MicroVM] = {}
         self._used_slots: set = set()
         self._lock = threading.Lock()
         self._spawn = spawn or self._thread_spawn
@@ -79,55 +81,55 @@ class SessionManager:
     def _thread_spawn(fn: Callable[[], None], name: str) -> None:
         threading.Thread(target=fn, name=name, daemon=True).start()
 
-    def _attrs(self, s: Session, **more: Any) -> Dict[str, Any]:
-        a = {"fleetkit.run_id": s.run_id, "fleetkit.trial_id": s.trial_id, "fleetkit.session_id": s.id,
+    def _attrs(self, s: MicroVM, **more: Any) -> Dict[str, Any]:
+        a = {"fleetkit.run_id": s.run_id, "fleetkit.trial_id": s.trial_id, "fleetkit.microvm_id": s.id,
              "fleetkit.backend": s.backend, "fleetkit.host_id": self.host_id, "fleetkit.slot": s.slot}
         a.update(more)
         return a
 
-    def _transition(self, s: Session, to: str, outcome: Optional[str] = None) -> None:
-        """Move the session and emit the `session.state` record. Caller holds s.lock."""
+    def _transition(self, s: MicroVM, to: str, outcome: Optional[str] = None) -> None:
+        """Move the microVM and emit the `microvm.state` record. Caller holds s.lock."""
         rec = s.transition(to, self.clock(), outcome)
-        self.tel.event("session.state", ctx=s.trace, **{**self._attrs(s), **rec})
+        self.tel.event("microvm.state", ctx=s.trace, **{**self._attrs(s), **rec})
 
-    def get(self, session_id: str) -> Session:
-        s = self.sessions.get(session_id)
+    def get(self, microvm_id: str) -> MicroVM:
+        s = self.microvms.get(microvm_id)
         if s is None:
-            raise ApiError(404, "no session %s" % session_id)
+            raise ApiError(404, "no microVM %s" % microvm_id)
         return s
 
     def list_records(self) -> List[Dict[str, Any]]:
-        return [s.record() for s in list(self.sessions.values())]
+        return [s.record() for s in list(self.microvms.values())]
 
-    def live_sessions(self) -> List[Session]:
-        return [s for s in list(self.sessions.values()) if s.state in (State.BOOTING, State.READY, State.BUSY)]
+    def live_microvms(self) -> List[MicroVM]:
+        return [s for s in list(self.microvms.values()) if s.state in (State.BOOTING, State.READY, State.BUSY)]
 
     def counts(self) -> Dict[str, int]:
         out: Dict[str, int] = {}
-        for s in list(self.sessions.values()):
+        for s in list(self.microvms.values()):
             out[s.state] = out.get(s.state, 0) + 1
         return out
 
     # ----- create ------------------------------------------------------------
-    def create_sessions(self, spec: Dict[str, Any], ctx: RequestContext) -> List[Dict[str, Any]]:
-        backend = spec.get("backend") or self.backend.name
+    def create_microvms(self, request: Dict[str, Any], ctx: RequestContext) -> List[Dict[str, Any]]:
+        backend = request.get("backend") or self.backend.name
         if backend != self.backend.name:
             raise ApiError(400, "this daemon runs the %s backend, not %s" % (self.backend.name, backend))
-        count = int(_num(spec, "count", 1, 1))
-        vcpus = int(_num(spec, "vcpus", Defaults.VCPUS, 1))
-        mem_mib = int(_num(spec, "mem_mib", Defaults.MEM_MIB, 64))
-        ready_timeout_s = _num(spec, "ready_timeout_s", Defaults.READY_TIMEOUT_S, 1)
-        max_lifetime_s = _num(spec, "max_lifetime_s", Defaults.MAX_LIFETIME_S, 1)
-        idle_timeout_s = _num(spec, "idle_timeout_s", Defaults.IDLE_TIMEOUT_S, 1)
-        launch_interval_ms = _num(spec, "launch_interval_ms", Defaults.LAUNCH_INTERVAL_MS, 0)
+        count = int(_num(request, "count", 1, 1))
+        vcpus = int(_num(request, "vcpus", Defaults.VCPUS, 1))
+        mem_mib = int(_num(request, "mem_mib", Defaults.MEM_MIB, 64))
+        ready_timeout_s = _num(request, "ready_timeout_s", Defaults.READY_TIMEOUT_S, 1)
+        max_lifetime_s = _num(request, "max_lifetime_s", Defaults.MAX_LIFETIME_S, 1)
+        idle_timeout_s = _num(request, "idle_timeout_s", Defaults.IDLE_TIMEOUT_S, 1)
+        launch_interval_ms = _num(request, "launch_interval_ms", Defaults.LAUNCH_INTERVAL_MS, 0)
         try:
-            fault = validate_fault(spec.get("fault"))
+            fault = validate_fault(request.get("fault"))
         except ValueError as e:
             raise ApiError(400, str(e))
-        run_id = spec.get("run_id") or ctx.run_id
-        trial_id = spec.get("trial_id") or ctx.trial_id
+        run_id = request.get("run_id") or ctx.run_id
+        trial_id = request.get("trial_id") or ctx.trial_id
 
-        created: List[Session] = []
+        created: List[MicroVM] = []
         with self._lock:
             free: List[int] = []
             skipped: List[int] = []
@@ -147,12 +149,12 @@ class SessionManager:
                 raise ApiError(409, "only %d of %d requested slots are free" % (len(free), count))
             for slot in free[:count]:
                 self._used_slots.add(slot)
-                s = Session(id=Session.new_id(slot), slot=slot, backend=self.backend.name,
+                s = MicroVM(id=MicroVM.new_id(slot), slot=slot, backend=self.backend.name,
                             address=self.backend.address(slot), vcpus=vcpus, mem_mib=mem_mib, fault=fault,
                             ready_timeout_s=ready_timeout_s, max_lifetime_s=max_lifetime_s,
                             idle_timeout_s=idle_timeout_s, fixture_base_url=self.backend.fixture_base_url,
                             run_id=run_id, trial_id=trial_id)
-                self.sessions[s.id] = s
+                self.microvms[s.id] = s
                 created.append(s)
 
         parent = ctx.trace
@@ -166,17 +168,17 @@ class SessionManager:
         self._spawn(launcher, "launcher")
         return [{"id": s.id, "slot": s.slot, "address": s.address} for s in created]
 
-    def launch(self, s: Session, parent: Optional[TraceContext]) -> None:
-        """Create the container/VM and poll readiness. Runs on its own thread per session."""
+    def launch(self, s: MicroVM, parent: Optional[TraceContext]) -> None:
+        """Create the container/VM and poll readiness. Runs on its own thread per microVM."""
         with s.lock:
             if s.state != State.CREATING:
                 return
             s.created_ts = self.clock()
-            span = self.tel.start_span("session.create", parent=parent, start_ns=int(s.created_ts * 1e9),
+            span = self.tel.start_span("microvm.create", parent=parent, start_ns=int(s.created_ts * 1e9),
                                        attrs=self._attrs(s, **{"fleetkit.vcpus": s.vcpus, "fleetkit.mem_mib": s.mem_mib,
                                                                "fleetkit.fault": s.fault}))
             s.trace = span.ctx
-            self.tel.event("session.state", ctx=s.trace, **{**self._attrs(s), "session_id": s.id, "from": None,
+            self.tel.event("microvm.state", ctx=s.trace, **{**self._attrs(s), "microvm_id": s.id, "from": None,
                                                               "to": State.CREATING, "ts": s.created_ts, "outcome": None})
         try:
             self.backend.create(s)
@@ -205,10 +207,10 @@ class SessionManager:
             try:
                 self.backend.destroy(s)
             except Exception as e:
-                self.tel.log("session %s: late destroy after cancelled create: %s: %s" % (s.id, type(e).__name__, e),
+                self.tel.log("microVM %s: late destroy after cancelled create: %s: %s" % (s.id, type(e).__name__, e),
                              severity="ERROR", ctx=s.trace, attrs=self._attrs(s))
             else:
-                self.tel.log("session %s: destroyed after create() returned into state %s" % (s.id, s.state),
+                self.tel.log("microVM %s: destroyed after create() returned into state %s" % (s.id, s.state),
                              severity="WARN", ctx=s.trace, attrs=self._attrs(s))
             return
         outcome = self._wait_ready(s)
@@ -222,15 +224,15 @@ class SessionManager:
             span.end(error="%s: %s" % (outcome, s.error))
             self.destroy(s.id)
 
-    def _fail(self, s: Session, outcome: str, error: str) -> None:
+    def _fail(self, s: MicroVM, outcome: str, error: str) -> None:
         with s.lock:
             if s.state in (State.CREATING, State.BOOTING):
                 s.error = error
                 self._transition(s, State.FAILED, outcome)
-                self.tel.log("session %s failed during startup: %s (%s)" % (s.id, outcome, error),
+                self.tel.log("microVM %s failed during startup: %s (%s)" % (s.id, outcome, error),
                              severity="WARN", ctx=s.trace, attrs=self._attrs(s))
 
-    def _wait_ready(self, s: Session) -> Optional[str]:
+    def _wait_ready(self, s: MicroVM) -> Optional[str]:
         """Poll /health every 250 ms. Returns None once ready, else the failure outcome."""
         if self.dry_run:
             with s.lock:
@@ -268,7 +270,7 @@ class SessionManager:
                     s.startup_ms = (now - s.created_ts) * 1000.0
                     s.last_activity_ts = now
                     self._transition(s, State.READY)
-                self.tel.log("session %s ready in %.0f ms" % (s.id, s.startup_ms), ctx=s.trace, attrs=self._attrs(s))
+                self.tel.log("microVM %s ready in %.0f ms" % (s.id, s.startup_ms), ctx=s.trace, attrs=self._attrs(s))
                 return None
             if now - s.created_ts >= s.ready_timeout_s:
                 self._fail(s, Outcome.STARTUP_TIMEOUT, "not ready after %.0fs" % s.ready_timeout_s)
@@ -282,9 +284,9 @@ class SessionManager:
             self.sleep(self.poll_interval)
 
     # ----- destroy -----------------------------------------------------------
-    def destroy(self, session_id: str, outcome: Optional[str] = None) -> Dict[str, Any]:
-        """Idempotent. Blocks until every per-session leftover is gone; cleanup_ms = receipt -> gone."""
-        s = self.get(session_id)
+    def destroy(self, microvm_id: str, outcome: Optional[str] = None) -> Dict[str, Any]:
+        """Idempotent. Blocks until every per-microVM leftover is gone; cleanup_ms = receipt -> gone."""
+        s = self.get(microvm_id)
         receipt = self.clock()
         with s.lock:
             if s.state == State.DESTROYED or (s.state == State.FAILED and s.destroyed_ts is not None):
@@ -299,13 +301,13 @@ class SessionManager:
         if in_progress:
             s.destroy_done.wait(timeout=120)
             return s.record()
-        span = self.tel.start_span("session.destroy", parent=s.trace, attrs=self._attrs(s, **{"fleetkit.outcome": s.outcome}))
+        span = self.tel.start_span("microvm.destroy", parent=s.trace, attrs=self._attrs(s, **{"fleetkit.outcome": s.outcome}))
         error = None
         try:
             self.backend.destroy(s)
         except Exception as e:
             error = "destroy: %s: %s" % (type(e).__name__, e)
-            self.tel.log("session %s: %s" % (s.id, error), severity="ERROR", ctx=s.trace, attrs=self._attrs(s))
+            self.tel.log("microVM %s: %s" % (s.id, error), severity="ERROR", ctx=s.trace, attrs=self._attrs(s))
         now = self.clock()
         with s.lock:
             s.destroyed_ts = now
@@ -319,12 +321,12 @@ class SessionManager:
         s.destroy_done.set()
         span.set(**{"fleetkit.cleanup_ms": s.cleanup_ms})
         span.end(error=error)
-        self.tel.log("session %s destroyed (%s) in %.0f ms" % (s.id, s.outcome, s.cleanup_ms), ctx=s.trace,
+        self.tel.log("microVM %s destroyed (%s) in %.0f ms" % (s.id, s.outcome, s.cleanup_ms), ctx=s.trace,
                      attrs=self._attrs(s))
         return s.record()
 
     def destroy_all(self) -> None:
-        for s in list(self.sessions.values()):
+        for s in list(self.microvms.values()):
             if s.state not in State.TERMINAL:
                 try:
                     self.destroy(s.id)
@@ -333,10 +335,10 @@ class SessionManager:
 
     # ----- reaper ------------------------------------------------------------
     def reap_once(self, now: Optional[float] = None) -> List[Tuple[str, str]]:
-        """Destroy sessions past their lifetime, or idle past their idle timeout (busy ones skipped)."""
+        """Destroy microVMs past their lifetime, or idle past their idle timeout (busy ones skipped)."""
         now = self.clock() if now is None else now
         reaped: List[Tuple[str, str]] = []
-        for s in list(self.sessions.values()):
+        for s in list(self.microvms.values()):
             with s.lock:
                 state, created, last = s.state, s.created_ts, s.last_activity_ts
                 lifetime, idle = s.max_lifetime_s, s.idle_timeout_s
@@ -346,7 +348,7 @@ class SessionManager:
             elif state == State.READY and last is not None and now - last >= idle:
                 outcome = Outcome.IDLE_EXPIRED
             if outcome:
-                self.tel.log("reaper: session %s %s (state %s)" % (s.id, outcome, state), severity="WARN",
+                self.tel.log("reaper: microVM %s %s (state %s)" % (s.id, outcome, state), severity="WARN",
                              ctx=s.trace, attrs=self._attrs(s, **{"fleetkit.outcome": outcome}))
                 reaped.append((s.id, outcome))
                 self._spawn(lambda sid=s.id, o=outcome: self.destroy(sid, o), "reap-%s" % s.id)
@@ -366,11 +368,11 @@ class SessionManager:
         self._reaper_stop.set()
 
     # ----- task proxy --------------------------------------------------------
-    def run_task(self, session_id: str, body: Dict[str, Any], ctx: RequestContext) -> Tuple[int, Dict[str, Any]]:
-        s = self.get(session_id)
+    def run_task(self, microvm_id: str, body: Dict[str, Any], ctx: RequestContext) -> Tuple[int, Dict[str, Any]]:
+        s = self.get(microvm_id)
         task_id = str(body.get("task_id") or uuid.uuid4().hex[:12])
-        # Everything that can reject the body (400) happens before the session is marked busy:
-        # a rejected request must leave the session `ready`, not held until max_lifetime_s.
+        # Everything that can reject the body (400) happens before the microVM is marked busy:
+        # a rejected request must leave the microVM `ready`, not held until max_lifetime_s.
         req = dict(body)
         req["task_id"] = task_id
         req.setdefault("fixture_base_url", s.fixture_base_url)
@@ -386,10 +388,10 @@ class SessionManager:
 
         with s.lock:
             if s.state != State.READY:
-                return 409, {"ok": False, "failure_category": FailureCategory.SESSION_NOT_READY,
-                             "failed_step": None, "steps": [], "task_id": task_id, "session_id": s.id,
-                             "session_state": s.state, "session_outcome": s.outcome,
-                             "error": "session is %s" % s.state}
+                return 409, {"ok": False, "failure_category": FailureCategory.MICROVM_NOT_READY,
+                             "failed_step": None, "steps": [], "task_id": task_id, "microvm_id": s.id,
+                             "microvm_state": s.state, "microvm_outcome": s.outcome,
+                             "error": "microVM is %s" % s.state}
             self._transition(s, State.BUSY)
             s.last_activity_ts = self.clock()
 
@@ -400,8 +402,8 @@ class SessionManager:
         try:
             return self._proxy(s, req, ctx, span, task_id, deadline_s, t0)
         except Exception as e:
-            # A bug past this point (e.g. a malformed guest answer) must not leave the session
-            # busy forever: the idle reaper skips busy sessions.
+            # A bug past this point (e.g. a malformed guest answer) must not leave the microVM
+            # busy forever: the idle reaper skips busy microVMs.
             with s.lock:
                 if s.state == State.BUSY:
                     self._transition(s, State.READY)
@@ -409,7 +411,7 @@ class SessionManager:
             span.end(error="%s: %s" % (type(e).__name__, e))
             raise
 
-    def _proxy(self, s: Session, req: Dict[str, Any], ctx: RequestContext, span: Any, task_id: str,
+    def _proxy(self, s: MicroVM, req: Dict[str, Any], ctx: RequestContext, span: Any, task_id: str,
                deadline_s: float, t0: float) -> Tuple[int, Dict[str, Any]]:
         attrs = dict(span.attrs)
         rtt_ns: Optional[int] = None
@@ -446,40 +448,40 @@ class SessionManager:
             if s.state == State.BUSY:
                 self._transition(s, State.READY)
             s.last_activity_ts = self.clock()
-            session_outcome = s.outcome
+            microvm_outcome = s.outcome
         resp.update({
-            "task_id": task_id, "session_id": s.id, "slot": s.slot, "trace_id": span.ctx.trace_id,
+            "task_id": task_id, "microvm_id": s.id, "slot": s.slot, "trace_id": span.ctx.trace_id,
             "clock_offset_ns": clock_offset_ns, "guest_mem_available": guest_mem_available,
             "chromium_rss": chromium_rss, "host_rtt_ms": (rtt_ns / 1e6) if rtt_ns is not None else None,
-            "proxy_ms": (time.monotonic() - t0) * 1000.0, "session_outcome": session_outcome,
+            "proxy_ms": (time.monotonic() - t0) * 1000.0, "microvm_outcome": microvm_outcome,
         })
         resp.setdefault("failure_category", FailureCategory.OK if resp.get("ok") else FailureCategory.GUEST_UNREACHABLE)
         span.set(**{"fleetkit.failure_category": resp["failure_category"], "fleetkit.task_ms": resp.get("task_ms")})
         span.end(error=None if resp.get("ok") else "%s: %s" % (resp["failure_category"], resp.get("error")))
         return 200, resp
 
-    def _unreachable(self, s: Session, span: Any, task_id: str, error: str, t0: float) -> Tuple[int, Dict[str, Any]]:
+    def _unreachable(self, s: MicroVM, span: Any, task_id: str, error: str, t0: float) -> Tuple[int, Dict[str, Any]]:
         with s.lock:
             was_busy = s.state == State.BUSY
             if was_busy:
-                # The daemon never answered within the proxy deadline: this session is not trusted.
+                # The daemon never answered within the proxy deadline: this microVM is not trusted.
                 s.outcome = Outcome.TASK_FAILURE_DESTROYED
             s.last_activity_ts = self.clock()
-            session_outcome = s.outcome
+            microvm_outcome = s.outcome
         self.tel.log("task %s on %s: guest_unreachable: %s" % (task_id, s.id, error), severity="WARN",
                      ctx=span.ctx, attrs=self._attrs(s, **{"fleetkit.task_id": task_id}))
         if was_busy:
             self._spawn(lambda: self.destroy(s.id, Outcome.TASK_FAILURE_DESTROYED), "destroy-%s" % s.id)
         resp = {"ok": False, "failure_category": FailureCategory.GUEST_UNREACHABLE, "failed_step": None,
-                "steps": [], "error": error, "task_id": task_id, "session_id": s.id, "slot": s.slot,
+                "steps": [], "error": error, "task_id": task_id, "microvm_id": s.id, "slot": s.slot,
                 "trace_id": span.ctx.trace_id, "clock_offset_ns": None, "guest_mem_available": None,
                 "chromium_rss": None, "proxy_ms": (time.monotonic() - t0) * 1000.0,
-                "session_outcome": session_outcome}
+                "microvm_outcome": microvm_outcome}
         span.set(**{"fleetkit.failure_category": FailureCategory.GUEST_UNREACHABLE})
         span.end(error=error)
         return 200, resp
 
-    def _emit_guest_spans(self, s: Session, parent: TraceContext, resp: Dict[str, Any], base_ns: int,
+    def _emit_guest_spans(self, s: MicroVM, parent: TraceContext, resp: Dict[str, Any], base_ns: int,
                           attrs: Dict[str, Any]) -> None:
         """Guest spans after the fact: base_ns is the guest's receipt time on the host clock."""
         task_ms = resp.get("task_ms")
@@ -507,13 +509,15 @@ class SessionManager:
                                  service="guest-daemon", status="error" if failed else "ok",
                                  error=resp.get("error") if failed else None)
 
-    def _forward_log_tail(self, s: Session, ctx: TraceContext, tail: Any, attrs: Dict[str, Any]) -> None:
+    def _forward_log_tail(self, s: MicroVM, ctx: TraceContext, tail: Any, attrs: Dict[str, Any]) -> None:
         if not tail:
             return
         for line in tail if isinstance(tail, list) else [tail]:
             if isinstance(line, dict):
                 body = str(line.get("msg") or line.get("message") or line.get("body") or line)
-                sev = str(line.get("level") or line.get("severity") or "INFO").upper()
+                # `severity`; a guest image built before the D56 rename still writes the
+                # logging module's `level` key, so it is read as a fallback.
+                sev = str(line.get("severity") or line.get("level") or "INFO").upper()
                 ts = line.get("ts")
                 ts_ns = int(float(ts) * 1e9) if isinstance(ts, (int, float)) else None
             else:

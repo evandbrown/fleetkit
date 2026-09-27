@@ -11,7 +11,7 @@ this keeps the daemon runnable from a stock python3 on the host. If the shared
 harness/telemetry package grows an equivalent interface this module is the seam
 to swap.
 
-Correlation attributes on every record: fleetkit.run_id, trial_id, session_id,
+Correlation attributes on every record: fleetkit.run_id, trial_id, microvm_id,
 task_id, backend, host_id (whichever are known).
 """
 from __future__ import annotations
@@ -229,7 +229,7 @@ class Telemetry:
         self._enqueue("log", rec)
 
     def event(self, name: str, ctx: Optional[TraceContext] = None, severity: str = "INFO", **fields: Any) -> None:
-        """A structured event record, e.g. `session.state {session_id, from, to, ts, outcome}`."""
+        """A structured event record, e.g. `microvm.state {microvm_id, from, to, ts, outcome}`."""
         self.log(name, severity=severity, ctx=ctx, attrs=fields, event=name)
 
     # ----- metrics ---------------------------------------------------------

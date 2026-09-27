@@ -1,13 +1,13 @@
-"""Pass criteria, shared by the trial loop (``--stop-at-first-miss``, confirmations) and ``driver report``.
+"""Pass criteria, shared by the trial loop (``--stop-at-first-miss``, boundary trials) and ``driver report``.
 
 A trial passes when its protocol held and every target it is given is met:
 
-* protocol: the trial completed, recorded no error, all N sessions reached ready, N tasks were
+* protocol: the trial completed, recorded no error, all N microVMs reached ready, N tasks were
   dispatched, all N tasks are ok, and verify-clean was clean;
 * targets (each optional): for every step name, p50 and p95 of ``duration_ms`` over the trial's ok
   tasks; p95 of ``task_ms`` over the trial's ok tasks.
 
-A level passes iff it has at least one trial and every one of its trials passed; percentiles are
+A density passes iff it has at least one trial and every one of its trials passed; percentiles are
 never pooled across trials for the verdict. Rows may be CSV rows (strings) or the trial loop's own
 rows (typed); both give the same verdict because the CSV writer round-trips floats exactly.
 """
@@ -49,7 +49,7 @@ def evaluate_trial(trial_doc: dict, task_rows, step_rows, criteria) -> dict:
     t = trial_doc if isinstance(trial_doc, dict) else {}
     c = normalize(criteria)
     tid = t.get("trial_id")
-    n = int(to_float(t.get("level_n"), 0) or 0)
+    n = int(to_float(t.get("density"), 0) or 0)
     counts = t.get("counts") or {}
     reasons: list[str] = []
 
@@ -58,13 +58,13 @@ def evaluate_trial(trial_doc: dict, task_rows, step_rows, criteria) -> dict:
         reasons.append(f"trial not complete (phase {t.get('phase') or 'unknown'})")
     if t.get("error"):
         reasons.append(f"trial error: {t['error']}")
-    ready = int(to_float(counts.get("sessions_ready"), 0) or 0)
+    ready = int(to_float(counts.get("microvms_ready"), 0) or 0)
     dispatched = int(to_float(counts.get("tasks_dispatched"), 0) or 0)
     tasks_ok = int(to_float(counts.get("tasks_ok"), 0) or 0)
     if n < 1:
-        reasons.append("no concurrency level recorded")
+        reasons.append("no density recorded")
     if ready != n:
-        reasons.append(f"sessions ready {ready}/{n}")
+        reasons.append(f"microVMs ready {ready}/{n}")
     if dispatched != n:
         reasons.append(f"tasks dispatched {dispatched}/{n}")
     if tasks_ok != n:
@@ -114,7 +114,7 @@ def evaluate_trial(trial_doc: dict, task_rows, step_rows, criteria) -> dict:
             "checks": checks, "reasons": reasons}
 
 
-def level_passed(evaluations) -> bool:
-    """A level passes iff it has at least one trial and every trial passed."""
+def density_passed(evaluations) -> bool:
+    """A density passes iff it has at least one trial and every trial at it passed."""
     evs = [e for e in (evaluations or []) if e is not None]
     return bool(evs) and all(bool(e.get("passed")) for e in evs)

@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 class Timeouts:
     step_timeout_ms: int = 10000
     task_timeout_ms: int = 45000
-    ready_timeout_s: float = 60.0  # 60 local; 90 on AWS for the first n=1 trial, then 3x observed startup_ms
+    ready_timeout_s: float = 60.0  # 60 local; 90 on AWS for the first density-1 trial, then 3x observed startup_ms
     max_lifetime_s: float = 600.0
     idle_timeout_s: float = 120.0
     launch_interval_ms: int = 0
@@ -35,8 +35,7 @@ class Timeouts:
 class TrialConfig:
     run_id: str
     backend: str
-    level_n: int
-    repeat: int
+    density: int  # N: how many microVMs the trial starts at once
     timeouts: Timeouts = field(default_factory=Timeouts)
     vcpus: int = 2
     mem_mib: int = 2048
@@ -45,8 +44,11 @@ class TrialConfig:
     fixture_base_url: str | None = None  # what the guest uses; defaults per backend
     products_source: str | None = None  # URL or path; default <fixture_check_url>/task-products.json
     host_id: str = ""
-    trial_label: str | None = None  # smoke uses this to name fault trials; warmup and illustration too
-    kind: str = "ladder"  # schemas.TRIAL_KINDS; recorded in trial.json and tasks.csv
+    # None: a numbered trial, ``d<density>-t<number>``, numbered from 1 within its density. Otherwise
+    # the trial is labelled, not numbered (``warmup``, ``illustration``, ``fault-<name>``), and a label
+    # already used in the run directory gets ``-2``, ``-3`` and so on.
+    trial_label: str | None = None
+    trial_kind: str = "ladder"  # schemas.TRIAL_KINDS; recorded in trial.json and tasks.csv
     criteria: dict | None = None  # criteria.evaluate_trial targets; None or empty = protocol only
     settle_s: float = 0.0  # wait before the trial, recording host cpu_util as trial.json pre_trial
     sample_interval_ms: int = 200  # guest proc sampling interval, sent in every task payload (0 = off)

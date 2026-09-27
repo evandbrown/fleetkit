@@ -1,6 +1,7 @@
 """``driver bundle``: assemble results/<run-id>/ into the evidence bundle of design section 11,
 with manifest.json and evidence.md. Succeeds on a partial run directory and lists missing items;
-with --strict it exits non-zero if any mandatory item is missing.
+with --strict it exits non-zero if any mandatory item is missing. A run directory from before the
+glossary is evidence already and is never rebundled (the CLI refuses it).
 """
 from __future__ import annotations
 
@@ -14,7 +15,7 @@ from pathlib import Path
 
 from . import __version__
 from .evidence import line_carries_run_id, iter_lines
-from .outputs import RunDir, read_csv, read_json, write_json_atomic
+from .outputs import RunDir, read_json, write_json_atomic
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 OTLP_FILES = ("traces.jsonl", "metrics.jsonl", "logs.jsonl")
@@ -141,9 +142,9 @@ HOST_INFO_FACTS = ("cpu_model", "cpu_count", "threads_per_core", "cores_per_sock
 
 
 def _host_info(run_json: dict) -> dict:
-    """run.json ``inputs.host_info`` (the host daemon's GET /host/info at run start), or {}."""
-    inputs = run_json.get("inputs") if isinstance(run_json.get("inputs"), dict) else {}
-    hi = inputs.get("host_info")
+    """run.json ``observed.host_info`` (the host daemon's GET /host/info at run start), or {}."""
+    observed = run_json.get("observed") if isinstance(run_json.get("observed"), dict) else {}
+    hi = observed.get("host_info")
     return hi if isinstance(hi, dict) else {}
 
 
@@ -154,7 +155,7 @@ def build_manifest(rundir: RunDir, trials: list[dict], opts: dict) -> dict:
         guest = {}
     gm = _guest_manifest_fields(guest)
     ami = read_json(Path(opts["ami_lock"]), {}) if opts.get("ami_lock") else {}
-    run_json = read_json(rundir.run_json, {}) or {}
+    run_json = rundir.read_run_json()
     starts = [t["timestamps"].get("create_start") for t in trials if t.get("timestamps", {}).get("create_start")]
     ends = [t["timestamps"].get("verify_clean_pass") or t.get("written_at") for t in trials]
     ends = [e for e in ends if e]
@@ -194,15 +195,15 @@ def build_manifest(rundir: RunDir, trials: list[dict], opts: dict) -> dict:
         "run_end_ts": max(ends) if ends else None,
         "timeout_parameters": uniq[0] if len(uniq) == 1 else uniq,
         "backends": sorted({t["backend"] for t in trials}),
-        "trials": [{"trial_id": t["trial_id"], "backend": t["backend"], "level_n": t["level_n"],
-                    "repeat": t.get("repeat"), "fault": t.get("fault"), "status": t.get("status"),
-                    "level_passed": t.get("level_passed"), "kind": t.get("kind"),
+        "trials": [{"trial_id": t["trial_id"], "sequence": t.get("sequence"), "backend": t["backend"],
+                    "density": t["density"], "trial_number": t.get("trial_number"), "fault": t.get("fault"),
+                    "status": t.get("status"), "trial_kind": t.get("trial_kind"),
                     "passed": (t.get("evaluation") or {}).get("passed")} for t in trials],
         "bundled_at": time.time(),
         "labels": {"git_commit": "measured", "timestamps": "measured",
                    "instance_type": "operator input, else the host daemon's GET /host/info (IMDS)",
                    "ami_id": "AMI lock or operator input, else GET /host/info (IMDS)",
-                   "host facts": "GET /host/info at run start (run.json inputs.host_info)",
+                   "host facts": "GET /host/info at run start (run.json observed.host_info)",
                    "vcpu_quota": "operator input at run time", "prices": "not in this file; see report inputs"},
     }
     # cpu and memory facts of the host the run measured, from the host daemon (null on old runs);
@@ -272,12 +273,13 @@ def run_bundle(run: str, strict: bool = False, lgtm_dir: str | None = None, snap
             if (hd / sub).exists():
                 _copy_into(hd / sub, rundir.console_logs_dir, log)
                 break
-        # hostd writes sessions/<id>/console.log (and firecracker.log on that backend)
-        if (hd / "sessions").exists():
-            for sdir in sorted(p for p in (hd / "sessions").iterdir() if p.is_dir()):
+        # hostd writes microvms/<id>/console.log (and firecracker.log on that backend)
+        vm_dir = rundir.hostd_microvm_dir(hd)
+        if vm_dir is not None:
+            for vdir in sorted(p for p in vm_dir.iterdir() if p.is_dir()):
                 for name in ("console.log", "firecracker.log"):
-                    if (sdir / name).exists():
-                        _copy_into(sdir / name, rundir.console_logs_dir / sdir.name / name, log)
+                    if (vdir / name).exists():
+                        _copy_into(vdir / name, rundir.console_logs_dir / vdir.name / name, log)
     if hostd_log:
         _copy_into(Path(hostd_log), rundir.root / "hostd.log", log)
     if console_logs_dir:
@@ -316,36 +318,36 @@ def run_bundle(run: str, strict: bool = False, lgtm_dir: str | None = None, snap
 def check_inventory(rundir: RunDir, trials: list[dict], aws: bool, collector_ran: bool, snapshotted: bool) -> dict:
     r = rundir.root
     mandatory = {
-        "sessions.csv": rundir.sessions_csv.exists(), "tasks.csv": rundir.tasks_csv.exists(),
+        "microvms.csv": rundir.table_path("microvms").exists(), "tasks.csv": rundir.tasks_csv.exists(),
         "steps.csv": rundir.steps_csv.exists(), "host_metrics.csv": rundir.host_metrics_csv.exists(),
         "trials/*/trial.json": bool(trials), "driver.log": rundir.driver_log.exists(),
         "spans.jsonl": rundir.spans_jsonl.exists(), "logs.jsonl": rundir.logs_jsonl.exists(),
         "manifest.json": rundir.manifest_json.exists(), "evidence.md": True,  # written right after this check
         "hostd.log": (r / "hostd.log").exists(),
     }
-    tasks = read_csv(rundir.tasks_csv)
+    tasks = rundir.read_rows("tasks")
     shots_expected = [t["screenshot_path"] for t in tasks if t.get("screenshot_path")]
     shots_missing = [p for p in shots_expected if not (r / p).exists()]
     mandatory["screenshots for every task that reached the screenshot phase"] = not shots_missing
-    sessions = read_csv(rundir.sessions_csv)
-    # Section 11: the bundle always contains every VM console log and per-session guest log tail.
-    # hostd writes sessions/<id>/console.log on both backends; the guest log tail exists for every
-    # task the guest answered, i.e. every category but guest_unreachable and session_not_ready.
+    microvms = rundir.read_rows("microvms")
+    # Section 11: the bundle always contains every microVM's console log and guest log tail.
+    # hostd writes microvms/<id>/console.log on both backends; the guest log tail exists for every
+    # task the guest answered, i.e. every category but guest_unreachable and microvm_not_ready.
     console_ids = []
-    for s in sessions:
-        sid = s.get("session_id")
-        if sid and sid not in console_ids:
-            console_ids.append(sid)
-    console_missing = [sid for sid in console_ids if not (rundir.console_logs_dir / sid / "console.log").exists()]
+    for s in microvms:
+        mid = s.get("microvm_id")
+        if mid and mid not in console_ids:
+            console_ids.append(mid)
+    console_missing = [mid for mid in console_ids if not (rundir.console_logs_dir / mid / "console.log").exists()]
     guest_ids = []
     for t in tasks:
-        sid = t.get("session_id")
-        if sid and t.get("failure_category") not in ("guest_unreachable", "session_not_ready") and sid not in guest_ids:
-            guest_ids.append(sid)
-    guest_missing = [sid for sid in guest_ids if not (rundir.guest_logs_dir / f"{sid}.jsonl").exists()]
-    mandatory[_ids_label("console-logs/<session_id>/console.log for every session in sessions.csv",
+        mid = t.get("microvm_id")
+        if mid and t.get("failure_category") not in ("guest_unreachable", "microvm_not_ready") and mid not in guest_ids:
+            guest_ids.append(mid)
+    guest_missing = [mid for mid in guest_ids if not (rundir.guest_logs_dir / f"{mid}.jsonl").exists()]
+    mandatory[_ids_label("console-logs/<microvm_id>/console.log for every microVM in microvms.csv",
                          console_ids, console_missing)] = not console_missing
-    mandatory[_ids_label("guest-logs/<session_id>.jsonl for every session whose guest answered a task",
+    mandatory[_ids_label("guest-logs/<microvm_id>.jsonl for every microVM whose guest answered a task",
                          guest_ids, guest_missing)] = not guest_missing
     optional = {
         "otlp/ (collector copies)": rundir.otlp_dir.exists() and any(rundir.otlp_dir.iterdir()),
@@ -378,8 +380,8 @@ def check_inventory(rundir: RunDir, trials: list[dict], aws: bool, collector_ran
 
 
 def _ids_label(base: str, expected: list[str], missing: list[str]) -> str:
-    """Inventory label for a per-session item; names the missing ids so evidence.md and
-    ``mandatory_missing`` say which sessions lack it."""
+    """Inventory label for a per-microVM item; names the missing ids so evidence.md and
+    ``mandatory_missing`` say which microVMs lack it."""
     if not missing:
         return f"{base} ({len(expected)} present)"
     shown = ", ".join(missing[:10]) + (f", ... {len(missing) - 10} more" if len(missing) > 10 else "")
@@ -394,45 +396,47 @@ def render_evidence(rundir: RunDir, trials: list[dict], manifest: dict, inv: dic
     if not trials:
         L.append("No trials in this run directory.")
     else:
-        L += ["| trial | backend | n | repeat | fault | status | complete | sessions ready | tasks ok | clean | level passed |",
-              "|---|---|---:|---:|---|---|---|---|---|---|---|"]
+        L += ["| trial id | trial kind | backend | density | trial | fault | status | complete | microVMs ready | tasks ok | "
+              "clean | passed |",
+              "|---|---|---|---:|---:|---|---|---|---|---|---|---|"]
         for t in trials:
             c = t.get("counts") or {}
             vc = (t.get("verify_clean") or {}).get("clean")
-            L.append(f"| {t['trial_id']} | {t['backend']} | {t['level_n']} | {t.get('repeat')} | {t.get('fault') or ''} | "
-                     f"{t.get('status')} | {t.get('complete')} | {c.get('sessions_ready')}/{c.get('sessions_requested')} | "
-                     f"{c.get('tasks_ok')}/{c.get('tasks_dispatched')} | {vc} | {t.get('level_passed')} |")
-    cases = sorted(rundir.trials_dir.glob("*/case.json")) if rundir.trials_dir.exists() else []
+            number = "" if t.get("trial_number") is None else t["trial_number"]
+            L.append(f"| {t['trial_id']} | {t.get('trial_kind')} | {t['backend']} | {t['density']} | {number} | "
+                     f"{t.get('fault') or ''} | {t.get('status')} | {t.get('complete')} | "
+                     f"{c.get('microvms_ready')}/{c.get('microvms_requested')} | "
+                     f"{c.get('tasks_ok')}/{c.get('tasks_dispatched')} | {vc} | {t.get('passed')} |")
+    cases = rundir.list_cases()
     if cases:
-        L += ["", "Smoke session cases:", ""]
-        for p in cases:
-            c = read_json(p, {}) or {}
+        L += ["", "Smoke microVM cases:", ""]
+        for c in cases:
             L.append(f"- {c.get('trial_id')}: {c.get('case')} expected {c.get('expected_outcome')}, got {c.get('outcome')} "
                      f"({'pass' if c.get('passed') else 'FAIL'})")
     L += ["", "## What passed", ""]
-    # A level passes only if every one of its trials passed; warm-up, illustration and fault
-    # trials do not count. The highest such level is reported, as in `driver report`.
-    by_level: dict = {}
+    # A density passes only if every one of its trials passed; warm-up, illustration and fault
+    # trials do not count. The highest such density is reported, as in `driver report`.
+    by_density: dict = {}
     for t in trials:
-        if t.get("fault") or t.get("kind") in ("warmup", "illustration", "fault"):
+        if t.get("fault") or t.get("trial_kind") in ("warmup", "illustration", "fault"):
             continue
-        by_level.setdefault((t["backend"], int(t["level_n"])), []).append(bool(t.get("level_passed")))
+        by_density.setdefault((t["backend"], int(t["density"])), []).append(bool(t.get("passed")))
     passed = {}
-    for (b, n), oks in sorted(by_level.items()):
+    for (b, n), oks in sorted(by_density.items()):
         passed.setdefault(b, 0)
         if oks and all(oks):
             passed[b] = max(passed[b], n)
     if passed:
         for b, n in passed.items():
-            L.append(f"- {b}: highest N whose trials passed (criteria from run.json when set, else protocol only; "
-                     f"`driver report` applies the level and headline rules) = {n}")
+            L.append(f"- {b}: highest density whose trials passed (criteria from run.json when set, else protocol "
+                     f"only; `driver report` applies the density and headline rules) = {n}")
     else:
-        L.append("- no level passed")
-    st = read_json(rundir.smoke_state_json, None)
+        L.append("- no density passed")
+    st = rundir.read_smoke_state()
     if st:
-        last = st["runs"][-1] if st.get("runs") else {}
-        L.append(f"- smoke: last run {'GREEN' if last.get('green') else 'RED'}, consecutive green {st.get('consecutive_green')}, "
-                 f"{len(st.get('runs', []))} run(s), {st.get('cumulative_s', 0) / 60:.1f} min cumulative (see smoke-report.md)")
+        last = st["rounds"][-1] if st.get("rounds") else {}
+        L.append(f"- smoke: last round {'GREEN' if last.get('green') else 'RED'}, consecutive green {st.get('consecutive_green')}, "
+                 f"{len(st.get('rounds', []))} round(s), {st.get('cumulative_s', 0) / 60:.1f} min cumulative (see smoke-report.md)")
     else:
         L.append("- smoke: not run in this run directory")
     L += ["", "## What is missing", ""]
@@ -446,9 +450,9 @@ def render_evidence(rundir: RunDir, trials: list[dict], manifest: dict, inv: dic
     if inv["screenshots_missing"]:
         L.append(f"- screenshots referenced but absent: {', '.join(inv['screenshots_missing'][:10])}")
     if inv.get("console_logs_missing"):
-        L.append(f"- sessions without a console log: {', '.join(inv['console_logs_missing'][:20])}")
+        L.append(f"- microVMs without a console log: {', '.join(inv['console_logs_missing'][:20])}")
     if inv.get("guest_logs_missing"):
-        L.append(f"- sessions without a guest log tail: {', '.join(inv['guest_logs_missing'][:20])}")
+        L.append(f"- microVMs without a guest log tail: {', '.join(inv['guest_logs_missing'][:20])}")
     L += ["", "## Manifest", "", "```json", json.dumps({k: v for k, v in manifest.items() if k != "trials"},
                                                         indent=2, sort_keys=True, default=str), "```", ""]
     if notes:

@@ -36,17 +36,17 @@ def test_firecracker_slot_naming():
 
 def test_slots_are_lowest_free_and_recycled(manager, guest, ctx):
     guest.ready.update({"guest-0", "guest-1", "guest-2", "guest-3"})
-    created = manager.create_sessions({"count": 2}, ctx)
+    created = manager.create_microvms({"count": 2}, ctx)
     assert [c["slot"] for c in created] == [0, 1]
     assert created[0]["address"] == "guest-0"
     assert created[0]["id"].startswith("s000-")
-    more = manager.create_sessions({"count": 2}, ctx)
+    more = manager.create_microvms({"count": 2}, ctx)
     assert [c["slot"] for c in more] == [2, 3]
     with pytest.raises(ApiError) as e:
-        manager.create_sessions({"count": 1}, ctx)
+        manager.create_microvms({"count": 1}, ctx)
     assert e.value.status == 409
     manager.destroy(created[1]["id"])
-    again = manager.create_sessions({"count": 1}, ctx)
+    again = manager.create_microvms({"count": 1}, ctx)
     assert again[0]["slot"] == 1
 
 
@@ -54,24 +54,24 @@ def test_create_validates_input(manager, ctx):
     for bad in ({"count": 0}, {"vcpus": "two"}, {"fault": "explode"}, {"fault": "slow_step"},
                 {"fault": "hang_task:1"}, {"backend": "firecracker"}):
         with pytest.raises(ApiError) as e:
-            manager.create_sessions(bad, ctx)
+            manager.create_microvms(bad, ctx)
         assert e.value.status == 400, bad
 
 
 def test_slot_freed_when_create_fails(manager, backend, ctx):
     backend.fail_create = "docker run failed: no such image"
-    created = manager.create_sessions({"count": 1}, ctx)
+    created = manager.create_microvms({"count": 1}, ctx)
     s = manager.get(created[0]["id"])
     assert s.state == "failed" and s.outcome == "startup_error"
     assert s.destroyed_ts is not None and s.cleanup_ms is not None
     backend.fail_create = None
-    assert manager.create_sessions({"count": 1}, ctx)[0]["slot"] == 0
+    assert manager.create_microvms({"count": 1}, ctx)[0]["slot"] == 0
 
 
 def test_unusable_slots_are_skipped(manager, backend, guest, ctx):
     guest.ready.update({"guest-0", "guest-1", "guest-2", "guest-3"})
     backend.slot_usable = lambda slot: slot != 0          # e.g. port 18080 held by another process
-    created = manager.create_sessions({"count": 2}, ctx)
+    created = manager.create_microvms({"count": 2}, ctx)
     assert [c["slot"] for c in created] == [1, 2]
 
 

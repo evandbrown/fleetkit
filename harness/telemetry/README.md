@@ -20,7 +20,7 @@ harness/.venv/bin/pip install -e harness/telemetry     # `make venv` does this
   never blocks the caller, and is logged once a minute rather than per batch. `lgtm=False`
   (`--no-lgtm`) disables it entirely.
 - **Correlation on everything.** `fleetkit.run_id`, `fleetkit.trial_id`,
-  `fleetkit.session_id`, `fleetkit.task_id`, `fleetkit.backend`, `fleetkit.host_id` are the
+  `fleetkit.microvm_id`, `fleetkit.task_id`, `fleetkit.backend`, `fleetkit.host_id` are the
   attribute names (constants in `fleetkit_telemetry.attributes`). They travel as W3C baggage
   next to `traceparent`, and a span processor and a log filter stamp them on every span and
   record; explicit attributes always win.
@@ -47,28 +47,28 @@ with tel.tracer.start_as_current_span("trial") as trial, tel.correlation(run_id=
     ... http.client request with headers ...
     trace_id = format(trial.get_span_context().trace_id, "032x")  # tasks.csv trace_id column
 
-# hostd: extract on the way in, keep correlation per session for later spans (reaper, destroy)
-with tel.server_span("POST /sessions/{id}/task", request.headers, attributes={"http.request.method": "POST"}):
-    session.correlation = ft.get_correlation()      # {"fleetkit.run_id": ..., "fleetkit.trial_id": ...}
-    with tel.correlation(session_id=session.id, task_id=task_id):
+# hostd: extract on the way in, keep correlation per microVM for later spans (reaper, destroy)
+with tel.server_span("POST /microvms/{id}/task", request.headers, attributes={"http.request.method": "POST"}):
+    microvm.correlation = ft.get_correlation()      # {"fleetkit.run_id": ..., "fleetkit.trial_id": ...}
+    with tel.correlation(microvm_id=microvm.id, task_id=task_id):
         out = tel.inject({"Content-Type": "application/json"})  # to the guest; it echoes traceparent
         host_send_ns = time.time_ns(); ... POST /task ...
-        emission = tel.emit_guest_task(response, session_id=session.id, task_id=task_id,
+        emission = tel.emit_guest_task(response, microvm_id=microvm.id, task_id=task_id,
                                        host_send_ns=host_send_ns, rtt_ns=health_rtt_ns)
-        tel.emit_guest_logs(response.get("log_tail"), session_id=session.id, task_id=task_id,
+        tel.emit_guest_logs(response.get("log_tail"), microvm_id=microvm.id, task_id=task_id,
                             clock_offset_ns=emission.clock_offset_ns,
                             trace_id=emission.trace_id, span_id=emission.task_span_id)
         row["clock_offset_ns"] = emission.clock_offset_ns
 
 # later, outside any request
-with tel.correlation(**session.correlation, session_id=session.id):
-    tel.log_session_state(session.id, "ready", "destroying", time.time(), outcome="idle_expired")
+with tel.correlation(**microvm.correlation, microvm_id=microvm.id):
+    tel.log_microvm_state(microvm.id, "ready", "destroying", time.time(), outcome="idle_expired")
 
 tel.shutdown()   # flushes everything, bounded by the OTLP timeout
 ```
 
 `tel.logger` is a stdlib logger named after the service; any logger works, the handlers sit
-on the root logger. Records go to stderr as JSON (`ts`, `level`, `logger`, `service`, `msg`,
+on the root logger. Records go to stderr as JSON (`ts`, `severity`, `logger`, `service`, `msg`,
 `trace_id`, `span_id`, extras, correlation keys), to `log_file` if given, and to OTLP with
 trace context. `extra={...}` fields become log attributes.
 
@@ -98,15 +98,17 @@ Failure: `ok: false` sets ERROR status on `task` and on the span named `failed_s
 `clock_offset_ns` and `guest_clock_ns` are attributes.
 
 `emit_guest_logs` forwards the `log_tail` as OTLP log records under the same resource: dicts
-with `ts|time|timestamp` (s, ms or ns, shifted by the offset), `level|severity`,
-`msg|message|body` and any other scalar fields (as `guest.<key>`), or plain strings.
+with `ts|time|timestamp` (s, ms or ns, shifted by the offset), `severity` (or `level`, the
+logging-library name for it), `msg|message|body` and any other scalar fields (as
+`guest.<key>`), or plain strings.
 
-## session.state records
+## microvm.state records
 
-`tel.log_session_state(session_id, from, to, ts, outcome=None)` emits the record of design
-section 4 with `event.name=session.state`, `fleetkit.session_id`, `session.from`,
-`session.to`, `session.ts`, `session.outcome` (namespaced so they never collide with the
-record's own `ts`) and the current trace context.
+`tel.log_microvm_state(microvm_id, from, to, ts, outcome=None)` emits the record of design
+section 4 with `event.name=microvm.state`, `fleetkit.microvm_id`, `microvm_id`, `from`, `to`,
+`outcome` and `state_ts` (hostd's own names; the transition time is `state_ts` so it never
+collides with the record's own `ts`), the same values namespaced as `microvm.from`,
+`microvm.to`, `microvm.ts`, `microvm.outcome`, and the current trace context.
 
 ## Reading the files at bundle time
 

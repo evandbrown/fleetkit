@@ -12,8 +12,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from hostd.backends.base import Backend, BackendError  # noqa: E402
 from hostd.guest import GuestError, GuestResponse  # noqa: E402
-from hostd.manager import RequestContext, SessionManager  # noqa: E402
-from hostd.model import Session  # noqa: E402
+from hostd.manager import Manager, RequestContext  # noqa: E402
+from hostd.model import MicroVM  # noqa: E402
 from hostd.runner import Runner  # noqa: E402
 from hostd.telemetry import Telemetry  # noqa: E402
 
@@ -48,22 +48,22 @@ class FakeBackend(Backend):
     def address(self, slot: int) -> str:
         return "guest-%d" % slot
 
-    def create(self, session: Session) -> None:
+    def create(self, microvm: MicroVM) -> None:
         self.create_calls += 1
         if self.fail_create:
             raise BackendError(self.fail_create)
-        session.handle["container"] = "c-" + session.id
-        session.console_log = "/nonexistent/%s/console.log" % session.id
-        self.created.append(session.id)
+        microvm.handle["container"] = "c-" + microvm.id
+        microvm.console_log = "/nonexistent/%s/console.log" % microvm.id
+        self.created.append(microvm.id)
 
-    def alive(self, session: Session) -> bool:
-        return self.alive_ids.get(session.id, True)
+    def alive(self, microvm: MicroVM) -> bool:
+        return self.alive_ids.get(microvm.id, True)
 
-    def exit_info(self, session: Session) -> Optional[str]:
+    def exit_info(self, microvm: MicroVM) -> Optional[str]:
         return "status=exited exit=1"
 
-    def destroy(self, session: Session) -> None:
-        self.destroyed.append(session.id)
+    def destroy(self, microvm: MicroVM) -> None:
+        self.destroyed.append(microvm.id)
 
     def verify_clean(self) -> List[str]:
         return ["container c-%s" % sid for sid in self.created if sid not in self.destroyed]
@@ -113,7 +113,7 @@ def ok_task_body(req: Dict[str, Any]) -> Dict[str, Any]:
         t += 100_000_000
     return {"ok": True, "failure_category": "ok", "steps": steps, "task_ms": 500.0, "bytes_received": 1234,
             "request_count": 12, "screenshot_b64": "", "guest_clock_ns": time.time_ns(),
-            "traceparent": None, "log_tail": ["guest line 1", {"level": "WARN", "msg": "guest line 2"}],
+            "traceparent": None, "log_tail": ["guest line 1", {"severity": "WARN", "msg": "guest line 2"}],
             "task_id": req.get("task_id")}
 
 
@@ -140,9 +140,9 @@ def tel(tmp_path) -> Telemetry:
 
 
 @pytest.fixture
-def manager(backend, guest, clock, tel) -> SessionManager:
-    """Synchronous spawn: create_sessions() returns after every launch has run to completion."""
-    return SessionManager(backend, tel, guest=guest, clock=clock.time, sleep=clock.sleep,
+def manager(backend, guest, clock, tel) -> Manager:
+    """Synchronous spawn: create_microvms() returns after every launch has run to completion."""
+    return Manager(backend, tel, guest=guest, clock=clock.time, sleep=clock.sleep,
                           spawn=lambda fn, name: fn(), host_id="test-host")
 
 

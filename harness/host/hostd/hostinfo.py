@@ -3,7 +3,7 @@
 What a reader of a run needs to know about the machine the numbers came from: kernel
 release, CPU model and topology, memory, whether the host is itself virtualized and has
 KVM, its EC2 identity (IMDSv2 with a 1 s budget, null off EC2, never raises), the metrics
-period, and for the firecracker backend the VMM version and the kernel and rootfs the
+period, and for the firecracker backend the Firecracker version and the kernel and rootfs the
 microVMs boot. Never the hostname: it can carry the operator's name into a shared bundle.
 
 Every source is injectable (proc root, /sys cpu root, /dev/kvm path, IMDS base URL, the

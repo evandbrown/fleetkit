@@ -5,7 +5,7 @@
 #   make lgtm-check    proves the pipeline: one span in, one line in results/dev/lgtm/otlp/traces.jsonl
 #
 # Images are pinned by digest (images/lock.env carries the same values). The network is
-# named exactly "fleetkit": the host daemon's docker backend attaches session containers to
+# named exactly "fleetkit": the host daemon's docker backend attaches microVM containers to
 # it and guests reach the fixture as http://fixture. On the AWS host the fixture must be
 # published on the bridge address instead: FIXTURE_BIND=10.200.0.1 make up.
 name: fleetkit

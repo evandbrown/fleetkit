@@ -1,5 +1,5 @@
 #!/bin/bash
-# Drives one run on the experiment hosts from a workstation, using SSM Run Command
+# Drives one run on the worker hosts from a workstation, using SSM Run Command
 # only (no Session Manager plugin needed). Every stage syncs the host's evidence to
 # the results bucket and pulls it locally, and the hosts are torn down from an exit
 # trap whatever happens. Run with bash, not zsh (arrays, word splitting).
@@ -8,7 +8,7 @@
 #
 # Plans:
 #   validation (default)  one m8i.xlarge host: cloud-init, host-setup, hostcheck,
-#                         trial n=1, trial n=2,4, smoke, bundle.
+#                         trial-n1 (density 1), trial-n24 (densities 2 and 4), smoke, bundle.
 #   capacity              one m8i.4xlarge host plus one support host (fixture and
 #                         observability backend, images/support): cloud-init on both,
 #                         host-setup and hostcheck against the support host, the
@@ -211,7 +211,7 @@ if [ -z "$SKIP_APPLY" ]; then
   fi
 fi
 IID=$(first host_instance_ids)
-[ -n "$IID" ] || { log "no experiment host in the terraform outputs"; exit 1; }
+[ -n "$IID" ] || { log "no worker host in the terraform outputs"; exit 1; }
 log "host: $IID (self-terminates 4 h after boot)"
 echo "$IID" > "$OUT/instance-id"
 if [ "$PLAN" = capacity ]; then

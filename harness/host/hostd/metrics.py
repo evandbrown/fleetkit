@@ -2,7 +2,7 @@
 
 Linux reads /proc directly (meminfo, stat, pressure/*). macOS has no PSI and no
 steal; memory and CPU come from psutil when it is installed, else null. Per-
-session figures come from the backend (Engine API stats or the VM's cgroup).
+microVM figures come from the backend (Engine API stats or the VM's cgroup).
 The sample also carries the daemon's own cost (hostd_cpu_usec, hostd_rss_bytes)
 so a reader can subtract it; the period is --metrics-period (default 1 s).
 """
@@ -14,7 +14,7 @@ import threading
 import time
 from typing import Any, Dict, List, Optional
 
-from .backends.base import SESSION_FIGURES
+from .backends.base import MICROVM_FIGURES
 from .model import Defaults, State
 from .procfs import PROC_ROOT, parse_pressure, read_text, status_rss_bytes
 
@@ -89,7 +89,7 @@ def _drop_none(attrs: Dict[str, Any]) -> Dict[str, Any]:
 
 
 class HostSampler:
-    """Samples host and per-session metrics every `period` seconds on a daemon thread."""
+    """Samples host and per-microVM metrics every `period` seconds on a daemon thread."""
 
     def __init__(self, manager: Any, telemetry: Any, period: float = Defaults.METRICS_PERIOD_S,
                  host_id: str = "", proc_root: str = PROC_ROOT):
@@ -143,28 +143,28 @@ class HostSampler:
         sample["cpu_count"] = os.cpu_count()
         sample["hostd_cpu_usec"] = hostd_cpu_usec()
         sample["hostd_rss_bytes"] = hostd_rss_bytes(self.proc_root)
-        sessions: List[Dict[str, Any]] = []
-        # Correlation keys per session (section 8) for the exported points; kept out of the
+        microvms: List[Dict[str, Any]] = []
+        # Correlation keys per microVM (section 8) for the exported points; kept out of the
         # GET /host/metrics shape, which section 4 fixes to {id, rss_bytes, ...}.
         keys: Dict[str, Dict[str, Any]] = {}
-        for s in self.manager.live_sessions():
+        for s in self.manager.live_microvms():
             try:
                 figures = self.manager.backend.sample(s)
             except Exception:
                 figures = {}
-            # Every key of SESSION_FIGURES on every session, whatever the backend returned.
-            sessions.append({"id": s.id, **{k: figures.get(k) for k in SESSION_FIGURES}})
+            # Every key of MICROVM_FIGURES on every microVM, whatever the backend returned.
+            microvms.append({"id": s.id, **{k: figures.get(k) for k in MICROVM_FIGURES}})
             keys[s.id] = {"fleetkit.run_id": s.run_id, "fleetkit.trial_id": s.trial_id,
                           "fleetkit.backend": s.backend}
-        sample["sessions"] = sessions
+        sample["microvms"] = microvms
         self.latest = sample
         self.samples += 1
         self._export(sample, keys)
         return sample
 
-    def _export(self, sample: Dict[str, Any], session_keys: Optional[Dict[str, Dict[str, Any]]] = None) -> None:
+    def _export(self, sample: Dict[str, Any], microvm_keys: Optional[Dict[str, Dict[str, Any]]] = None) -> None:
         """Gauges with the section 8 correlation keys: fleetkit.host_id and fleetkit.backend on host
-        points; those plus fleetkit.session_id, run_id and trial_id on per-session points."""
+        points; those plus fleetkit.microvm_id, run_id and trial_id on per-microVM points."""
         if self.telemetry is None:
             return
         backend = getattr(getattr(self.manager, "backend", None), "name", None)
@@ -176,11 +176,11 @@ class HostSampler:
         for res, entry in psi.items():
             for k, v in entry.items():
                 points.append({"name": "fleetkit.host.psi.%s.%s" % (res, k), "value": v, "attributes": host_attrs})
-        for s in sample["sessions"]:
-            attrs = _drop_none({**host_attrs, **(session_keys or {}).get(s["id"], {}),
-                                "fleetkit.session_id": s["id"]})
-            for k in SESSION_FIGURES:
-                points.append({"name": "fleetkit.session.%s" % k, "value": s.get(k), "attributes": attrs})
+        for s in sample["microvms"]:
+            attrs = _drop_none({**host_attrs, **(microvm_keys or {}).get(s["id"], {}),
+                                "fleetkit.microvm_id": s["id"]})
+            for k in MICROVM_FIGURES:
+                points.append({"name": "fleetkit.microvm.%s" % k, "value": s.get(k), "attributes": attrs})
         self.telemetry.gauges([p for p in points if p["value"] is not None], ts_ns=int(sample["ts"] * 1e9))
 
     def _loop(self) -> None:

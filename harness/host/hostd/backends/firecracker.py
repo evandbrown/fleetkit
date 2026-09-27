@@ -1,4 +1,4 @@
-"""Firecracker backend: one microVM per session on the fcbr0 bridge (Linux hosts).
+"""Firecracker backend: one microVM per slot on the fcbr0 bridge (Linux hosts).
 
 Sections 2-4 of the design, per slot s:
   tap fc-<s> attached to fcbr0; guest IP 10.200.0.(10+s); MAC 06:00:0A:C8:00:<10+s hex>;
@@ -11,7 +11,7 @@ Sections 2-4 of the design, per slot s:
 
 Sampling splits the VM's CPU time by Firecracker thread: `fc_vcpu <n>` threads are the
 guest's vCPUs, every other thread (the main event loop with the device emulation, the API
-thread) is VMM overhead. The proc and cgroup roots are constructor arguments so the
+thread) is hypervisor overhead. The proc and cgroup roots are constructor arguments so the
 readers can be tested against a fake tree.
 
 The serial console (console=ttyS0) is Firecracker's stdout, redirected to the
@@ -27,7 +27,7 @@ import shutil
 import time
 from typing import Any, Dict, List, Optional
 
-from ..model import Session
+from ..model import MicroVM
 from ..procfs import (PROC_ROOT, cgroup_pids, parse_flat_keyed, parse_pressure, read_int, read_text,
                       status_rss_bytes, thread_cpu_split)
 from ..runner import CommandError, Runner
@@ -104,96 +104,96 @@ class FirecrackerBackend(Backend):
     def ip_arg(self, slot: int) -> str:
         return "ip=%s::%s:%s:vm%d:eth0:off:%s" % (self.guest_ip(slot), self.gateway, NETMASK, slot, self.resolver)
 
-    def boot_args(self, session: Session) -> str:
-        args = ["console=ttyS0", "reboot=k", "panic=1", "pci=off", self.ip_arg(session.slot)]
-        if session.fault:
-            args.append("fleetkit.fault=%s" % session.fault)
+    def boot_args(self, microvm: MicroVM) -> str:
+        args = ["console=ttyS0", "reboot=k", "panic=1", "pci=off", self.ip_arg(microvm.slot)]
+        if microvm.fault:
+            args.append("fleetkit.fault=%s" % microvm.fault)
         if self.extra_boot_args:
             args.append(self.extra_boot_args)
         return " ".join(args)
 
-    def run_dir(self, session: Session) -> str:
-        return os.path.join(self.run_root, session.id)
+    def run_dir(self, microvm: MicroVM) -> str:
+        return os.path.join(self.run_root, microvm.id)
 
-    def console_log_path(self, session: Session) -> str:
-        return os.path.join(self.log_dir, "sessions", session.id, "console.log")
+    def console_log_path(self, microvm: MicroVM) -> str:
+        return os.path.join(self.log_dir, "microvms", microvm.id, "console.log")
 
-    def vm_config(self, session: Session) -> Dict[str, Any]:
+    def vm_config(self, microvm: MicroVM) -> Dict[str, Any]:
         """Firecracker rejects unknown keys, so only its own schema goes here."""
         return {
-            "boot-source": {"kernel_image_path": self.kernel, "boot_args": self.boot_args(session)},
+            "boot-source": {"kernel_image_path": self.kernel, "boot_args": self.boot_args(microvm)},
             "drives": [{"drive_id": "rootfs", "path_on_host": self.rootfs,
                         "is_root_device": True, "is_read_only": True}],
-            "machine-config": {"vcpu_count": session.vcpus, "mem_size_mib": session.mem_mib, "smt": SMT},
-            "network-interfaces": [{"iface_id": "eth0", "guest_mac": self.guest_mac(session.slot),
-                                    "host_dev_name": self.tap(session.slot)}],
-            "logger": {"log_path": self.firecracker_log_path(session), "level": "Warning",
+            "machine-config": {"vcpu_count": microvm.vcpus, "mem_size_mib": microvm.mem_mib, "smt": SMT},
+            "network-interfaces": [{"iface_id": "eth0", "guest_mac": self.guest_mac(microvm.slot),
+                                    "host_dev_name": self.tap(microvm.slot)}],
+            "logger": {"log_path": self.firecracker_log_path(microvm), "level": "Warning",
                        "show_level": True, "show_log_origin": False},
         }
 
-    def firecracker_log_path(self, session: Session) -> str:
-        return os.path.join(self.log_dir, "sessions", session.id, "firecracker.log")
+    def firecracker_log_path(self, microvm: MicroVM) -> str:
+        return os.path.join(self.log_dir, "microvms", microvm.id, "firecracker.log")
 
-    def sidecar(self, session: Session) -> Dict[str, Any]:
+    def sidecar(self, microvm: MicroVM) -> Dict[str, Any]:
         """What a human needs next to vm.json: where the console went and which slot this is."""
-        return {"session_id": session.id, "slot": session.slot, "guest_ip": self.guest_ip(session.slot),
-                "guest_mac": self.guest_mac(session.slot), "tap": self.tap(session.slot),
-                "unit": self.unit(session.slot) + ".scope", "console_log": self.console_log_path(session),
-                "firecracker_log": self.firecracker_log_path(session), "fault": session.fault}
+        return {"microvm_id": microvm.id, "slot": microvm.slot, "guest_ip": self.guest_ip(microvm.slot),
+                "guest_mac": self.guest_mac(microvm.slot), "tap": self.tap(microvm.slot),
+                "unit": self.unit(microvm.slot) + ".scope", "console_log": self.console_log_path(microvm),
+                "firecracker_log": self.firecracker_log_path(microvm), "fault": microvm.fault}
 
-    def scope_argv(self, session: Session) -> List[str]:
-        d = self.run_dir(session)
+    def scope_argv(self, microvm: MicroVM) -> List[str]:
+        d = self.run_dir(microvm)
         return ["systemd-run", "--scope", "--quiet",
-                "--unit", self.unit(session.slot),
-                "--description", "fleetkit session %s" % session.id,
-                "-p", "MemoryMax=%dM" % (session.mem_mib + self.mem_overhead_mib),
+                "--unit", self.unit(microvm.slot),
+                "--description", "fleetkit microVM %s" % microvm.id,
+                "-p", "MemoryMax=%dM" % (microvm.mem_mib + self.mem_overhead_mib),
                 "-p", "MemorySwapMax=0",
-                "-p", "CPUQuota=%d%%" % (session.vcpus * CPU_QUOTA_PCT_PER_VCPU),
+                "-p", "CPUQuota=%d%%" % (microvm.vcpus * CPU_QUOTA_PCT_PER_VCPU),
                 self.firecracker,
                 "--api-sock", os.path.join(d, "fc.sock"),
                 "--config-file", os.path.join(d, "vm.json")]
 
     # --- lifecycle ---------------------------------------------------------
-    def create(self, session: Session) -> None:
-        slot = session.slot
-        d = self.run_dir(session)
+    def create(self, microvm: MicroVM) -> None:
+        slot = microvm.slot
+        d = self.run_dir(microvm)
         tap = self.tap(slot)
-        session.handle.update({"tap": tap, "unit": self.unit(slot) + ".scope", "run_dir": d})
-        session.console_log = self.console_log_path(session)
+        microvm.handle.update({"tap": tap, "unit": self.unit(slot) + ".scope", "run_dir": d})
+        microvm.console_log = self.console_log_path(microvm)
         self.runner.mkdir(d)
-        self.runner.mkdir(os.path.dirname(session.console_log))
-        self.runner.write_file(os.path.join(d, "vm.json"), json.dumps(self.vm_config(session), indent=2) + "\n")
-        self.runner.write_file(os.path.join(d, "session.json"), json.dumps(self.sidecar(session), indent=2) + "\n")
-        self.runner.write_file(self.firecracker_log_path(session), "")   # Firecracker wants it to exist
+        self.runner.mkdir(os.path.dirname(microvm.console_log))
+        self.runner.write_file(os.path.join(d, "vm.json"), json.dumps(self.vm_config(microvm), indent=2) + "\n")
+        self.runner.write_file(os.path.join(d, "microvm.json"), json.dumps(self.sidecar(microvm), indent=2) + "\n")
+        self.runner.write_file(self.firecracker_log_path(microvm), "")   # Firecracker wants it to exist
         try:
             self.runner.run(["ip", "tuntap", "add", "dev", tap, "mode", "tap"], timeout=20)
             self.runner.run(["ip", "link", "set", tap, "master", self.bridge], timeout=20)
             self.runner.run(["ip", "link", "set", tap, "up"], timeout=20)
         except CommandError as e:
             raise BackendError("tap setup failed: %s" % e) from e
-        handle = self.runner.popen(self.scope_argv(session), stdout_path=session.console_log)
-        session.handle["process"] = handle
-        session.handle["pid"] = handle.pid
+        handle = self.runner.popen(self.scope_argv(microvm), stdout_path=microvm.console_log)
+        microvm.handle["process"] = handle
+        microvm.handle["pid"] = handle.pid
         if not self.runner.dry_run:
-            # A VMM that dies at once (bad config, missing kernel) shows up here, not after a poll.
+            # A Firecracker process that dies at once (bad config, missing kernel) shows up here, not after a poll.
             rc = handle.wait(0.2)
             if rc is not None:
-                raise BackendError("firecracker exited immediately (rc=%s); see %s" % (rc, session.console_log))
+                raise BackendError("firecracker exited immediately (rc=%s); see %s" % (rc, microvm.console_log))
 
-    def alive(self, session: Session) -> bool:
-        handle = session.handle.get("process")
+    def alive(self, microvm: MicroVM) -> bool:
+        handle = microvm.handle.get("process")
         if handle is None:
             return False
         return handle.poll() is None
 
-    def exit_info(self, session: Session) -> Optional[str]:
-        handle = session.handle.get("process")
+    def exit_info(self, microvm: MicroVM) -> Optional[str]:
+        handle = microvm.handle.get("process")
         if handle is None or self.runner.dry_run:
             return None
         rc = handle.poll()
         info = "firecracker exited rc=%s" % rc
         try:
-            with open(session.console_log or "", "rb") as f:
+            with open(microvm.console_log or "", "rb") as f:
                 f.seek(0, os.SEEK_END)
                 f.seek(max(0, f.tell() - 600))
                 tail = f.read().decode(errors="replace").strip().splitlines()[-3:]
@@ -203,19 +203,19 @@ class FirecrackerBackend(Backend):
             pass
         return info[:500]
 
-    def destroy(self, session: Session) -> None:
-        slot = session.slot
+    def destroy(self, microvm: MicroVM) -> None:
+        slot = microvm.slot
         unit = self.unit(slot) + ".scope"
         # SIGKILL the scope: nothing to flush in a read-only guest (section 4).
         self.runner.run(["systemctl", "kill", "--signal=SIGKILL", unit], check=False, timeout=20)
-        handle = session.handle.get("process")
+        handle = microvm.handle.get("process")
         if handle is not None:
             handle.wait(5.0)
         self.runner.run(["ip", "link", "del", self.tap(slot)], check=False, timeout=20)
         self._wait_scope_gone(unit, 5.0)
         self.runner.run(["systemctl", "reset-failed", unit], check=False, timeout=20)
-        self.runner.remove_tree(self.run_dir(session))
-        self._cgroup_paths.pop(session.id, None)
+        self.runner.remove_tree(self.run_dir(microvm))
+        self._cgroup_paths.pop(microvm.id, None)
 
     def _wait_scope_gone(self, unit: str, timeout: float) -> None:
         deadline = time.monotonic() + timeout
@@ -228,31 +228,31 @@ class FirecrackerBackend(Backend):
             time.sleep(0.1)
 
     # --- sampling ----------------------------------------------------------
-    def _cgroup_dir(self, session: Session) -> Optional[str]:
-        cached = self._cgroup_paths.get(session.id)
+    def _cgroup_dir(self, microvm: MicroVM) -> Optional[str]:
+        cached = self._cgroup_paths.get(microvm.id)
         if cached:
             return cached
-        unit = self.unit(session.slot) + ".scope"
+        unit = self.unit(microvm.slot) + ".scope"
         for candidate in (os.path.join(self.cgroup_root, "system.slice", unit),):
             if os.path.isdir(candidate):
-                self._cgroup_paths[session.id] = candidate
+                self._cgroup_paths[microvm.id] = candidate
                 return candidate
         r = self.runner.run(["systemctl", "show", "-p", "ControlGroup", "--value", unit], check=False, timeout=10)
         cg = r.stdout.strip()
         if cg:
             path = self.cgroup_root + cg
             if os.path.isdir(path):
-                self._cgroup_paths[session.id] = path
+                self._cgroup_paths[microvm.id] = path
                 return path
         return None
 
-    def sample(self, session: Session) -> Dict[str, Optional[int]]:
+    def sample(self, microvm: MicroVM) -> Dict[str, Optional[int]]:
         """The scope's cgroup figures, VmRSS summed over its processes, and the Firecracker
-        process's CPU split into vCPU threads and VMM threads (cumulative, microseconds)."""
+        process's CPU split into vCPU threads and hypervisor threads (cumulative, microseconds)."""
         out = empty_sample()
         if self.runner.dry_run:
             return out
-        cg = self._cgroup_dir(session)
+        cg = self._cgroup_dir(microvm)
         if not cg:
             return out
         out["cgroup_memory_current"] = read_int(os.path.join(cg, "memory.current"))
@@ -271,7 +271,7 @@ class FirecrackerBackend(Backend):
         out["rss_bytes"] = sum(rss) if rss else None
         split = thread_cpu_split(pids, self.proc_root)
         out["cpu_vcpu_usec"] = split["vcpu_usec"]
-        out["cpu_vmm_usec"] = split["other_usec"]
+        out["cpu_hypervisor_usec"] = split["other_usec"]
         return out
 
     # --- static facts for GET /host/info -------------------------------------
@@ -284,7 +284,7 @@ class FirecrackerBackend(Backend):
         return lines[0] if lines else None
 
     def info(self) -> Dict[str, Any]:
-        example = Session(id="s000-example", slot=0, backend=self.name, address=self.address(0), vcpus=2,
+        example = MicroVM(id="s000-example", slot=0, backend=self.name, address=self.address(0), vcpus=2,
                           mem_mib=2048, fault=None, ready_timeout_s=0, max_lifetime_s=0, idle_timeout_s=0,
                           fixture_base_url=self.fixture_base_url)
         return {

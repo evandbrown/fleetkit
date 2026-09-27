@@ -1,5 +1,5 @@
 output "host_instance_ids" {
-  description = "Instance ids of the experiment hosts; empty when host_count is 0."
+  description = "Instance ids of the worker hosts; empty when host_count is 0."
   value       = aws_instance.host[*].id
 }
 
@@ -9,7 +9,7 @@ output "support_instance_ids" {
 }
 
 output "support_private_ips" {
-  description = "Private IPs of the support hosts, which the experiment hosts and their guests reach on 8081 (fixture) and 4317/4318 (OTLP)."
+  description = "Private IPs of the support hosts, which the worker hosts and their guests reach on 8081 (fixture) and 4317/4318 (OTLP)."
   value       = aws_instance.support[*].private_ip
 }
 
@@ -21,11 +21,11 @@ output "results_bucket" {
 }
 
 output "host_security_group_id" {
-  description = "Egress-only security group of the experiment hosts."
+  description = "Egress-only security group of the worker hosts."
   value       = aws_security_group.host.id
 }
 
 output "host_instance_profile_name" {
-  description = "Instance profile (SSM plus the results bucket) of the experiment hosts."
+  description = "Instance profile (SSM plus the results bucket) of the worker hosts."
   value       = aws_iam_instance_profile.host.name
 }

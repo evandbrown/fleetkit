@@ -121,7 +121,7 @@ def thread_cpu_split(pids: Iterable[str], proc_root: str = PROC_ROOT, tck: Optio
 
     Threads are /proc/<pid>/task/<tid>; a thread whose comm starts with `vcpu_prefix` counts as
     vCPU time, every other thread (Firecracker's main event loop with the device emulation, its
-    API thread) as VMM time. A thread that has already exited is not counted: its time moves to
+    API thread) as hypervisor time. A thread that has already exited is not counted: its time moves to
     the process total, not to any task entry. Firecracker's threads live as long as the VM, so
     nothing is lost in practice. Both values are None when no thread could be read.
     """

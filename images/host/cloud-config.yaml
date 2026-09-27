@@ -10,7 +10,7 @@
 bootcmd:
   # The hard stop on cost, armed before anything else and on every boot. The
   # instance terminates on shutdown (host.tf), so this ends the instance, not
-  # just the session. Cancel with `shutdown -c`, re-arm with `shutdown -h +N`.
+  # just this boot. Cancel with `shutdown -c`, re-arm with `shutdown -h +N`.
   - shutdown -h +${shutdown_after_minutes}
 
 # The AMI's frozen package snapshot is what the pin in ami.lock.json means.

@@ -1,12 +1,12 @@
 # How we run capacity experiments
 
-This page defines the words we use and the procedure every capacity experiment follows. Specs, pre-registrations, reports, the explorer and the code use these words and no others. When a term here changes, everything else changes with it.
+This page defines the words we use and the procedure every campaign, run and trial follows. Specs, campaign definitions, pre-registrations, reports, the explorer and the code use these words and no others. When a term here changes, everything else changes with it.
 
 ## The question
 
-How many browsers can one worker host run at the same time, each doing a real shopping task, with every task inside its latency targets? At that number, what does a task cost, and what ran out first: which resource, used by which process?
+How many browsers can one worker host run at the same time, each doing a real shopping task, with every task inside its latency targets? At that density, what does a task cost, and what ran out first: which resource, used by which process?
 
-Every browser runs in its own microVM. That isolation is a requirement of the product, not something an experiment varies.
+Every browser runs in its own microVM. That isolation is a requirement of the product, not something a campaign varies.
 
 ## Glossary
 
@@ -15,64 +15,85 @@ Every browser runs in its own microVM. That isolation is a requirement of the pr
 | Term | Meaning |
 |---|---|
 | **Worker host** | The EC2 instance whose capacity is measured. |
-| **Host kind** | *Metal*: an EC2 bare-metal instance, where microVMs run directly on the hardware. *Nested*: an ordinary EC2 instance, where microVMs run inside it through nested virtualization. |
+| **Host kind** | *Metal*: an EC2 bare-metal instance, where microVMs run directly on the hardware. *Nested*: an ordinary EC2 instance, where microVMs run inside it through nested virtualization. It follows from the instance type, so a spec never states it. |
 | **Hypervisor** | The program on the worker host that runs each microVM: Firecracker or Cloud Hypervisor. |
 | **Support host** | A separate instance that serves the test shopping site and collects telemetry, so neither competes with the microVMs for the worker host's CPU. |
 
-### What a result is made of
+### Units
 
-From biggest to smallest. Each contains the next.
+There are four units, from biggest to smallest. Each contains the next, and there are no others.
 
-| Term | Meaning |
+| Unit | Meaning |
 |---|---|
-| **Campaign** | Several runs launched together. |
-| **Run** | One worker host executing one spec from start to finish. |
-| **Level** | A number N. At level N, N microVMs are started at the same moment. Level 8 means 8 microVMs at once. A run tests several levels. |
-| **Trial** | One attempt at a level: start N fresh microVMs, run one shopping task in each, destroy them. Trials at the same level run one after another, never overlapping, and are numbered from 1 within their level: "trial 2 at level 8". Every trial at a level has identical inputs, down to which product each microVM shops for. Only the conditions the experiment doesn't control differ: fresh microVMs, when the trial ran, and the host's state at that moment. |
-| **MicroVM** | One of the N in a trial. It runs one headless Chrome, and that browser runs one shopping task of five steps. |
+| **Campaign** | A named set of runs launched together to answer one question. |
+| **Run** | One worker host carrying out one spec, start to finish. |
+| **Trial** | Start N fresh microVMs at the same moment, run one task in each, destroy them. N is the trial's density. |
+| **MicroVM** | One of the N in a trial. It runs one headless Chromium, and that browser runs one shopping task of five steps. |
 
-### How runs relate
+Trials at the same density run one after another, never overlapping, and are numbered from 1 within their density: "trial 2 at density 8". The warm-up and illustration trials are labelled as such and not numbered.
 
-| Term | Meaning |
+Every trial at a density has identical inputs, down to which product each microVM shops for. Only what the run doesn't control differs: fresh microVMs, when the trial ran, and the host's state at that moment.
+
+### Inputs
+
+| Input | Meaning |
 |---|---|
-| **Spec** | The complete, fixed inputs of a run: the host, the hypervisor, the microVM's size, the workload, the procedure and the pass criteria. A spec is written and committed before its run. |
-| **Replica** | Another run with the same spec on a different worker host. |
+| **Spec** | Everything fixed about one run, including the list of densities to test. It covers the worker host, the hypervisor, the microVM's size and guest, the workload, the support host, the densities, the procedure, the pass criteria, and the sampling and attribution rules. |
+| **Campaign definition** | What the experiment builder produces: the question, a base spec, the named specs written as their changes from the base, and the number of replicas. |
+| **Replicas** | How many runs each spec gets, each on its own worker host. |
 
-Extra trials at one level show how much the same test varies on the same host. Replicas show how much it varies from host to host. A comparison between two specs means something only when the difference between them is larger than both.
+Two kinds of value are never inputs:
+
+- **Values derivable from other inputs.** The host kind follows from the instance type.
+- **Measured facts.** The worker host's CPU model and the guest kernel's digest are examples. A run records them beside its spec, as what it observed.
+
+### Measures
+
+| Measure | Meaning |
+|---|---|
+| **Density** | How many microVMs a trial starts at once. It is a value, not a unit: the spec lists the densities to test, and each trial records its own. Nothing sits between a run and its trials; a run's trials are grouped by density only to judge them. |
+| **Pass** | A trial passes if it meets every criterion in its spec. A density passes if every trial at it passed. |
+| **Result** | A run's result is the highest density that passed with every lower density passing too. It is stated as "tested successfully", never as a maximum, because the densities between the last pass and the first miss were not tried. |
+| **Density per host vCPU** | A run's result divided by the worker host's vCPUs. It puts hosts of different sizes on one scale. |
+| **Cost per 1,000 tasks** | What 1,000 tasks cost at a run's result, from the worker host's hourly price and the time the tasks took. It puts hosts at different prices on one scale. |
+
+Extra trials at one density show how much the same test varies on the same host. Replicas show how much it varies from host to host. A comparison between two specs means something only when the difference between them is larger than both.
 
 ### Words we don't use
 
 | Don't say | Say |
 |---|---|
-| repeat | trial 2 at level 8 |
+| level | density: "density 8", "trial 2 at density 8" |
+| repeat | trial 2 at density 8 |
 | factor, condition | the specs in this campaign, or the input that differs |
-| VMM | hypervisor |
 | session, for a microVM | microVM |
+| VMM | hypervisor |
+| experiment, as a unit | campaign, run or trial. The experiment builder is the tool that writes campaign definitions. |
 
 ## The procedure
 
-### 1. Write the spec and commit it first
+### 1. Write the campaign definition and commit it first
 
-The spec names everything the run will do, including the pass criteria and the rules for reading the result. It is committed before the run starts, and the run records the commit it ran from. Anyone can then check that the criteria weren't chosen after the data arrived.
+The campaign definition names everything its runs will do: every spec, with its pass criteria and the rules for reading the result, and how many replicas each spec gets. It is committed before the first run starts, and each run records the commit it ran from. Anyone can then check that the criteria weren't chosen after the data arrived.
 
 ### 2. One run on one worker host
 
-1. **Warm-up.** One trial at level 1, excluded from the result. The first microVM after setup reads its root filesystem from disk; later ones read it from memory.
-2. **The ladder.** The levels in increasing order, for example 1, 2, 4, 8, 12, 16, with one trial each.
-3. **Stop at the first failing level.** No higher level runs.
-4. **Check the boundary.** Two more trials at the last passing level and two more at the first failing level, three trials at each. If a new trial at the last passing level fails, that level becomes a failing level, and the next lower passing level gets two more trials, and so on down.
-5. **Illustration.** One trial at level 1 that takes a screenshot after every step, for the filmstrip. The screenshots take time inside the task, so this trial is excluded from the result.
+1. **Warm-up.** One trial at density 1, labelled *warm-up*, not numbered and excluded from the result. The first microVM after setup reads its root filesystem from disk; later ones read it from memory.
+2. **The ladder.** The spec's densities in increasing order, for example 1, 2, 4, 8, 12, 16. Each gets trial 1, and more if the spec asks for more trials per density.
+3. **Stop at the first failing density.** No higher density runs.
+4. **Check the boundary.** The spec's boundary trials run at the last passing density and again at the first failing density. With two boundary trials and one ladder trial, each of the two densities ends with trials 1 to 3. If a new trial at the last passing density fails, that density becomes a failing density, the next lower passing density gets the boundary trials, and so on down.
+5. **Illustration.** One trial at density 1, labelled *illustration* and not numbered, that takes a screenshot after every step for the filmstrip. The screenshots take time inside the task, so this trial is excluded from the result.
 
 ### 3. One trial
 
 1. The worker host sits idle for a fixed period, and its CPU during that time is recorded.
-2. N microVMs are started together. The trial waits until every one reports its browser ready.
+2. N microVMs are started together, where N is the trial's density. The trial waits until every one reports its browser ready.
 3. All N shopping tasks are released at the same moment. Each task has five steps: open the home page, search, open a product, add it to the cart, and verify the cart.
 4. When every task has returned, all N microVMs are destroyed, and the host is checked for anything left behind.
 
 ### 4. Judge
 
-A **trial passes** only if all of its criteria hold:
+A **trial passes** only if it meets every criterion in its spec. The criteria are:
 
 - all N microVMs became ready within the time limit
 - all N tasks succeeded
@@ -80,15 +101,17 @@ A **trial passes** only if all of its criteria hold:
 - the whole task met its latency target
 - nothing was left on the host
 
-A **level passes** only if every trial at it passed.
+A **density passes** only if every trial at it passed.
 
-The **result of a run** is the highest level that passed with every lower level also passing. It is always stated as "tested successfully", never as a maximum, because levels between the last pass and the first miss were not tried.
+A **run's result** is the highest density that passed with every lower density also passing, stated as "tested successfully".
 
 ### 5. Record
 
 Every run records:
 
-- **Inputs:** its spec, and facts measured on the worker host, such as its CPU model and core count.
+- **Spec:** the spec it carried out.
+- **Observed facts:** what was measured about the worker host and the guest, such as the CPU model, the core count and the kernel. They sit beside the spec and are never part of it.
+- **Per trial:** its density and its number within that density, or its label. The trial id reads the same way: `d8-t2` is trial 2 at density 8, and `warmup` and `illustration` are the labelled trials. Each trial also records its place in the run's order, because trials at different densities interleave once the boundary is checked.
 - **Per microVM:** when it was created, when its kernel, guest and browser started, when it became ready, and when it was destroyed.
 - **Per step:** start, end, bytes and requests.
 - **Samples:** the worker host's CPU, pressure and memory, five times a second, split by microVM and by the hypervisor's own threads. Inside each microVM, CPU and memory by process type during its task.
@@ -105,11 +128,11 @@ Each trial gets a verdict on which resource limited it. The verdict is computed 
 - CPU taken by the hypervisor under a nested worker host
 - none of these
 
-Beside the verdict, the report names the process that used the resource: on the worker host, each microVM's virtual CPUs against the hypervisor's own work; inside a microVM, the browser's renderer against its other processes.
+Beside the verdict, the report names the process that used the resource: on the worker host, each microVM's virtual CPUs against the hypervisor's own work; inside a microVM, Chromium's renderer against its other processes.
 
 ### 7. Compare
 
-A campaign runs several specs at once. Specs in a campaign differ only in the inputs being compared, and each spec runs on more than one worker host as replicas. After a result, the next experiment changes one input, chosen from what the evidence shows.
+A campaign runs several specs at once. Specs in a campaign differ only in the inputs being compared, and each spec runs on more than one worker host as replicas. Runs are compared by their results, by density per host vCPU and by cost per 1,000 tasks, so a small host and a large one, or a nested host and a metal one, read on one scale. After a result, the next campaign changes one input, chosen from what the evidence shows.
 
 ## Worked example: cap-baseline-1
 
@@ -117,17 +140,21 @@ The first capacity run, on 27 September 2026, pre-registered in [capacity-experi
 
 **Setup:** one m8i.4xlarge worker host (nested; 16 virtual CPUs on 8 physical cores), Firecracker, microVMs of 2 virtual CPUs and 2 GiB.
 
-| Level | Trials | Result |
+| Density | Trials | Result |
 |---|---|---|
 | 1 | 1 | passed |
 | 2 | 1 | passed |
 | 4 | 1 | passed |
 | 8 | 3 | all three passed |
 | 12 | 3 | all three failed |
-| 16 | 0 | not run: the ladder stopped at 12 |
+| 16 | 0 | not run: the run stopped at 12 |
 
-At level 12, every microVM became ready and every task succeeded. Each trial failed one latency target: the median home-page step took 1,279, 1,063 and 1,563 ms against a target of 1,000 ms.
+In the order they ran: the warm-up, d1-t1, d2-t1, d4-t1, d8-t1, d12-t1, then the boundary trials d8-t2, d8-t3, d12-t2 and d12-t3, and last the illustration.
 
-**Result:** level 8 was tested successfully on this worker host. Levels 9 to 11 were not tried.
+At density 12, every microVM became ready and every task succeeded. Each trial failed one latency target: the median home-page step took 1,279, 1,063 and 1,563 ms against a target of 1,000 ms.
 
-**Attribution:** at level 12 the worker host's CPU was contended. Tasks were waiting for CPU for 35 to 47 percent of the time. The microVMs' virtual CPUs used almost all of it, and inside them Chrome's renderer processes did most of the work.
+**Result:** density 8 was tested successfully on this worker host. Densities 9 to 11 were not tried.
+
+**Compared across hosts:** 0.5 microVMs per host vCPU (8 on 16). About $0.075 per 1,000 tasks counting only the time the tasks ran, or $0.19 counting startup and cleanup too, at the assumed $0.84672 an hour.
+
+**Attribution:** at density 12 the worker host's CPU was contended. Tasks were waiting for CPU for 35 to 47 percent of the time. The microVMs' virtual CPUs used almost all of it, and inside them Chromium's renderer processes did most of the work.

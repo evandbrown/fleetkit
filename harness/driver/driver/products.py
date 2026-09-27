@@ -1,6 +1,6 @@
 """The fixture check and the task product list (fixture/dist/task-products.json).
 
-Products are assigned to sessions as ``list[slot mod len]`` (design section 4).
+Products are assigned to microVMs by slot as ``list[slot mod len]`` (design section 4).
 The list may be a JSON array or ``{"products": [...]}``; each entry needs a product id, a search
 query and the expected title. Accepted keys: ``product_id``/``id``, ``query``, ``expected_title``/``title``.
 """

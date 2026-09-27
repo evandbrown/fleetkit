@@ -11,7 +11,7 @@ from opentelemetry import trace
 from opentelemetry.sdk._logs import LoggingHandler
 from opentelemetry.trace import format_span_id, format_trace_id
 
-from .attributes import ATTR_SESSION_ID, EVENT_SESSION_STATE
+from .attributes import ATTR_MICROVM_ID, EVENT_MICROVM_STATE
 from .propagation import get_correlation
 
 _STANDARD_RECORD_KEYS = frozenset(
@@ -27,7 +27,7 @@ def record_extras(record: logging.LogRecord) -> dict[str, Any]:
 
 
 class JsonFormatter(logging.Formatter):
-    """One JSON object per line: ts (Unix seconds), level, logger, msg, trace ids, extras."""
+    """One JSON object per line: ts (Unix seconds), severity, logger, msg, trace ids, extras."""
 
     def __init__(self, service_name: str) -> None:
         super().__init__()
@@ -36,7 +36,7 @@ class JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         out: dict[str, Any] = {
             "ts": record.created,
-            "level": record.levelname,
+            "severity": record.levelname,
             "logger": record.name,
             "service": self.service_name,
             "msg": record.getMessage(),
@@ -93,43 +93,44 @@ class RateLimitOtelNoise(logging.Filter):
         return True
 
 
-def log_session_state(
+def log_microvm_state(
     logger: logging.Logger,
-    session_id: str,
+    microvm_id: str,
     from_state: str | None,
     to_state: str,
     ts: float,
     outcome: str | None = None,
     **extra: Any,
 ) -> None:
-    """Emit the ``session.state`` record of design section 4 with trace context.
+    """Emit the ``microvm.state`` record of design section 4 with trace context.
 
-    Design section 4 names the fields ``{session_id, from, to, ts, outcome}``, and the host
+    Design section 4 names the fields ``{microvm_id, from, to, ts, outcome}``, and the host
     daemon emits exactly those. This record carries the same names so a reader can use either
-    source: ``session_id``, ``from``, ``to`` and ``outcome`` as they are, and the transition
+    source: ``microvm_id``, ``from``, ``to`` and ``outcome`` as they are, and the transition
     time as ``state_ts``, because ``ts`` is the log record's own emission time (the JSON
-    formatter writes it at the top level) and would be overwritten. The earlier namespaced
-    fields (``session.from``, ``session.to``, ``session.ts``, ``session.outcome``) stay for
-    compatibility. Log attributes cannot be null, so an initial transition has ``from`` = ""
-    (hostd writes null) and a transition without an outcome has no ``outcome`` field.
+    formatter writes it at the top of the line) and would be overwritten. The namespaced
+    fields (``microvm.from``, ``microvm.to``, ``microvm.ts``, ``microvm.outcome``) carry the
+    same values for readers that query by namespace. Log attributes cannot be null, so an
+    initial transition has ``from`` = "" (hostd writes null) and a transition without an
+    outcome has no ``outcome`` field.
     """
     from_value = from_state if from_state is not None else ""
     fields: dict[str, Any] = {
-        "event.name": EVENT_SESSION_STATE,
-        ATTR_SESSION_ID: session_id,
-        "session_id": session_id,
+        "event.name": EVENT_MICROVM_STATE,
+        ATTR_MICROVM_ID: microvm_id,
+        "microvm_id": microvm_id,
         "from": from_value,
         "to": to_state,
         "state_ts": float(ts),
-        "session.from": from_value,
-        "session.to": to_state,
-        "session.ts": float(ts),
+        "microvm.from": from_value,
+        "microvm.to": to_state,
+        "microvm.ts": float(ts),
     }
     if outcome is not None:
         fields["outcome"] = outcome
-        fields["session.outcome"] = outcome
+        fields["microvm.outcome"] = outcome
     fields.update(extra)
-    logger.info("%s %s %s -> %s", EVENT_SESSION_STATE, session_id, from_state, to_state, extra=fields)
+    logger.info("%s %s %s -> %s", EVENT_MICROVM_STATE, microvm_id, from_state, to_state, extra=fields)
 
 
 class OtelBridgeHandler(LoggingHandler):

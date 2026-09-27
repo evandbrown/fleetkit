@@ -1,16 +1,16 @@
 """A stub host daemon for driver tests: implements the hostd API of design section 4 with a fake
-session model, the five faults, the idle and lifetime reapers, verify-clean, host metrics, and its
+microVM model, the five faults, the idle and lifetime reapers, verify-clean, host metrics, and its
 own spans.jsonl/logs.jsonl (services ``hostd`` and ``guest-daemon``, log records in the shape of
-hostd/telemetry.py) plus sessions/<id>/console.log, so the trace assertion and the bundle inventory
+hostd/telemetry.py) plus microvms/<id>/console.log, so the trace assertion and the bundle inventory
 can be exercised offline. Like the real guest, a failed task's reply carries only the steps
 completed so far. No Docker, no Chromium.
 
 Capacity-experiment fields (contract section 1 and 2): ``GET /host/info``; boot phases and
-``guest_info`` on the session record once ready; ``cpu_count``/``hostd_*`` and, for sessions created
-with backend ``firecracker``, the per-VM CPU/throttle/pressure counters on ``/host/metrics``; per-step
-``bytes_received``/``request_count``, ``proc_samples``, ``timing_valid``, ``guestd_cpu_ms`` and
-``step_screenshots`` on the task result. ``step_ms_per_n`` makes each step take longer with the
-number of live sessions, so a ladder finds a limit. Also runnable by hand::
+``guest_info`` on the microVM record once ready; ``cpu_count``/``hostd_*`` and, for microVMs created
+with backend ``firecracker``, the per-microVM CPU/throttle/pressure counters on ``/host/metrics``;
+per-step ``bytes_received``/``request_count``, ``proc_samples``, ``timing_valid``, ``guestd_cpu_ms``
+and ``step_screenshots`` on the task result. ``step_ms_per_n`` makes each step take longer with the
+number of live microVMs, so a ladder finds a limit. Also runnable by hand::
 
     python3 -m tests.stub_hostd --port 8090 --telemetry-dir results/hostd
 
@@ -47,18 +47,18 @@ class StubOptions:
         self.host_id = kw.get("host_id", "stub-host")
         self.jitter_ms = kw.get("jitter_ms", 10)
         self.crash_slots = set(kw.get("crash_slots", ()))  # slots that crash on start regardless of fault
-        self.step_ms_per_n = kw.get("step_ms_per_n", 0)  # extra ms per step per live session beyond the first
+        self.step_ms_per_n = kw.get("step_ms_per_n", 0)  # extra ms per step per live microVM beyond the first
         self.host_info = kw.get("host_info", True)  # False: GET /host/info answers 404 (an older daemon)
         self.ec2 = kw.get("ec2")  # the /host/info ec2 object (None off EC2)
         self.cpu_count = kw.get("cpu_count", 16)
 
 
-class Session:
-    def __init__(self, sid: str, slot: int, spec: dict, opts: StubOptions):
-        self.id = sid
+class MicroVM:
+    def __init__(self, mid: str, slot: int, create_request: dict, opts: StubOptions):
+        self.id = mid
         self.slot = slot
-        self.spec = spec
-        self.backend = spec.get("backend", "docker")
+        self.request = create_request
+        self.backend = create_request.get("backend", "docker")
         self.address = f"127.0.0.1:{18080 + slot}"
         self.state = "creating"
         self.created_ts = time.time()
@@ -70,7 +70,7 @@ class Session:
         self.cleanup_ms = None
         self.outcome = None
         self.error = None
-        self.fault = spec.get("fault") or None
+        self.fault = create_request.get("fault") or None
         self.lock = threading.Lock()
         self.task_lock = threading.Lock()
         self.tasks_run = 0
@@ -91,7 +91,7 @@ class Session:
 class StubHost:
     def __init__(self, opts: StubOptions):
         self.o = opts
-        self.sessions: dict[str, Session] = {}
+        self.microvms: dict[str, MicroVM] = {}
         self.lock = threading.Lock()
         self.slots_in_use: set[int] = set()
         self.transitions: list[dict] = []
@@ -104,32 +104,32 @@ class StubHost:
         self.task_payloads: list[dict] = []
 
     # ---- lifecycle -----------------------------------------------------------------------
-    def create(self, spec: dict, traceparent: str | None, run_id: str | None) -> list[dict]:
+    def create(self, create_request: dict, traceparent: str | None, run_id: str | None) -> list[dict]:
         out = []
         with self.lock:
-            for _ in range(int(spec.get("count", 1))):
+            for _ in range(int(create_request.get("count", 1))):
                 slot = next(s for s in range(0, 120) if s not in self.slots_in_use)
                 self.slots_in_use.add(slot)
-                sid = f"sess-{uuid.uuid4().hex[:8]}"
-                s = Session(sid, slot, spec, self.o)
-                self.sessions[sid] = s
-                out.append({"id": sid, "slot": slot, "address": s.address})
+                mid = f"s{slot:03d}-{uuid.uuid4().hex[:8]}"  # the format hostd issues
+                s = MicroVM(mid, slot, create_request, self.o)
+                self.microvms[mid] = s
+                out.append({"id": mid, "slot": slot, "address": s.address})
                 threading.Thread(target=self._boot, args=(s, traceparent, run_id), daemon=True).start()
         return out
 
-    def _transition(self, s: Session, to: str, outcome=None, traceparent=None, run_id=None):
+    def _transition(self, s: MicroVM, to: str, outcome=None, traceparent=None, run_id=None):
         frm = s.state
         s.state = to
         if outcome and not s.outcome:
             s.outcome = outcome
-        rec = {"session_id": s.id, "from": frm, "to": to, "ts": time.time(), "outcome": s.outcome}
+        rec = {"microvm_id": s.id, "from": frm, "to": to, "ts": time.time(), "outcome": s.outcome}
         self.transitions.append(rec)
         if self.tel:
-            self.tel.log("hostd", "session.state", rec, traceparent, run_id)
+            self.tel.log("hostd", "microvm.state", rec, traceparent, run_id)
 
-    def _boot(self, s: Session, traceparent, run_id):
+    def _boot(self, s: MicroVM, traceparent, run_id):
         t0 = time.time()
-        delay = int(s.spec.get("launch_interval_ms", 0) or 0) * s.slot / 1000.0
+        delay = int(s.request.get("launch_interval_ms", 0) or 0) * s.slot / 1000.0
         if delay:
             time.sleep(delay)
         span_start = time.time_ns()
@@ -147,11 +147,11 @@ class StubHost:
             self._teardown(s, traceparent, run_id)
             return
         if s.fault == "never_ready":
-            deadline = t0 + float(s.spec.get("ready_timeout_s", 60))
+            deadline = t0 + float(s.request.get("ready_timeout_s", 60))
             while time.time() < deadline and s.state == "booting":
                 time.sleep(0.05)
             if s.state == "booting":
-                s.error = f"not ready within ready_timeout_s={s.spec.get('ready_timeout_s')}"
+                s.error = f"not ready within ready_timeout_s={s.request.get('ready_timeout_s')}"
                 self._transition(s, "failed", "startup_timeout", traceparent, run_id)
                 self._teardown(s, traceparent, run_id)
             return
@@ -168,18 +168,18 @@ class StubHost:
                       "guest_info": {"guestd_version": "stub", "chromium_version": "154.0.0.0-stub",
                                      "chromium_flags": ["--headless=new", "--remote-debugging-port=9222"],
                                      "kernel_cmdline": "console=ttyS0 reboot=k panic=1 fleetkit.stub=1",
-                                     "vcpus": int(s.spec.get("vcpus", 2)),
-                                     "mem_total": int(s.spec.get("mem_mib", 2048)) * 1024 * 1024}}
+                                     "vcpus": int(s.request.get("vcpus", 2)),
+                                     "mem_total": int(s.request.get("mem_mib", 2048)) * 1024 * 1024}}
             self._transition(s, "ready", traceparent=traceparent, run_id=run_id)
         if self.tel:
-            self.tel.span("hostd", "session.create", traceparent, span_start, time.time_ns(),
-                          {"fleetkit.session_id": s.id, "fleetkit.run_id": run_id or ""})
+            self.tel.span("hostd", "microvm.create", traceparent, span_start, time.time_ns(),
+                          {"fleetkit.microvm_id": s.id, "fleetkit.run_id": run_id or ""})
 
-    def get(self, sid: str):
-        return self.sessions.get(sid)
+    def get(self, mid: str):
+        return self.microvms.get(mid)
 
-    def destroy(self, sid: str, outcome=None, traceparent=None, run_id=None) -> bool:
-        s = self.sessions.get(sid)
+    def destroy(self, mid: str, outcome=None, traceparent=None, run_id=None) -> bool:
+        s = self.microvms.get(mid)
         if not s:
             return False
         with s.lock:
@@ -191,7 +191,7 @@ class StubHost:
         self._teardown(s, traceparent, run_id)
         return True
 
-    def _teardown(self, s: Session, traceparent=None, run_id=None):
+    def _teardown(self, s: MicroVM, traceparent=None, run_id=None):
         t0 = time.time()
         time.sleep(0.03 + random.uniform(0, self.o.jitter_ms) / 1000.0)  # docker rm -f
         if self.tel:
@@ -200,7 +200,7 @@ class StubHost:
         with self.lock:
             self.slots_in_use.discard(s.slot)
             if self.o.leak_after_trial:
-                self.leaked.append(f"container fleetkit-session-{s.slot} (fleetkit.role=session)")
+                self.leaked.append(f"container fleetkit-microvm-{s.slot} (fleetkit.role=microvm)")
         s.destroyed_ts = time.time()
         s.cleanup_ms = (s.destroyed_ts - t0) * 1000.0
         if s.state != "failed":
@@ -209,23 +209,23 @@ class StubHost:
     def _reap(self):
         while not self._stop.wait(self.o.reaper_interval_s):
             now = time.time()
-            for s in list(self.sessions.values()):
+            for s in list(self.microvms.values()):
                 if s.state not in ("ready", "busy"):
                     continue
-                if now - s.created_ts > float(s.spec.get("max_lifetime_s", 600)):
+                if now - s.created_ts > float(s.request.get("max_lifetime_s", 600)):
                     self.destroy(s.id, "lifetime_expired")
-                elif s.state == "ready" and now - s.last_activity_ts > float(s.spec.get("idle_timeout_s", 120)):
+                elif s.state == "ready" and now - s.last_activity_ts > float(s.request.get("idle_timeout_s", 120)):
                     self.destroy(s.id, "idle_expired")
 
     # ---- task proxy ------------------------------------------------------------------------
-    def task(self, sid: str, payload: dict, traceparent, run_id) -> tuple[int, dict]:
-        s = self.sessions.get(sid)
+    def task(self, mid: str, payload: dict, traceparent, run_id) -> tuple[int, dict]:
+        s = self.microvms.get(mid)
         if not s:
-            return 404, {"ok": False, "failure_category": "session_not_ready", "error": "no such session"}
+            return 404, {"ok": False, "failure_category": "microvm_not_ready", "error": "no such microVM"}
         with s.lock:
             if s.state != "ready":
-                return 409, {"ok": False, "failure_category": "session_not_ready",
-                             "error": f"session is {s.state}"}
+                return 409, {"ok": False, "failure_category": "microvm_not_ready", "microvm_id": s.id,
+                             "microvm_state": s.state, "error": f"microVM is {s.state}"}
             s.state = "busy"
             s.last_activity_ts = time.time()
         send_ts = time.time()
@@ -246,20 +246,20 @@ class StubHost:
                 if s.state == "busy":
                     s.state = "ready"
         if destroy:
-            self.destroy(sid, "task_failure_destroyed", traceparent, run_id)
+            self.destroy(mid, "task_failure_destroyed", traceparent, run_id)
         if "guest_clock_ns" in body:
             body["clock_offset_ns"] = int(send_ts * 1e9) + rtt_ns // 2 - body["guest_clock_ns"]
         body["guest_mem_available"] = 1_500_000_000 - s.slot * 1000
         body["chromium_rss"] = 250_000_000 + s.slot * 1000
         return status, body
 
-    def _guest(self, s: Session, payload: dict, traceparent, run_id) -> tuple[int, dict]:
+    def _guest(self, s: MicroVM, payload: dict, traceparent, run_id) -> tuple[int, dict]:
         self.task_payloads.append(dict(payload))
         step_timeout = int(payload.get("step_timeout_ms", 10000))
         task_timeout = int(payload.get("task_timeout_ms", 45000))
         interval_ms = int(payload.get("sample_interval_ms", 200))
         shots = bool(payload.get("screenshot_each_step"))
-        live = sum(1 for x in list(self.sessions.values()) if x.state in ("ready", "busy"))
+        live = sum(1 for x in list(self.microvms.values()) if x.state in ("ready", "busy"))
         step_ms = self.o.step_ms + self.o.step_ms_per_n * max(0, live - 1)
         guest_clock_ns = time.time_ns()
         t0 = time.monotonic_ns()
@@ -296,15 +296,15 @@ class StubHost:
                 self.tel.span("guest-daemon", f"step.{st['name']}", traceparent, guest_clock_ns + st["dispatch_ns"],
                               guest_clock_ns + st["settle_ns"], {"fleetkit.task_id": payload.get("task_id", "")})
             self.tel.span("hostd", "task.proxy", traceparent, guest_clock_ns - 1000, time.time_ns() + 1000,
-                          {"fleetkit.task_id": payload.get("task_id", ""), "fleetkit.session_id": s.id,
+                          {"fleetkit.task_id": payload.get("task_id", ""), "fleetkit.microvm_id": s.id,
                            "fleetkit.run_id": run_id or ""})
-            self.tel.log("hostd", "task proxied", {"task_id": payload.get("task_id"), "session_id": s.id,
+            self.tel.log("hostd", "task proxied", {"task_id": payload.get("task_id"), "microvm_id": s.id,
                                                     "failure_category": category}, traceparent, run_id)
         body = {"ok": category == "ok", "failure_category": category, "steps": steps, "task_ms": task_ms,
                 "bytes_received": sum(st["bytes_received"] for st in steps),
                 "request_count": sum(st["request_count"] for st in steps), "guest_clock_ns": guest_clock_ns,
                 "traceparent": traceparent or "", "task_id": payload.get("task_id"),
-                "log_tail": [{"ts": time.time(), "level": "INFO", "msg": f"task {payload.get('task_id')} {category}"}],
+                "log_tail": [{"ts": time.time(), "severity": "INFO", "msg": f"task {payload.get('task_id')} {category}"}],
                 "screenshot_b64": base64.b64encode(TINY_JPEG).decode(),
                 "sample_interval_ms": interval_ms, "proc_samples": _proc_samples(task_ns, interval_ms),
                 "guestd_cpu_ms": round(task_ms * 0.02, 3), "timing_valid": not shots}
@@ -318,7 +318,7 @@ class StubHost:
     def metrics(self) -> dict:
         now = time.time()
         up_us = (now - self.started) * 1e6
-        live = [s for s in list(self.sessions.values()) if s.state in ("ready", "busy", "booting")]
+        live = [s for s in list(self.microvms.values()) if s.state in ("ready", "busy", "booting")]
         busy = sum(1 for s in live if s.state == "busy")
         return {"ts": now, "mem_total": 8_000_000_000, "mem_available": 5_000_000_000,
                 "cpu_util": round(5.0 + 10.0 * busy + random.uniform(0, 1), 3), "steal": None,
@@ -326,7 +326,7 @@ class StubHost:
                 "psi": {"cpu": {"some_avg10": 0.1, "some_total": int(up_us * 0.01), "full_avg10": None, "full_total": None},
                         "memory": {"some_avg10": 0.0, "some_total": 0, "full_avg10": 0.0, "full_total": 0},
                         "io": {"some_avg10": 0.0, "some_total": 0, "full_avg10": 0.0, "full_total": 0}},
-                "sessions": [{"id": s.id, "rss_bytes": 240_000_000, "cgroup_memory_current": 300_000_000,
+                "microvms": [{"id": s.id, "rss_bytes": 240_000_000, "cgroup_memory_current": 300_000_000,
                               "cgroup_memory_peak": 310_000_000, "cpu_usage_usec": 123456, **_vm_counters(s, now)}
                              for s in live]}
 
@@ -337,7 +337,7 @@ class StubHost:
                 "virtualized": True, "kvm": False, "ec2": self.o.ec2, "metrics_period_s": 1.0, "firecracker": None}
 
     def verify_clean(self) -> dict:
-        leftovers = [f"container for session {s.id}" for s in self.sessions.values() if s.container_present]
+        leftovers = [f"container for microVM {s.id}" for s in self.microvms.values() if s.container_present]
         leftovers += self.leaked
         return {"clean": not leftovers, "leftovers": leftovers}
 
@@ -370,14 +370,14 @@ def _proc_samples(task_ns: int, interval_ms: int) -> list[dict]:
     return out
 
 
-def _vm_counters(s: "Session", now: float) -> dict:
-    """Per-VM counters hostd reports on the firecracker backend (null elsewhere)."""
-    keys = ("cpu_vcpu_usec", "cpu_vmm_usec", "cpu_throttled_usec", "cpu_nr_throttled", "cpu_pressure_some_total_us",
-            "cpu_pressure_full_total_us", "memory_pressure_some_total_us")
+def _vm_counters(s: "MicroVM", now: float) -> dict:
+    """Per-microVM counters hostd reports on the firecracker backend (null elsewhere)."""
+    keys = ("cpu_vcpu_usec", "cpu_hypervisor_usec", "cpu_throttled_usec", "cpu_nr_throttled",
+            "cpu_pressure_some_total_us", "cpu_pressure_full_total_us", "memory_pressure_some_total_us")
     if s.backend != "firecracker" or not s.process_started_ts:
         return dict.fromkeys(keys)
     up = (now - s.process_started_ts) * 1e6
-    return {"cpu_vcpu_usec": int(up * 0.8), "cpu_vmm_usec": int(up * 0.05), "cpu_throttled_usec": int(up * 0.01),
+    return {"cpu_vcpu_usec": int(up * 0.8), "cpu_hypervisor_usec": int(up * 0.05), "cpu_throttled_usec": int(up * 0.01),
             "cpu_nr_throttled": int(up / 100_000), "cpu_pressure_some_total_us": int(up * 0.02),
             "cpu_pressure_full_total_us": int(up * 0.01), "memory_pressure_some_total_us": 0}
 
@@ -410,7 +410,7 @@ class _Telemetry:
 
     def log(self, service, message, attrs, traceparent, run_id):
         # the shape hostd/telemetry.py log() writes: body + severity, a structured event's name
-        # repeated in attributes.event (session.state carries session_id/from/to/ts/outcome there)
+        # echoed in attributes.event (microvm.state carries microvm_id/from/to/ts/outcome there)
         tid, pid = self._ids(traceparent) if traceparent else (None, None)
         attributes = {"fleetkit.run_id": run_id or "", "service.version": "stub", **attrs}
         if "." in message:
@@ -423,9 +423,9 @@ class _Telemetry:
             self.text.write(f"{rec['ts']:.3f} {service} {message} {json.dumps(attrs, default=str)}\n")
             self.text.flush()
 
-    def console(self, session_id: str, line: str) -> None:
-        """sessions/<id>/console.log, as hostd's docker and firecracker backends write it."""
-        d = self.dir / "sessions" / session_id
+    def console(self, microvm_id: str, line: str) -> None:
+        """microvms/<id>/console.log, as hostd's docker and firecracker backends write it."""
+        d = self.dir / "microvms" / microvm_id
         d.mkdir(parents=True, exist_ok=True)
         with self.lock, open(d / "console.log", "a", encoding="utf-8") as fh:
             fh.write(line + "\n")
@@ -469,23 +469,22 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, h.info()) if h.o.host_info else self._send(404, {"error": "not found"})
         if p == "/host/verify-clean":
             return self._send(200, h.verify_clean())
-        if p == "/sessions":
-            return self._send(200, [s.view() for s in h.sessions.values()])
-        if p.startswith("/sessions/"):
-            sid = p.split("/")[2]
-            s = h.get(sid)
-            return self._send(200, s.view()) if s else self._send(404, {"error": "no such session"})
+        if p == "/microvms":
+            return self._send(200, [s.view() for s in h.microvms.values()])
+        if p.startswith("/microvms/"):
+            mid = p.split("/")[2]
+            s = h.get(mid)
+            return self._send(200, s.view()) if s else self._send(404, {"error": "no such microVM"})
         self._send(404, {"error": "not found"})
 
     def do_POST(self):
         h = self.host
         p = self.path.split("?", 1)[0]
         tp, run_id = self._ctx()
-        if p == "/sessions":
-            spec = self._body()
-            return self._send(201, h.create(spec, tp, run_id))
+        if p == "/microvms":
+            return self._send(201, h.create(self._body(), tp, run_id))
         parts = p.split("/")
-        if len(parts) == 4 and parts[1] == "sessions" and parts[3] == "task":
+        if len(parts) == 4 and parts[1] == "microvms" and parts[3] == "task":
             status, body = h.task(parts[2], self._body(), tp, run_id)
             return self._send(status, body)
         self._send(404, {"error": "not found"})
@@ -494,7 +493,7 @@ class Handler(BaseHTTPRequestHandler):
         h = self.host
         parts = self.path.split("?", 1)[0].split("/")
         tp, run_id = self._ctx()
-        if len(parts) == 3 and parts[1] == "sessions":
+        if len(parts) == 3 and parts[1] == "microvms":
             found = h.destroy(parts[2], traceparent=tp, run_id=run_id)
             return self._send(200 if found else 404, {"ok": found})
         self._send(404, {"error": "not found"})

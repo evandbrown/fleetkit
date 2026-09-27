@@ -108,29 +108,29 @@ def test_cli_switches():
     assert default.lgtm is True and default.otlp_timeout_s == 2.0
 
 
-def test_session_state_record(make_tel):
+def test_microvm_state_record(make_tel):
     tel = make_tel()
-    tel.log_session_state("s1", "booting", "ready", 1700000000.5)
-    tel.log_session_state("s1", "ready", "destroyed", 1700000010.0, outcome="completed")
+    tel.log_microvm_state("s000-aaaaaaaa", "booting", "ready", 1700000000.5)
+    tel.log_microvm_state("s000-aaaaaaaa", "ready", "destroyed", 1700000010.0, outcome="completed")
     recs = [r for l in ft.iter_jsonl(tel.log_writer.path) for rl in l["resourceLogs"] for sl in rl["scopeLogs"] for r in sl["logRecords"]]
     attrs = {a["key"]: a["value"] for a in recs[1]["attributes"]}
-    assert attrs["event.name"] == {"stringValue": "session.state"}
-    assert attrs["session.from"] == {"stringValue": "ready"}
-    assert attrs["session.to"] == {"stringValue": "destroyed"}
-    assert attrs["session.outcome"] == {"stringValue": "completed"}
-    assert attrs[ft.ATTR_SESSION_ID] == {"stringValue": "s1"}
+    assert attrs["event.name"] == {"stringValue": "microvm.state"}
+    assert attrs["microvm.from"] == {"stringValue": "ready"}
+    assert attrs["microvm.to"] == {"stringValue": "destroyed"}
+    assert attrs["microvm.outcome"] == {"stringValue": "completed"}
+    assert attrs[ft.ATTR_MICROVM_ID] == {"stringValue": "s000-aaaaaaaa"}
     # the design's (and hostd's) names too; the transition time as state_ts
-    assert attrs["session_id"] == {"stringValue": "s1"}
+    assert attrs["microvm_id"] == {"stringValue": "s000-aaaaaaaa"}
     assert attrs["from"] == {"stringValue": "ready"}
     assert attrs["to"] == {"stringValue": "destroyed"}
     assert attrs["outcome"] == {"stringValue": "completed"}
     assert attrs["state_ts"] == {"doubleValue": 1700000010.0}
     first = {a["key"]: a["value"] for a in recs[0]["attributes"]}
     assert first["from"] == {"stringValue": "booting"} and first["state_ts"] == {"doubleValue": 1700000000.5}
-    assert "outcome" not in first and "session.outcome" not in first
+    assert "outcome" not in first and "microvm.outcome" not in first
 
 
-def test_session_state_json_line_matches_hostd_names(make_tel):
+def test_microvm_state_json_line_matches_hostd_names(make_tel):
     """The JSON formatter flattens extras into the line: from/to/outcome as hostd writes them,
     state_ts for the transition time, and the line's own ts left alone."""
     import io
@@ -143,13 +143,14 @@ def test_session_state_json_line_matches_hostd_names(make_tel):
     handler.setFormatter(ft.JsonFormatter("hostd"))
     tel.logger.addHandler(handler)
     try:
-        tel.log_session_state("s2", None, "creating", 1700000000.25)
+        tel.log_microvm_state("s001-bbbbbbbb", None, "creating", 1700000000.25)
     finally:
         tel.logger.removeHandler(handler)
     line = json.loads(stream.getvalue().strip().splitlines()[-1])
-    assert line["session_id"] == "s2" and line["from"] == "" and line["to"] == "creating"
+    assert line["microvm_id"] == "s001-bbbbbbbb" and line["from"] == "" and line["to"] == "creating"
     assert line["state_ts"] == 1700000000.25 and line["ts"] != 1700000000.25
     assert "outcome" not in line
+    assert line["severity"] == "INFO" and line["event.name"] == "microvm.state"
 
 
 def test_host_id_covers_every_resource_attribute(make_tel, monkeypatch):

@@ -620,7 +620,7 @@ def cart_body(products: list[dict]) -> str:
 
 
 # The cart row template lives in app.js only (it is never rendered statically);
-# it is repeated here so the manifest can count its nodes.
+# a copy of it lives here so the manifest can count its nodes.
 CART_ITEM_TEMPLATE = """<li class="cart-item" data-testid="cart-item" data-product-id="{id}">
 <img src="{image}" alt="" width="320" height="240">
 <div class="cart-item-body"><h3 class="cart-item-title" data-testid="cart-item-title">{title}</h3><p class="card-brand">{brand}</p><p class="cart-item-unit">{price} each</p></div>

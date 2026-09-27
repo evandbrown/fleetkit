@@ -2,8 +2,8 @@
 plus best-effort OTLP/HTTP export (two-second timeout) to the collector.
 
 Design section 8: one trace per trial; ``traceparent`` flows to the host daemon over HTTP.
-Correlation keys on every span and log: fleetkit.run_id, trial_id, session_id, task_id, backend,
-host_id. This module is the single integration point for the shared ``harness/telemetry``
+Correlation keys on every span and log: fleetkit.run_id, trial_id, microvm_id, task_id, backend,
+host_id; the trial span and every trial log record also carry the trial's density. This module is the single integration point for the shared ``harness/telemetry``
 package once the driver is switched to the OpenTelemetry SDK; the file formats stay the same.
 
 spans.jsonl and logs.jsonl use the collector's own OTLP-JSON line shape, the same one the host
@@ -129,11 +129,11 @@ class Tracer:
             self._otlp.submit_span(rec)
 
     # ---- logs --------------------------------------------------------------------------
-    def log(self, level: str, message: str, span: Span | None = None, **attributes) -> None:
+    def log(self, severity: str, message: str, span: Span | None = None, **attributes) -> None:
         ts = time.time()
         rec = {
             "ts": ts,
-            "level": level.upper(),
+            "severity": severity.upper(),
             "service": SERVICE_NAME,
             "message": message,
             "trace_id": span.trace_id if span else "",
@@ -144,7 +144,7 @@ class Tracer:
         line = json.dumps(log_record_to_otlp(rec, self.resource_attributes), separators=(",", ":"))
         text = "{} {:5s} {}{}".format(
             time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(ts)) + f".{int((ts % 1) * 1000):03d}Z",
-            rec["level"], message,
+            rec["severity"], message,
             (" " + " ".join(f"{k}={v}" for k, v in attributes.items())) if attributes else "")
         with self._lock:
             self._logs_fh.write(line + "\n")
@@ -232,8 +232,8 @@ _SEVERITY = {"DEBUG": 5, "INFO": 9, "WARN": 13, "WARNING": 13, "ERROR": 17}
 def log_record_to_otlp(rec: dict, resource_attributes: dict) -> dict:
     lr = {
         "timeUnixNano": str(int(rec["ts"] * 1e9)),
-        "severityNumber": _SEVERITY.get(rec["level"], 9),
-        "severityText": rec["level"],
+        "severityNumber": _SEVERITY.get(rec["severity"], 9),
+        "severityText": rec["severity"],
         "body": {"stringValue": rec["message"]},
         "attributes": otlp_attributes(rec.get("attributes", {})),
     }

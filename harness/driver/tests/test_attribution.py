@@ -12,19 +12,19 @@ from driver.outputs import RunDir, read_csv
 from driver.report import _headline
 
 T0, T1 = 102.0, 106.0  # task window: 4 s
-TRIAL = {"trial_id": "t001-firecracker-n2-r1", "timestamps": {"barrier_release": T0, "last_task_return": T1},
-         "sessions": [{"session_id": "s1", "ready": True}, {"session_id": "s2", "ready": True},
-                      {"session_id": "s3", "ready": False}]}
+TRIAL = {"trial_id": "d2-t1", "timestamps": {"barrier_release": T0, "last_task_return": T1},
+         "microvms": [{"microvm_id": "s1", "ready": True}, {"microvm_id": "s2", "ready": True},
+                      {"microvm_id": "s3", "ready": False}]}
 
 
 def host_rows(cpu=95.0, psi_cpu_rate=0.30, mem_frac=0.5, steal=1.0, psi_mem_rate=0.0, psi_io_rate=0.0,
-              throttle_rate=0.20, sessions=("s1", "s2")):
+              throttle_rate=0.20, microvms=("s1", "s2")):
     """5 Hz samples from t=100 to t=110 of counters growing at fixed rates."""
     rows = []
     for i in range(51):
         ts = 100.0 + i * 0.2
         up = ts - 100.0
-        add = lambda sid, m, v: rows.append({"ts": ts, "session_id": sid, "metric": m, "value": v})  # noqa: E731
+        add = lambda subject, m, v: rows.append({"ts": ts, "subject": subject, "metric": m, "value": v})  # noqa: E731
         add("host", "cpu_util", cpu)
         add("host", "steal", steal)
         add("host", "cpu_count", 16)
@@ -35,12 +35,12 @@ def host_rows(cpu=95.0, psi_cpu_rate=0.30, mem_frac=0.5, steal=1.0, psi_mem_rate
         add("host", "psi_io_some_total", up * psi_io_rate * 1e6)
         add("host", "hostd_cpu_usec", 5e6 + up * 0.1e6)
         add("driver", "driver_cpu_usec", 2e6 + up * 0.05e6)
-        for sid in sessions:
-            add(sid, "cpu_vcpu_usec", up * 1.5e6)
-            add(sid, "cpu_vmm_usec", up * 0.1e6)
-            add(sid, "cpu_throttled_usec", up * throttle_rate * 1e6)
-            add(sid, "cpu_pressure_some_total_us", up * 0.25e6)
-            add(sid, "cgroup_memory_peak", 1.8e9 + (1e6 if sid == "s2" else 0))
+        for mid in microvms:
+            add(mid, "cpu_vcpu_usec", up * 1.5e6)
+            add(mid, "cpu_hypervisor_usec", up * 0.1e6)
+            add(mid, "cpu_throttled_usec", up * throttle_rate * 1e6)
+            add(mid, "cpu_pressure_some_total_us", up * 0.25e6)
+            add(mid, "cgroup_memory_peak", 1.8e9 + (1e6 if mid == "s2" else 0))
     return rows
 
 
@@ -48,7 +48,7 @@ def guest_rows():
     rows = []
     for task in ("a", "b"):
         for k in range(5):
-            base = {"ts": T0 + k * 0.2, "trial_id": TRIAL["trial_id"], "session_id": "s1", "task_id": task}
+            base = {"ts": T0 + k * 0.2, "trial_id": TRIAL["trial_id"], "microvm_id": "s1", "task_id": task}
             rows += [{**base, "metric": "cpu_total_ms", "value": 100}, {**base, "metric": "cpu_idle_ms", "value": 300},
                      {**base, "metric": "cpu_ms.renderer", "value": 60}, {**base, "metric": "cpu_ms.browser", "value": 20},
                      {**base, "metric": "rss_bytes.renderer", "value": 1e8}]
@@ -64,13 +64,15 @@ def test_attribution_numbers_and_verdicts():
     assert h["psi_cpu_some_pct"] == pytest.approx(30.0) and h["psi_memory_some_pct"] == pytest.approx(0.0)
     assert h["mem_available_min_fraction"] == pytest.approx(0.5) and h["cpu_count"] == 16
     assert h["busy_cpu_s"] == pytest.approx(0.95 * 16 * 4)
-    # only the ready sessions; s3 never became ready
-    assert [s["session_id"] for s in a["sessions"]] == ["s1", "s2"]
-    s1 = a["sessions"][0]
-    assert s1["vcpu_s"] == pytest.approx(6.0) and s1["vmm_s"] == pytest.approx(0.4) and s1["cpu_s"] == pytest.approx(6.4)
+    # only the ready microVMs; s3 never became ready
+    assert [s["microvm_id"] for s in a["microvms"]] == ["s1", "s2"]
+    s1 = a["microvms"][0]
+    assert s1["vcpu_s"] == pytest.approx(6.0) and s1["hypervisor_s"] == pytest.approx(0.4)
+    assert s1["cpu_s"] == pytest.approx(6.4)
     assert s1["throttled_fraction"] == pytest.approx(0.20) and s1["cgroup_cpu_pressure_some_pct"] == pytest.approx(25.0)
-    assert a["sessions"][1]["cgroup_memory_peak_bytes"] == pytest.approx(1.801e9)
-    assert a["vcpu_s"] == pytest.approx(12.0) and a["vmm_s"] == pytest.approx(0.8)
+    assert a["microvms"][1]["cgroup_memory_peak_bytes"] == pytest.approx(1.801e9)
+    assert a["vcpu_s"] == pytest.approx(12.0) and a["hypervisor_s"] == pytest.approx(0.8)
+    assert a["microvms_cpu_s"] == pytest.approx(12.8)
     assert a["hostd_cpu_s"] == pytest.approx(0.4) and a["driver_cpu_s"] == pytest.approx(0.2)
     assert a["unattributed_cpu_s"] == pytest.approx(60.8 - 12.8 - 0.4 - 0.2)
     g = a["guest"]
@@ -98,17 +100,17 @@ def test_verdict_rules(kw, expected):
 
 
 def test_missing_data_gives_nulls_and_unknown():
-    # docker-like: no per-VM counters, no steal, no PSI
-    rows = [r for r in host_rows(cpu=50) if r["session_id"] == "host"
+    # docker-like: no per-microVM counters, no steal, no PSI
+    rows = [r for r in host_rows(cpu=50) if r["subject"] == "host"
             and r["metric"] in ("cpu_util", "mem_available", "mem_total")]
     a = attribute_trial(TRIAL, index_host_metrics(rows))
     assert a["verdicts"] == ["unknown"]
-    assert a["host"]["psi_cpu_some_pct"] is None and a["sessions"][0]["vcpu_s"] is None
-    assert a["sessions_cpu_s"] is None and a["unattributed_cpu_s"] is None and a["host"]["busy_cpu_s"] is None
+    assert a["host"]["psi_cpu_some_pct"] is None and a["microvms"][0]["vcpu_s"] is None
+    assert a["microvms_cpu_s"] is None and a["unattributed_cpu_s"] is None and a["host"]["busy_cpu_s"] is None
     assert "steal_mean_pct" in a["missing"] and "vm_throttled_fraction_mean" in a["missing"]
     assert a["guest"]["top_group"] is None
     # a rule that fires is still reported when other signals are missing
-    rows = [r for r in host_rows(cpu=97) if r["session_id"] == "host" and r["metric"] == "cpu_util"]
+    rows = [r for r in host_rows(cpu=97) if r["subject"] == "host" and r["metric"] == "cpu_util"]
     assert attribute_trial(TRIAL, index_host_metrics(rows))["verdicts"] == ["host_cpu"]
     # no task window at all (an old or aborted trial)
     a = attribute_trial({"timestamps": {"barrier_release": None}}, {})
@@ -127,16 +129,20 @@ def test_counter_edges_interpolate_and_clamp():
     assert delta([(1.0, 500.0), (2.0, 10.0)], 1.0, 2.0) is None  # counter reset
 
 
-def test_headline_is_the_highest_n_with_every_lower_level_passing():
-    rows = [{"backend": "firecracker", "level_n": n, "passed": p, "repeats": r}
+def test_headline_is_the_highest_density_with_every_lower_density_passing():
+    cost = {"execution_only": 0.0001, "observed": 0.0002, "fixture_serving_estimate": None}
+    rows = [{"backend": "firecracker", "density": n, "passed": p, "trial_count": r, "cost_usd_per_task": cost}
             for n, p, r in ((1, True, 1), (2, True, 3), (4, False, 3), (8, True, 1))]
-    h = _headline(rows)["firecracker"]
-    assert h["highest_n_tested_successfully"] == 2 and h["limit_found"]
+    h = _headline(rows, host_vcpus=16)["firecracker"]
+    assert h["highest_density_tested_successfully"] == 2 and h["limit_found"]
     assert h["boundary"] == {"last_pass": 2, "last_pass_trials": 3, "first_miss": 4, "first_miss_trials": 3}
-    h = _headline([{"backend": "docker", "level_n": 1, "passed": False, "repeats": 2}])["docker"]
-    assert h["highest_n_tested_successfully"] == 0 and h["boundary"]["last_pass"] is None and h["limit_found"]
-    h = _headline([{"backend": "docker", "level_n": 4, "passed": True, "repeats": 1}])["docker"]
-    assert h["highest_n_tested_successfully"] == 4 and not h["limit_found"]
+    assert h["density_per_host_vcpu"] == pytest.approx(0.125) and h["host_vcpus"] == 16
+    assert h["cost_usd_per_1000_tasks"] == {"execution_only": pytest.approx(0.1), "observed": pytest.approx(0.2)}
+    h = _headline([{"backend": "docker", "density": 1, "passed": False, "trial_count": 2}])["docker"]
+    assert h["highest_density_tested_successfully"] == 0 and h["boundary"]["last_pass"] is None and h["limit_found"]
+    assert h["density_per_host_vcpu"] is None and h["cost_usd_per_1000_tasks"]["observed"] is None
+    h = _headline([{"backend": "docker", "density": 4, "passed": True, "trial_count": 1}])["docker"]
+    assert h["highest_density_tested_successfully"] == 4 and not h["limit_found"]
 
 
 class _FakeClient:
@@ -146,7 +152,7 @@ class _FakeClient:
     def host_metrics(self, timeout_s=1.0):
         ts = self.ts_seq.pop(0)
         return {"ts": ts, "cpu_util": 10.0, "cpu_count": 4, "hostd_cpu_usec": 5, "hostd_rss_bytes": 7, "steal": None,
-                "sessions": [{"id": "s1", "cpu_vcpu_usec": 3, "cpu_throttled_usec": None, "rss_bytes": 1}]}
+                "microvms": [{"id": "s1", "cpu_vcpu_usec": 3, "cpu_throttled_usec": None, "rss_bytes": 1}]}
 
 
 class _ListWriter:
@@ -160,31 +166,31 @@ class _ListWriter:
         self.rows.extend(rows)
 
 
-def test_sampler_skips_repeated_samples_and_writes_its_own_figures():
+def test_sampler_skips_duplicate_samples_and_writes_its_own_figures():
     w = _ListWriter()
     smp = HostMetricsSampler(_FakeClient([1.0, 1.0, 1.2, 1.2, 1.4]), w, interval_s=0.2)
     for _ in range(5):
         smp.tick()
-    host_ts = sorted({r["ts"] for r in w.rows if r["session_id"] == "host"})
-    assert host_ts == [1.0, 1.2, 1.4] and smp.samples == 3 and smp.repeats == 2
-    assert sum(1 for r in w.rows if r["session_id"] == "host" and r["metric"] == "cpu_util") == 3
-    metrics = {(r["session_id"], r["metric"]) for r in w.rows}
+    host_ts = sorted({r["ts"] for r in w.rows if r["subject"] == "host"})
+    assert host_ts == [1.0, 1.2, 1.4] and smp.samples == 3 and smp.duplicates == 2
+    assert sum(1 for r in w.rows if r["subject"] == "host" and r["metric"] == "cpu_util") == 3
+    metrics = {(r["subject"], r["metric"]) for r in w.rows}
     assert {("host", "cpu_count"), ("host", "hostd_cpu_usec"), ("host", "hostd_rss_bytes"), ("s1", "cpu_vcpu_usec"),
             ("s1", "rss_bytes")} <= metrics
     assert ("s1", "cpu_throttled_usec") not in metrics and ("host", "steal") not in metrics  # nulls skipped
-    driver = [r for r in w.rows if r["session_id"] == "driver"]
+    driver = [r for r in w.rows if r["subject"] == "driver"]
     assert {r["metric"] for r in driver} == {"driver_cpu_usec", "driver_rss_bytes"} and len(driver) == 10
     assert all(r["value"] > 0 for r in driver)
     assert smp.cpu_util_between(0, 1e12) == [10.0, 10.0, 10.0]
 
 
-def test_appending_to_an_old_run_dir_keeps_its_header(tmp_path):
-    old = [c for c in schemas.TASKS_COLUMNS if c not in ("timing_valid", "guestd_cpu_ms", "kind")]
+def test_appending_to_a_file_with_fewer_columns_keeps_its_header(tmp_path):
+    old = [c for c in schemas.TASKS_COLUMNS if c not in ("timing_valid", "guestd_cpu_ms", "trial_kind")]
     rd = RunDir(tmp_path / "old-run")
     with open(rd.tasks_csv, "w", newline="") as fh:
         csv.writer(fh).writerow(old)
     w = rd.open_writers()
-    w.tasks.append({"run_id": "old-run", "trial_id": "t001", "task_id": "x", "ok": True, "kind": "ladder"})
+    w.tasks.append({"run_id": "old-run", "trial_id": "d1-t1", "task_id": "x", "ok": True, "trial_kind": "ladder"})
     w.close()
     rows = read_csv(rd.tasks_csv)
     assert list(rows[0]) == old and rows[0]["ok"] == "true" and rows[0]["task_id"] == "x"

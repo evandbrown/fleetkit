@@ -1,7 +1,7 @@
-"""Docker backend: one labeled container per session on the `fleetkit` network.
+"""Docker backend: one labeled container per microVM on the `fleetkit` network.
 
 Section 3: the guest daemon's port 8080 is published to 127.0.0.1:<18080+slot>,
-so the daemon addresses sessions by host port on every platform. Memory and CPU
+so the daemon addresses microVMs by host port on every platform. Memory and CPU
 limits stand in for the VM shape. Lifecycle goes through the docker CLI (so
 `--dry-run` renders readable commands); per-container stats come from the
 Engine API over the unix socket, because `docker stats` blocks for a second.
@@ -14,7 +14,7 @@ import os
 import socket
 from typing import Any, Dict, List, Optional
 
-from ..model import Session
+from ..model import MicroVM
 from ..runner import CommandError, Runner
 from .base import Backend, BackendError, empty_sample
 
@@ -22,7 +22,7 @@ PORT_BASE = 18080
 PORT_LAST = 18199
 GUEST_PORT = 8080
 NETWORK = "fleetkit"
-ROLE_LABEL = "fleetkit.role=session"
+ROLE_LABEL = "fleetkit.role=microvm"
 
 
 class _UnixHTTPConnection(http.client.HTTPConnection):
@@ -86,23 +86,23 @@ class DockerBackend(Backend):
             probe.close()
 
     @staticmethod
-    def container_name(session: Session) -> str:
-        return "fleetkit-session-%s" % session.id
+    def container_name(microvm: MicroVM) -> str:
+        return "fleetkit-microvm-%s" % microvm.id
 
-    def run_argv(self, session: Session) -> List[str]:
+    def run_argv(self, microvm: MicroVM) -> List[str]:
         argv = [self.docker, "run", "-d",
-                "--name", self.container_name(session),
+                "--name", self.container_name(microvm),
                 "--label", ROLE_LABEL,
-                "--label", "fleetkit.session_id=%s" % session.id,
-                "--label", "fleetkit.slot=%d" % session.slot,
+                "--label", "fleetkit.microvm_id=%s" % microvm.id,
+                "--label", "fleetkit.slot=%d" % microvm.slot,
                 "--network", self.network,
-                "--cpus", str(session.vcpus),
-                "--memory", "%dm" % session.mem_mib,
-                "-p", "127.0.0.1:%d:%d" % (self.port(session.slot), GUEST_PORT),
+                "--cpus", str(microvm.vcpus),
+                "--memory", "%dm" % microvm.mem_mib,
+                "-p", "127.0.0.1:%d:%d" % (self.port(microvm.slot), GUEST_PORT),
                 "-e", "FLEETKIT_FIXTURE_URL=%s" % self.fixture_base_url,
-                "-e", "FLEETKIT_SESSION_ID=%s" % session.id]
-        if session.fault:
-            argv += ["-e", "FLEETKIT_FAULT=%s" % session.fault]
+                "-e", "FLEETKIT_MICROVM_ID=%s" % microvm.id]
+        if microvm.fault:
+            argv += ["-e", "FLEETKIT_FAULT=%s" % microvm.fault]
         for k, v in sorted(self.extra_env.items()):
             argv += ["-e", "%s=%s" % (k, v)]
         argv.append(self.image)
@@ -123,20 +123,20 @@ class DockerBackend(Backend):
                              self.network], check=False, timeout=20)
         self._network_checked = True
 
-    def create(self, session: Session) -> None:
+    def create(self, microvm: MicroVM) -> None:
         self._ensure_network()
-        session.handle["container"] = self.container_name(session)
-        session.handle["port"] = self.port(session.slot)
-        session.console_log = os.path.join(self.log_dir, "sessions", session.id, "console.log")
-        self.runner.mkdir(os.path.dirname(session.console_log))
+        microvm.handle["container"] = self.container_name(microvm)
+        microvm.handle["port"] = self.port(microvm.slot)
+        microvm.console_log = os.path.join(self.log_dir, "microvms", microvm.id, "console.log")
+        self.runner.mkdir(os.path.dirname(microvm.console_log))
         try:
-            r = self.runner.run(self.run_argv(session), timeout=60)
+            r = self.runner.run(self.run_argv(microvm), timeout=60)
         except CommandError as e:
             raise BackendError("docker run failed: %s" % (e.result.stderr or e.result.stdout).strip()[-400:]) from e
-        session.handle["container_id"] = r.stdout.strip()[:12] or None
+        microvm.handle["container_id"] = r.stdout.strip()[:12] or None
 
-    def alive(self, session: Session) -> bool:
-        name = session.handle.get("container")
+    def alive(self, microvm: MicroVM) -> bool:
+        name = microvm.handle.get("container")
         if not name:
             return False
         r = self.runner.run([self.docker, "inspect", "-f", "{{.State.Running}}", name], check=False, timeout=20)
@@ -144,8 +144,8 @@ class DockerBackend(Backend):
             return True
         return r.ok and r.stdout.strip() == "true"
 
-    def exit_info(self, session: Session) -> Optional[str]:
-        name = session.handle.get("container")
+    def exit_info(self, microvm: MicroVM) -> Optional[str]:
+        name = microvm.handle.get("container")
         if not name or self.runner.dry_run:
             return None
         r = self.runner.run([self.docker, "inspect", "-f",
@@ -160,23 +160,23 @@ class DockerBackend(Backend):
             info += " | " + " / ".join(tail)
         return info[:500]
 
-    def destroy(self, session: Session) -> None:
-        name = session.handle.get("container") or self.container_name(session)
-        if session.console_log:
-            # Keep the guest's stdout/stderr as the session's console log (evidence bundle).
+    def destroy(self, microvm: MicroVM) -> None:
+        name = microvm.handle.get("container") or self.container_name(microvm)
+        if microvm.console_log:
+            # Keep the guest's stdout/stderr as the microVM's console log (evidence bundle).
             r = self.runner.run([self.docker, "logs", "--tail", "2000", name], check=False, timeout=30)
             if not self.runner.dry_run and (r.stdout or r.stderr):
-                os.makedirs(os.path.dirname(session.console_log), exist_ok=True)
-                with open(session.console_log, "a") as f:
+                os.makedirs(os.path.dirname(microvm.console_log), exist_ok=True)
+                with open(microvm.console_log, "a") as f:
                     f.write(r.stdout)
                     f.write(r.stderr)
         self.runner.run([self.docker, "rm", "-f", name], check=False, timeout=60)
 
     # --- sampling ----------------------------------------------------------
-    def sample(self, session: Session) -> Dict[str, Optional[int]]:
-        # The Firecracker-only figures (vCPU/VMM split, throttling, cgroup pressure) stay None.
+    def sample(self, microvm: MicroVM) -> Dict[str, Optional[int]]:
+        # The Firecracker-only figures (vCPU/hypervisor split, throttling, cgroup pressure) stay None.
         out = empty_sample()
-        name = session.handle.get("container")
+        name = microvm.handle.get("container")
         sock = docker_socket_path()
         if not name or not sock or self.runner.dry_run:
             return out

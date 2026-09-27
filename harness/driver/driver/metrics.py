@@ -1,14 +1,15 @@
 """Host metrics sampling: GET /host/metrics at ``--metrics-hz`` (default 1 Hz) into host_metrics.csv
 (long format).
 
-Nulls (PSI and steal where the platform has none, the Firecracker-only per-session CPU fields on
+Nulls (PSI and steal where the platform has none, the Firecracker-only per-microVM CPU fields on
 docker) are skipped rather than written as empty cells. The host daemon samples on its own period
 (``--metrics-period``) and serves its latest sample, so a response whose ``ts`` equals the previous
-one is a repeat and is not written again.
+one is a duplicate and is not written again.
 
-Each tick also writes the driver's own ``driver_cpu_usec`` / ``driver_rss_bytes`` under session_id
-``driver``, and, unless disabled, a separate thread times one HTTP GET of the fixture at 1 Hz and
-writes ``fixture_rtt_ms`` under session_id ``fixture`` (a failed probe writes no row and is counted).
+Each row's ``subject`` is what it measures: ``host``, a microVM id, ``driver`` for the driver's own
+``driver_cpu_usec`` / ``driver_rss_bytes`` written on every tick, or ``fixture`` for
+``fixture_rtt_ms``: unless disabled, a separate thread times one HTTP GET of the fixture at 1 Hz (a
+failed probe writes no row and is counted).
 """
 from __future__ import annotations
 
@@ -24,13 +25,13 @@ from .hostclient import HostClient
 from .outputs import CsvAppender
 
 HOST_SCALARS = ("mem_total", "mem_available", "cpu_util", "steal", "cpu_count", "hostd_cpu_usec", "hostd_rss_bytes")
-SESSION_SCALARS = ("rss_bytes", "cgroup_memory_current", "cgroup_memory_peak", "cpu_usage_usec",
-                   "cpu_vcpu_usec", "cpu_vmm_usec", "cpu_throttled_usec", "cpu_nr_throttled",
+MICROVM_SCALARS = ("rss_bytes", "cgroup_memory_current", "cgroup_memory_peak", "cpu_usage_usec",
+                   "cpu_vcpu_usec", "cpu_hypervisor_usec", "cpu_throttled_usec", "cpu_nr_throttled",
                    "cpu_pressure_some_total_us", "cpu_pressure_full_total_us", "memory_pressure_some_total_us")
 
 
 def flatten(sample: dict) -> list[tuple[str, str, float]]:
-    """-> [(session_id or 'host', metric, value)] for one /host/metrics response."""
+    """-> [(subject: 'host' or a microVM id, metric, value)] for one /host/metrics response."""
     rows = []
     if not isinstance(sample, dict):
         return rows
@@ -46,10 +47,10 @@ def flatten(sample: dict) -> list[tuple[str, str, float]]:
             for key, v in vals.items():
                 if _num(v):
                     rows.append(("host", f"psi_{res}_{key}", v))
-    for s in sample.get("sessions") or []:
+    for s in sample.get("microvms") or []:
         if not isinstance(s, dict) or not s.get("id"):
             continue
-        for k in SESSION_SCALARS:
+        for k in MICROVM_SCALARS:
             v = s.get(k)
             if _num(v):
                 rows.append((str(s["id"]), k, v))
@@ -100,7 +101,7 @@ class HostMetricsSampler:
         self._recent: collections.deque = collections.deque(maxlen=4096)
         self.samples = 0
         self.errors = 0
-        self.repeats = 0
+        self.duplicates = 0
         self.probes = 0
         self.probe_errors = 0
 
@@ -122,18 +123,18 @@ class HostMetricsSampler:
             return [v for ts, v in self._recent if t0 <= ts <= t1]
 
     def tick(self) -> None:
-        """One sampling tick: the host daemon's latest sample (unless it is a repeat) and the driver's own figures."""
+        """One sampling tick: the host daemon's latest sample (unless it is a duplicate) and the driver's own figures."""
         try:
             sample = self.client.host_metrics(timeout_s=max(0.5, self.interval_s - 0.1))
             ts = sample.get("ts") if isinstance(sample, dict) else None
             if _num(ts) and ts == self._last_ts:
-                self.repeats += 1  # the daemon has not taken a new sample since the last tick
+                self.duplicates += 1  # the daemon has not taken a new sample since the last tick
             else:
                 self._last_ts = ts if _num(ts) else None
                 if not _num(ts):
                     ts = time.time()
-                self.writer.append_many([{"ts": ts, "session_id": sid, "metric": metric, "value": value}
-                                         for sid, metric, value in flatten(sample)])
+                self.writer.append_many([{"ts": ts, "subject": subject, "metric": metric, "value": value}
+                                         for subject, metric, value in flatten(sample)])
                 if isinstance(sample, dict) and _num(sample.get("cpu_util")):
                     with self._recent_lock:
                         self._recent.append((time.time(), sample["cpu_util"]))
@@ -144,7 +145,7 @@ class HostMetricsSampler:
                 self.log.warn(f"host metrics sampling failed: {exc}")
         if self.self_metrics:
             now = time.time()
-            self.writer.append_many([{"ts": now, "session_id": "driver", "metric": k, "value": v}
+            self.writer.append_many([{"ts": now, "subject": "driver", "metric": k, "value": v}
                                      for k, v in driver_self_metrics().items() if _num(v)])
 
     def _run(self) -> None:
@@ -171,7 +172,7 @@ class HostMetricsSampler:
                     ok = 200 <= resp.status < 300
                 if not ok:
                     raise RuntimeError(f"HTTP {resp.status}")
-                self.writer.append({"ts": ts, "session_id": "fixture", "metric": "fixture_rtt_ms",
+                self.writer.append({"ts": ts, "subject": "fixture", "metric": "fixture_rtt_ms",
                                     "value": round((time.monotonic() - t0) * 1000.0, 3)})
                 self.probes += 1
             except Exception as exc:

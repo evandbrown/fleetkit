@@ -10,9 +10,9 @@
 #   make down         stop them (results/dev/lgtm is kept)
 #   make lgtm-check   send one span, expect it in results/dev/lgtm/otlp/traces.jsonl, ping Grafana
 #   make hostd        run the host daemon in the foreground on :8090
-#   make host-setup   set up an AWS experiment host (Linux, as root; prints a skip on macOS)
+#   make host-setup   set up an AWS worker host (Linux, as root; prints a skip on macOS)
 #   make smoke        driver smoke suite against BACKEND (docker by default)
-#   make clean        build outputs, caches, stray session containers
+#   make clean        build outputs, caches, stray microVM containers
 #   make distclean    clean + venv + results/dev/lgtm
 
 SHELL := /bin/bash
@@ -33,7 +33,7 @@ export DEBIAN_IMAGE NGINX_IMAGE LGTM_IMAGE ALPINE_IMAGE
 VENV := harness/.venv
 PY := $(VENV)/bin/python
 PYTHON3 ?= python3
-# hostd, driver and guestd packages live one level below their component directories;
+# hostd, driver and guestd packages sit in a subdirectory of their component directories;
 # fleetkit_telemetry is installed editable, the path entry makes it importable without that too.
 export PYTHONPATH := $(ROOT)/harness/host:$(ROOT)/harness/driver:$(ROOT)/harness/telemetry:$(ROOT)/harness/guest
 
@@ -127,9 +127,9 @@ lgtm-check: ## prove the pipeline: one span in, a line in results/dev/lgtm/otlp/
 hostd: venv ## run the host daemon in the foreground (BACKEND=docker|firecracker, HOSTD_ARGS=...)
 	$(PY) -m hostd --backend $(BACKEND) --log-dir $(HOSTD_LOG_DIR) $(HOSTD_NO_LGTM) $(HOSTD_ARGS)
 
-host-setup: ## set up the experiment host: venv, fixture, guest image, rootfs, hostd unit (images/host/setup.sh)
+host-setup: ## set up the worker host: venv, fixture, guest image, rootfs, hostd unit (images/host/setup.sh)
 ifeq ($(UNAME_S),Darwin)
-	@echo "host-setup: skipped on macOS; it sets up the Linux experiment host (as root, from /opt/fleetkit)."
+	@echo "host-setup: skipped on macOS; it sets up the Linux worker host (as root, from /opt/fleetkit)."
 else
 	bash images/host/setup.sh
 endif
@@ -139,10 +139,10 @@ smoke: venv ## run the driver smoke suite against a running host daemon
 
 # --- cleanup -----------------------------------------------------------------------------
 
-clean: ## remove build outputs, caches and any leftover session containers
+clean: ## remove build outputs, caches and any leftover microVM containers
 	rm -rf fixture/dist
 	find . -path ./$(VENV) -prune -o \( -name __pycache__ -o -name .pytest_cache -o -name '*.egg-info' \) -type d -print0 | xargs -0 rm -rf
-	@ids=$$(docker ps -aq -f label=fleetkit.role=session 2>/dev/null); if [ -n "$$ids" ]; then docker rm -f $$ids; fi
+	@ids=$$(docker ps -aq -f label=fleetkit.role=microvm 2>/dev/null); if [ -n "$$ids" ]; then docker rm -f $$ids; fi
 
 clean-lgtm: down ## remove the observability stack's state and OTLP files under results/dev/lgtm
 	rm -rf $(RESULTS)/lgtm

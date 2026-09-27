@@ -94,7 +94,7 @@ for _ in $(seq 1 30); do curl -fsS -m 2 http://127.0.0.1:8090/health >/dev/null 
 curl -fsS -m 2 http://127.0.0.1:8090/health; echo
 systemctl is-active fleetkit-hostd
 
-t "render one session (dry run) for the record"
+t "render one microVM (dry run) for the record"
 harness/.venv/bin/python -m hostd --backend firecracker --render --slot 0 2>&1 | head -40 > "$FK/render-slot0.txt" || true
 
 touch "$FK/setup-done"

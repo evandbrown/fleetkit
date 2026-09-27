@@ -48,7 +48,7 @@ def test_guest_task_spans_under_echoed_traceparent_and_shifted_clock(make_tel):
             "guest_clock_ns": guest_clock,
             "traceparent": headers["traceparent"],
         }
-        em = tel.emit_guest_task(response, session_id="s1", task_id="k1", host_send_ns=send_ns, rtt_ns=2_000_000)
+        em = tel.emit_guest_task(response, microvm_id="s000-aaaaaaaa", task_id="k1", host_send_ns=send_ns, rtt_ns=2_000_000)
     assert em.clock_offset_ns == 5_000_000_000 + 1_000_000
     assert em.steps_emitted == 2
     assert em.task_start_ns == guest_clock + em.clock_offset_ns
@@ -62,7 +62,7 @@ def test_guest_task_spans_under_echoed_traceparent_and_shifted_clock(make_tel):
     assert int(task["endTimeUnixNano"]) - int(task["startTimeUnixNano"]) == 500_000_000
     attrs = _attrs(task)
     assert attrs[ft.ATTR_RUN_ID] == "r3" and attrs[ft.ATTR_TRIAL_ID] == "t3"
-    assert attrs[ft.ATTR_SESSION_ID] == "s1" and attrs[ft.ATTR_TASK_ID] == "k1"
+    assert attrs[ft.ATTR_MICROVM_ID] == "s000-aaaaaaaa" and attrs[ft.ATTR_TASK_ID] == "k1"
     assert attrs["fleetkit.clock_offset_ns"] == str(em.clock_offset_ns)
     assert "status" not in task or task["status"] == {}
 
@@ -87,7 +87,7 @@ def test_failed_task_marks_task_and_failed_step(make_tel):
         ],
         "guest_clock_ns": send_ns,
     }
-    em = tel.emit_guest_task(response, session_id="s2", task_id="k2", host_send_ns=send_ns, rtt_ns=0)
+    em = tel.emit_guest_task(response, microvm_id="s001-bbbbbbbb", task_id="k2", host_send_ns=send_ns, rtt_ns=0)
     spans = _spans(tel)
     task = next(s for s in spans if s["name"] == "task")
     assert task["status"]["code"] == "STATUS_CODE_ERROR"
@@ -103,21 +103,23 @@ def test_guest_logs_forwarded_with_shifted_timestamps(make_tel):
     tel = make_tel()
     guest_ts = 1_700_000_000.25
     n = tel.emit_guest_logs(
-        [{"seq": 1, "ts": guest_ts, "level": "WARN", "msg": "slow"}, "plain"],
-        session_id="s3",
+        [{"seq": 1, "ts": guest_ts, "severity": "WARN", "msg": "slow"}, "plain", {"level": "error", "msg": "logging-library shape"}],
+        microvm_id="s002-cccccccc",
         task_id="k3",
         clock_offset_ns=1_000_000_000,
         trace_id="0af7651916cd43dd8448eb211c80319c",
         span_id="b7ad6b7169203331",
     )
-    assert n == 2
+    assert n == 3
     recs = [r for l in ft.iter_jsonl(tel.log_writer.path) for rl in l["resourceLogs"] for sl in rl["scopeLogs"] for r in sl["logRecords"]]
-    assert len(recs) == 2
-    first, second = recs
+    assert len(recs) == 3
+    first, second, third = recs
     assert int(first["timeUnixNano"]) == int(guest_ts * 1e9) + 1_000_000_000
     assert first["severityText"] == "WARN" and first["body"] == {"stringValue": "slow"}
     assert first["traceId"] == "0af7651916cd43dd8448eb211c80319c"
     assert {a["key"]: a["value"] for a in first["attributes"]}["guest.seq"] == {"intValue": "1"}
     assert second["body"] == {"stringValue": "plain"}
+    assert third["severityText"] == "ERROR"  # the logging-library key is accepted too
+    assert {a["key"]: a["value"] for a in first["attributes"]}[ft.ATTR_MICROVM_ID] == {"stringValue": "s002-cccccccc"}
     service = next(a["value"]["stringValue"] for a in list(ft.iter_jsonl(tel.log_writer.path))[0]["resourceLogs"][0]["resource"]["attributes"] if a["key"] == "service.name")
     assert service == "guest-daemon"

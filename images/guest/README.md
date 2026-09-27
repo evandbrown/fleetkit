@@ -36,7 +36,7 @@ What the Dockerfile does beyond installing packages:
   `EXPOSE 8080`.
 
 Running it as the Docker backend does: `docker run -d -p 127.0.0.1:18080:8080
---network fleetkit --label fleetkit.role=session -e FLEETKIT_FAULT=... fleetkit-guest:dev`.
+--network fleetkit --label fleetkit.role=microvm -e FLEETKIT_FAULT=... fleetkit-guest:dev`.
 
 Measured on this Mac (arm64): image 829 MB, Chromium 154.0.8037.57, DevTools answering
 about 150 ms after launch in a container, selftest task about 200 ms.

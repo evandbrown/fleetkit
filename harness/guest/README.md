@@ -1,7 +1,7 @@
 # Guest daemon (`guestd`)
 
-The process that runs inside every session, next to Chromium: a container on the Docker
-backend, a Firecracker microVM on AWS. It starts the browser, runs one browser task at a
+The process that runs inside every microVM, next to Chromium: a Firecracker microVM on
+AWS, or a container standing in for one on the Docker backend. It starts the browser, runs one browser task at a
 time over the DevTools protocol, and answers the host daemon on port 8080. The contract
 is [docs/harness-design.md](../../docs/harness-design.md), sections 2, 4 and 6; this file
 says how the package implements it and what other components can rely on.
@@ -15,8 +15,8 @@ nothing else. `python3 -m guestd` is the whole invocation; production takes no f
 |---|---|
 | `guestd/__main__.py` | CLI: `python3 -m guestd [--selftest \| --serve-site HOST:PORT]`; `FLEETKIT_FAULT` |
 | `guestd/server.py` | `/health`, `/task`, `/metrics`, `/logs`, `/egress-check` on an asyncio HTTP server; one task at a time |
-| `guestd/task.py` | the five steps: actions, settle conditions, assertions; failure categories; timing |
-| `guestd/cdp.py` | raw CDP on one websocket: one reader task, flat sessions, event queues, listeners |
+| `guestd/task.py` | the five steps: actions, settle points, assertions; failure categories; timing |
+| `guestd/cdp.py` | raw CDP on one websocket: one reader task, flat CDP sessions (`flatten: true`), event queues, listeners |
 | `guestd/chromium.py` | launches `/usr/lib/chromium/chromium` with the exact flag list; readiness; relaunch on death |
 | `guestd/clock.py` | `Deadline`: the one timeout mechanism for steps, the task and every DevTools wait |
 | `guestd/faults.py` | the five faults and what they do |
@@ -69,7 +69,7 @@ disables sampling, 1 to 9 is refused; `screenshot_each_step` defaults to false).
                     "psi_cpu_some_total_us": 1348016, "groups": {"browser": {"cpu_ms": 30.0, "rss_bytes": 229638144, "procs": 1}, ...}}, ...],
   "sample_interval_ms": 200, "guestd_cpu_ms": 21.7, "timing_valid": true,
   "guest_clock_ns": 1790491954396926750, "traceparent": "<echoed>",
-  "log_tail": [{"seq": 5, "ts": ..., "level": "info", "component": "guestd", "msg": "task start", "task_id": "...", ...}, ...]
+  "log_tail": [{"seq": 5, "ts": ..., "severity": "info", "component": "guestd", "msg": "task start", "task_id": "...", ...}, ...]
 }
 ```
 
@@ -108,7 +108,7 @@ has a number.
   task deadline.
 - A second `POST /task` while one runs gets `409 {"ok": false, "error": "...", "task_id": ...}`.
 - A task while Chromium is not ready gets `503` with the failure shape and
-  `failure_category: "session_not_ready"`.
+  `failure_category: "microvm_not_ready"`.
 - A malformed body gets `400 {"ok": false, "error": "..."}`.
 
 **`GET /metrics`** → `{mem_total, mem_available, cached, chromium_rss, tasks_run, tasks_failed}`.
@@ -124,7 +124,7 @@ a query string. Independent of Chromium, so it answers before readiness too.
 
 **`GET /logs?since=<seq>`** → `{"since": N, "lines": [...], "next": <seq of the last line returned>, "latest": <newest seq>}`,
 at most 1000 lines per call; poll with `since=next`. Each line is
-`{seq, ts, level, component, msg, ...fields}` and the same lines go to stdout, so
+`{seq, ts, severity, component, msg, ...fields}` and the same lines go to stdout, so
 `docker logs` and the VM console show them too. The ring holds the last 2000.
 
 ## The task
@@ -154,7 +154,7 @@ includes it as the design requires.
 
 **Failure categories** (closed set): `ok`, `step_timeout`, `task_timeout`,
 `assertion_failed`, `navigation_error`, `browser_crashed`; the host produces
-`guest_unreachable` and `session_not_ready` (the guest returns `session_not_ready` itself
+`guest_unreachable` and `microvm_not_ready` (the guest returns `microvm_not_ready` itself
 only when asked for a task before Chromium is up).
 
 - `navigation_error`: `Page.navigate` returned `errorText` (`net::ERR_CONNECTION_REFUSED`, ...).
@@ -176,7 +176,7 @@ command line, exported by init). Unknown names are a configuration error (exit 2
 | `crash_on_start` | exit code 3 before listening |
 | `never_ready` | listens, never launches Chromium, `/health` 503 forever |
 | `hang_task` | `POST /task` never answers (the connection stays open); `/health` still answers |
-| `hang_step` | hangs inside `search` under the step deadline → `step_timeout`, `failed_step: search`, `steps: [home]`, session still ready |
+| `hang_step` | hangs inside `search` under the step deadline → `step_timeout`, `failed_step: search`, `steps: [home]`, microVM still ready |
 | `slow_step:<ms>` | sleeps `ms` inside `search` under the deadline → `step_timeout` when `ms > step_timeout_ms`, `task_timeout` when the task budget is the smaller one, `ok` otherwise |
 
 ## Selectors the fixture must provide

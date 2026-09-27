@@ -4,13 +4,13 @@ from __future__ import annotations
 from hostd.model import Outcome, State
 
 
-def _ready_session(manager, guest, ctx, **spec):
+def _ready_microvm(manager, guest, ctx, **request):
     guest.ready.update({"guest-%d" % i for i in range(4)})
-    return manager.get(manager.create_sessions({"count": 1, **spec}, ctx)[0]["id"])
+    return manager.get(manager.create_microvms({"count": 1, **request}, ctx)[0]["id"])
 
 
 def test_idle_expired(manager, guest, backend, clock, ctx):
-    s = _ready_session(manager, guest, ctx, idle_timeout_s=5, max_lifetime_s=600)
+    s = _ready_microvm(manager, guest, ctx, idle_timeout_s=5, max_lifetime_s=600)
     clock.advance(4.9)
     assert manager.reap_once() == []
     assert s.state == State.READY
@@ -23,7 +23,7 @@ def test_idle_expired(manager, guest, backend, clock, ctx):
 
 
 def test_activity_resets_idle(manager, guest, backend, clock, ctx):
-    s = _ready_session(manager, guest, ctx, idle_timeout_s=5)
+    s = _ready_microvm(manager, guest, ctx, idle_timeout_s=5)
     clock.advance(4)
     manager.run_task(s.id, {}, ctx)             # sets last_activity_ts at start and end
     clock.advance(4)
@@ -32,8 +32,8 @@ def test_activity_resets_idle(manager, guest, backend, clock, ctx):
     assert manager.reap_once() == [(s.id, Outcome.IDLE_EXPIRED)]
 
 
-def test_busy_sessions_are_skipped_by_idle_but_not_lifetime(manager, guest, backend, clock, ctx):
-    s = _ready_session(manager, guest, ctx, idle_timeout_s=5, max_lifetime_s=20)
+def test_busy_microvms_are_skipped_by_idle_but_not_lifetime(manager, guest, backend, clock, ctx):
+    s = _ready_microvm(manager, guest, ctx, idle_timeout_s=5, max_lifetime_s=20)
     with s.lock:
         manager._transition(s, State.BUSY)       # a task in flight
     clock.advance(10)
@@ -45,7 +45,7 @@ def test_busy_sessions_are_skipped_by_idle_but_not_lifetime(manager, guest, back
 
 
 def test_lifetime_expired_from_creation(manager, guest, backend, clock, ctx):
-    s = _ready_session(manager, guest, ctx, idle_timeout_s=600, max_lifetime_s=8)
+    s = _ready_microvm(manager, guest, ctx, idle_timeout_s=600, max_lifetime_s=8)
     manager.run_task(s.id, {}, ctx)
     clock.advance(7)
     manager.run_task(s.id, {}, ctx)             # activity does not extend the lifetime
@@ -56,7 +56,7 @@ def test_lifetime_expired_from_creation(manager, guest, backend, clock, ctx):
 
 
 def test_lifetime_applies_while_booting(manager, guest, backend, clock, ctx):
-    """A session that is still booting when its lifetime ends is torn down with lifetime_expired."""
+    """A microVM that is still booting when its lifetime ends is torn down with lifetime_expired."""
     calls = {"n": 0}
     original_health = guest.health
 
@@ -68,15 +68,15 @@ def test_lifetime_applies_while_booting(manager, guest, backend, clock, ctx):
         return original_health(address, timeout)
 
     guest.health = slow_health
-    created = manager.create_sessions({"count": 1, "ready_timeout_s": 300, "max_lifetime_s": 50}, ctx)
+    created = manager.create_microvms({"count": 1, "ready_timeout_s": 300, "max_lifetime_s": 50}, ctx)
     s = manager.get(created[0]["id"])
     assert s.state == State.DESTROYED and s.outcome == Outcome.LIFETIME_EXPIRED
     assert s.ready_ts is None
     assert backend.destroyed == [s.id]
 
 
-def test_terminal_sessions_are_never_reaped(manager, guest, backend, clock, ctx):
-    s = _ready_session(manager, guest, ctx, idle_timeout_s=1, max_lifetime_s=2)
+def test_terminal_microvms_are_never_reaped(manager, guest, backend, clock, ctx):
+    s = _ready_microvm(manager, guest, ctx, idle_timeout_s=1, max_lifetime_s=2)
     manager.destroy(s.id)
     clock.advance(100)
     assert manager.reap_once() == []

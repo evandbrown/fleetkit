@@ -65,7 +65,7 @@ def test_log_ring_seq_since_tail():
     assert ring.since(5) == []
     assert [r["i"] for r in ring.tail(2)] == [3, 4]
     lines = [json.loads(l) for l in out.getvalue().splitlines()]
-    assert len(lines) == 5 and lines[0]["component"] == "guestd" and lines[0]["level"] == "info"
+    assert len(lines) == 5 and lines[0]["component"] == "guestd" and lines[0]["severity"] == "info"
 
 
 def test_task_request_schema_and_defaults():
@@ -158,7 +158,7 @@ def test_task_result_shape():
 def test_closed_sets_match_design():
     assert STEP_NAMES == ("home", "search", "open_product", "add_to_cart", "verify_cart")
     assert set(FAILURE_CATEGORIES) == {
-        "ok", "step_timeout", "task_timeout", "assertion_failed", "navigation_error", "browser_crashed", "guest_unreachable", "session_not_ready",
+        "ok", "step_timeout", "task_timeout", "assertion_failed", "navigation_error", "browser_crashed", "guest_unreachable", "microvm_not_ready",
     }
 
 

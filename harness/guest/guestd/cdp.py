@@ -1,4 +1,4 @@
-"""Raw Chrome DevTools Protocol over one websocket, with flat sessions.
+"""Raw Chrome DevTools Protocol over one websocket, with flat CDP sessions.
 
 One connection to the browser endpoint, one reader task. Commands are matched to
 responses by id; events are fanned out by ``sessionId`` to listeners and event queues.
@@ -41,7 +41,8 @@ class BrowserGone(Exception):
 
 
 class EventQueue:
-    """Events of one session, in arrival order. A ``None`` item means the connection died."""
+    """Events of one CDP session (one attached target), in arrival order. A ``None`` item
+    means the connection died."""
 
     def __init__(self, client: "CDPClient", session_id: Optional[str]) -> None:
         self._client = client

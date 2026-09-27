@@ -45,7 +45,7 @@ from .logs import (
     JsonFormatter,
     OtelBridgeHandler,
     RateLimitOtelNoise,
-    log_session_state,
+    log_microvm_state,
 )
 from .propagation import (
     PROPAGATOR,
@@ -85,7 +85,7 @@ DEFAULT_HOST_ID = "local"
 
 def default_host_id() -> str:
     """``FLEETKIT_HOST_ID`` or ``local``. Never the machine's hostname: it can carry the
-    operator's name, and every span and log record in a shared bundle would repeat it."""
+    operator's name, and every span and log record in a shared bundle would carry it."""
     return os.environ.get("FLEETKIT_HOST_ID") or DEFAULT_HOST_ID
 
 
@@ -238,8 +238,8 @@ class Telemetry:
     def emit_guest_logs(self, log_tail: Sequence[Any] | None, **kwargs: Any) -> int:
         return emit_guest_logs(self.guest_log_emitter, log_tail, **kwargs)
 
-    def log_session_state(self, session_id: str, from_state: str | None, to_state: str, ts: float, outcome: str | None = None, **extra: Any) -> None:
-        log_session_state(self.logger, session_id, from_state, to_state, ts, outcome, **extra)
+    def log_microvm_state(self, microvm_id: str, from_state: str | None, to_state: str, ts: float, outcome: str | None = None, **extra: Any) -> None:
+        log_microvm_state(self.logger, microvm_id, from_state, to_state, ts, outcome, **extra)
 
     # --- lifecycle ----------------------------------------------------------------------
 

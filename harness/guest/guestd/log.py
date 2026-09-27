@@ -37,13 +37,13 @@ class LogRing:
         """Sequence number of the most recent record (0 when empty)."""
         return self._seq
 
-    def log(self, level: str, msg: str, **fields: Any) -> Dict[str, Any]:
+    def log(self, severity: str, msg: str, **fields: Any) -> Dict[str, Any]:
         with self._lock:
             self._seq += 1
             rec: Dict[str, Any] = {
                 "seq": self._seq,
                 "ts": time.time(),
-                "level": level,
+                "severity": severity,
                 "component": self._component,
                 "msg": msg,
             }

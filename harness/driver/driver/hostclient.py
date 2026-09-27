@@ -76,31 +76,31 @@ class HostClient:
     def health(self) -> dict:
         return self.request("GET", "/health").body
 
-    def create_sessions(self, spec: dict, trace_headers: dict | None = None) -> list[dict]:
-        body = self.request("POST", "/sessions", body=spec, headers=trace_headers, timeout_s=30.0).body
-        if isinstance(body, dict) and "sessions" in body:
-            body = body["sessions"]
+    def create_microvms(self, create_request: dict, trace_headers: dict | None = None) -> list[dict]:
+        body = self.request("POST", "/microvms", body=create_request, headers=trace_headers, timeout_s=30.0).body
+        if isinstance(body, dict) and "microvms" in body:
+            body = body["microvms"]
         if not isinstance(body, list):
-            raise HostError(f"POST /sessions: unexpected body {_short(body)}", body=body)
+            raise HostError(f"POST /microvms: unexpected body {_short(body)}", body=body)
         return body
 
-    def list_sessions(self) -> list[dict]:
-        body = self.request("GET", "/sessions").body
-        if isinstance(body, dict) and "sessions" in body:
-            body = body["sessions"]
+    def list_microvms(self) -> list[dict]:
+        body = self.request("GET", "/microvms").body
+        if isinstance(body, dict) and "microvms" in body:
+            body = body["microvms"]
         return body if isinstance(body, list) else []
 
-    def get_session(self, session_id: str) -> dict:
-        return self.request("GET", f"/sessions/{session_id}").body
+    def get_microvm(self, microvm_id: str) -> dict:
+        return self.request("GET", f"/microvms/{microvm_id}").body
 
-    def run_task(self, session_id: str, payload: dict, timeout_s: float,
+    def run_task(self, microvm_id: str, payload: dict, timeout_s: float,
                  trace_headers: dict | None = None) -> Reply:
         """Never raises on HTTP status; transport errors come back in ``Reply.transport_error``."""
-        return self.request("POST", f"/sessions/{session_id}/task", body=payload, timeout_s=timeout_s,
+        return self.request("POST", f"/microvms/{microvm_id}/task", body=payload, timeout_s=timeout_s,
                             headers=trace_headers, raise_on_error=False)
 
-    def delete_session(self, session_id: str, trace_headers: dict | None = None) -> Reply:
-        return self.request("DELETE", f"/sessions/{session_id}", headers=trace_headers,
+    def delete_microvm(self, microvm_id: str, trace_headers: dict | None = None) -> Reply:
+        return self.request("DELETE", f"/microvms/{microvm_id}", headers=trace_headers,
                             timeout_s=30.0, raise_on_error=False)
 
     def host_metrics(self, timeout_s: float = 1.0) -> dict:

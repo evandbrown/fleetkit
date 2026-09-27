@@ -1,11 +1,14 @@
 """The trial protocol (design sections 4, 5, 6 and 11).
 
-One trial: optional settle wait, fixture check, create N sessions, wait until all are ready or
-failed, release a barrier so N tasks start together (or spaced by launch_interval_ms), collect rows
-as they return, destroy every session, verify-clean, write trial.json with the trial's ``kind`` and
-its ``evaluation`` against the criteria (driver/criteria.py). Every CSV row is appended as it
-arrives and trial.json is rewritten at each phase, so the run directory is valid after any
-interruption.
+One trial at density N: optional settle wait, fixture check, create N microVMs, wait until all are
+ready or failed, release a barrier so N tasks start together (or spaced by launch_interval_ms),
+collect rows as they return, destroy every microVM, verify-clean, write trial.json with the trial's
+``trial_kind`` and its ``evaluation`` against the criteria (driver/criteria.py).
+
+A counting trial is numbered from 1 within its density, ``d<N>-t<number>`` ("trial 2 at density 8"
+is ``d8-t2``); warm-up, illustration and fault trials are labelled instead. ``sequence`` records the
+run-wide execution order. Every CSV row is appended as it arrives and trial.json is rewritten at
+each phase, so the run directory is valid after any interruption.
 """
 from __future__ import annotations
 
@@ -30,11 +33,11 @@ from .telemetry import Span, Tracer
 
 
 @dataclass
-class SessionRec:
-    session_id: str
+class MicrovmRec:
+    microvm_id: str
     slot: int
     address: str = ""
-    info: dict = field(default_factory=dict)  # last GET /sessions/{id} body
+    info: dict = field(default_factory=dict)  # last GET /microvms/{id} body
     ready: bool = False
     failed: bool = False
     driver_error: str = ""
@@ -60,11 +63,15 @@ class TrialRunner:
         self.w = writers
         self.tr = tracer
         self.metrics = metrics  # HostMetricsSampler, for the settle wait's cpu_util; polled directly if None
-        seq = seq if seq is not None else rundir.next_trial_seq()
-        label = cfg.trial_label or f"{cfg.backend}-n{cfg.level_n}-r{cfg.repeat}"
-        self.trial_id = f"t{seq:03d}-{label}"
+        self.sequence = seq if seq is not None else rundir.next_sequence()
+        if cfg.trial_label:
+            self.trial_number: int | None = None
+            self.trial_id = rundir.unique_label(cfg.trial_label)
+        else:
+            self.trial_number = rundir.next_trial_number(cfg.density)
+            self.trial_id = f"d{cfg.density}-t{self.trial_number}"
         self.trial_dir = rundir.trial_dir(self.trial_id)
-        self.sessions: list[SessionRec] = []
+        self.microvms: list[MicrovmRec] = []
         self.timestamps: dict[str, float | None] = {
             "create_start": None, "all_ready": None, "barrier_release": None,
             "last_task_return": None, "verify_clean_pass": None,
@@ -84,9 +91,9 @@ class TrialRunner:
         self.step_rows: list[dict] = []
 
     # ---- helpers -----------------------------------------------------------------------
-    def _log(self, level: str, msg: str, **attrs):
-        self.tr.log(level, msg, self.span, trial_id=self.trial_id, backend=self.cfg.backend,
-                    level_n=self.cfg.level_n, **attrs)
+    def _log(self, severity: str, msg: str, **attrs):
+        self.tr.log(severity, msg, self.span, trial_id=self.trial_id, backend=self.cfg.backend,
+                    density=self.cfg.density, **attrs)
 
     def _headers(self, span: Span | None = None) -> dict:
         s = span or self.span
@@ -97,11 +104,11 @@ class TrialRunner:
         cfg = self.cfg
         self.span = self.tr.start_span("trial", attributes={
             "fleetkit.run_id": cfg.run_id, "fleetkit.trial_id": self.trial_id,
-            "fleetkit.backend": cfg.backend, "fleetkit.level_n": cfg.level_n,
-            "fleetkit.repeat": cfg.repeat, "fleetkit.fault": cfg.fault or "",
-            "fleetkit.host_id": cfg.host_id, "fleetkit.trial_kind": cfg.kind})
-        self._log("INFO", f"trial {self.trial_id} starting", fault=cfg.fault or "", kind=cfg.kind,
-                  trace_id=self.span.trace_id)
+            "fleetkit.backend": cfg.backend, "fleetkit.density": cfg.density,
+            "fleetkit.trial_number": self.trial_number, "fleetkit.fault": cfg.fault or "",
+            "fleetkit.host_id": cfg.host_id, "fleetkit.trial_kind": cfg.trial_kind})
+        self._log("INFO", f"trial {self.trial_id} starting", fault=cfg.fault or "", trial_kind=cfg.trial_kind,
+                  sequence=self.sequence, trace_id=self.span.trace_id)
         self._write_trial_json()
         created = False
         try:
@@ -115,7 +122,7 @@ class TrialRunner:
             self._write_trial_json()
 
             self.phase = "create"
-            self._create_sessions()
+            self._create_microvms()
             created = True
             self._write_trial_json()
 
@@ -123,7 +130,7 @@ class TrialRunner:
             self._wait_all_ready()
             self._write_trial_json()
 
-            ready = [s for s in self.sessions if s.ready]
+            ready = [s for s in self.microvms if s.ready]
             if ready:
                 self.phase = "fixture_recheck"
                 try:
@@ -135,12 +142,12 @@ class TrialRunner:
                     self.phase = "tasks"
                     self._run_tasks(ready)
             else:
-                self._log("WARN", "no session became ready; no tasks dispatched")
+                self._log("WARN", "no microVM became ready; no tasks dispatched")
             self._write_trial_json()
         except KeyboardInterrupt:
             self._interrupted = True
             self.error = "interrupted"
-            self._log("WARN", "interrupted; cleaning up sessions")
+            self._log("WARN", "interrupted; cleaning up microVMs")
         except FixtureCheckError as exc:
             self.error = f"fixture check failed: {exc}"
             self._log("ERROR", f"trial {self.trial_id} aborted: {self.error}")
@@ -170,7 +177,7 @@ class TrialRunner:
             self.span.set(**{"fleetkit.status": result["status"]})
             self.span.end()
             self._log("INFO", f"trial {self.trial_id} {result['status']}",
-                      sessions_ready=result["counts"]["sessions_ready"],
+                      microvms_ready=result["counts"]["microvms_ready"],
                       tasks_ok=result["counts"]["tasks_ok"], tasks=result["counts"]["tasks_dispatched"])
         if self._interrupted:
             raise KeyboardInterrupt
@@ -212,63 +219,63 @@ class TrialRunner:
             sp.set(**{"fleetkit.products": len(self.products), "fleetkit.products_source": self.products_source})
         self._log("INFO", "fixture check ok", url=self.cfg.fixture_check_url, products=len(self.products))
 
-    def _create_sessions(self) -> None:
+    def _create_microvms(self) -> None:
         cfg, t = self.cfg, self.cfg.timeouts
-        spec = {
-            "backend": cfg.backend, "count": cfg.level_n, "vcpus": cfg.vcpus, "mem_mib": cfg.mem_mib,
+        create_request = {
+            "backend": cfg.backend, "count": cfg.density, "vcpus": cfg.vcpus, "mem_mib": cfg.mem_mib,
             "ready_timeout_s": t.ready_timeout_s, "max_lifetime_s": t.max_lifetime_s,
             "idle_timeout_s": t.idle_timeout_s, "launch_interval_ms": t.launch_interval_ms,
             "fault": cfg.fault,
         }
-        with self.tr.start_span("sessions.create", self.span, {"fleetkit.count": cfg.level_n}) as sp:
+        with self.tr.start_span("microvms.create", self.span, {"fleetkit.count": cfg.density}) as sp:
             self.timestamps["create_start"] = time.time()
-            created = self.client.create_sessions(spec, self._headers(sp))
+            created = self.client.create_microvms(create_request, self._headers(sp))
             for i, c in enumerate(created):
-                sid = str(c.get("id") or c.get("session_id") or "")
-                if not sid:
-                    raise HostError(f"POST /sessions returned a session without an id: {c}")
-                self.sessions.append(SessionRec(sid, int(c.get("slot", i)), str(c.get("address") or "")))
-        self._log("INFO", f"created {len(self.sessions)} sessions", ids=",".join(s.session_id for s in self.sessions))
+                mid = str(c.get("id") or c.get("microvm_id") or "")
+                if not mid:
+                    raise HostError(f"POST /microvms returned a microVM without an id: {c}")
+                self.microvms.append(MicrovmRec(mid, int(c.get("slot", i)), str(c.get("address") or "")))
+        self._log("INFO", f"created {len(self.microvms)} microVMs", ids=",".join(s.microvm_id for s in self.microvms))
 
     def _wait_all_ready(self) -> None:
         t = self.cfg.timeouts
         deadline = time.monotonic() + t.ready_timeout_s + READY_GRACE_S
         with self.tr.start_span("wait_all_ready", self.span) as sp:
-            pending = {s.session_id: s for s in self.sessions}
+            pending = {s.microvm_id: s for s in self.microvms}
             while pending:
-                for sid in list(pending):
-                    s = pending[sid]
+                for mid in list(pending):
+                    s = pending[mid]
                     try:
-                        s.info = self.client.get_session(sid)
+                        s.info = self.client.get_microvm(mid)
                     except HostError as exc:
                         s.driver_error = str(exc)
                         continue
                     if s.state == "ready" or s.state == "busy":
                         s.ready = True
-                        del pending[sid]
-                        self._log("INFO", "session ready", session_id=sid, slot=s.slot,
+                        del pending[mid]
+                        self._log("INFO", "microVM ready", microvm_id=mid, slot=s.slot,
                                   startup_ms=s.info.get("startup_ms"))
                     elif s.state in schemas.TERMINAL_STATES or s.state == "destroying":
                         s.failed = True
-                        del pending[sid]
-                        self._log("WARN", "session failed before ready", session_id=sid, slot=s.slot,
+                        del pending[mid]
+                        self._log("WARN", "microVM failed before ready", microvm_id=mid, slot=s.slot,
                                   outcome=s.outcome, error=s.info.get("error"))
                 if pending and time.monotonic() > deadline:
-                    for sid, s in pending.items():
+                    for mid, s in pending.items():
                         s.failed = True
                         s.driver_error = ("driver: readiness deadline exceeded without a terminal state "
                                           f"from hostd (state={s.state or 'unknown'})")
-                        self._log("ERROR", s.driver_error, session_id=sid)
+                        self._log("ERROR", s.driver_error, microvm_id=mid)
                     break
                 if pending:
                     time.sleep(READY_POLL_INTERVAL_S)
             self.timestamps["all_ready"] = time.time()
-            n_ready = sum(1 for s in self.sessions if s.ready)
-            sp.set(**{"fleetkit.ready": n_ready, "fleetkit.failed": len(self.sessions) - n_ready})
-        self._log("INFO", "wait-all-ready done", ready=n_ready, failed=len(self.sessions) - n_ready,
+            n_ready = sum(1 for s in self.microvms if s.ready)
+            sp.set(**{"fleetkit.ready": n_ready, "fleetkit.failed": len(self.microvms) - n_ready})
+        self._log("INFO", "wait-all-ready done", ready=n_ready, failed=len(self.microvms) - n_ready,
                   wait_s=round(self.timestamps["all_ready"] - self.timestamps["create_start"], 3))
 
-    def _run_tasks(self, ready: list[SessionRec]) -> None:
+    def _run_tasks(self, ready: list[MicrovmRec]) -> None:
         t = self.cfg.timeouts
         release = threading.Event()
         order = sorted(ready, key=lambda s: s.slot)
@@ -282,7 +289,7 @@ class TrialRunner:
                     f.result()
             sp.set(**{"fleetkit.tasks_ok": sum(1 for s in order if s.task and s.task["ok"])})
 
-    def _task_worker(self, s: SessionRec, index: int, release: threading.Event) -> None:
+    def _task_worker(self, s: MicrovmRec, index: int, release: threading.Event) -> None:
         cfg, t = self.cfg, self.cfg.timeouts
         release.wait()
         if t.launch_interval_ms > 0 and index > 0:
@@ -297,11 +304,11 @@ class TrialRunner:
             "sample_interval_ms": cfg.sample_interval_ms, "screenshot_each_step": bool(cfg.screenshot_each_step),
         }
         span = self.tr.start_span("task", self.span, {
-            "fleetkit.session_id": s.session_id, "fleetkit.task_id": task_id,
+            "fleetkit.microvm_id": s.microvm_id, "fleetkit.task_id": task_id,
             "fleetkit.slot": s.slot, "fleetkit.product_id": product.product_id})
         headers = self._headers(span)
         headers["X-Fleetkit-Task-Id"] = task_id
-        reply = self.client.run_task(s.session_id, payload, t.client_timeout_ms / 1000.0, headers)
+        reply = self.client.run_task(s.microvm_id, payload, t.client_timeout_ms / 1000.0, headers)
         body = reply.body if isinstance(reply.body, dict) else {}
         category, error = categorize(reply.status, reply.body, reply.transport_error)
         ok = category == "ok" and body.get("ok") is True
@@ -327,11 +334,11 @@ class TrialRunner:
         if log_tail:
             try:
                 self.rundir.guest_logs_dir.mkdir(parents=True, exist_ok=True)
-                with open(self.rundir.guest_logs_dir / f"{s.session_id}.jsonl", "a", encoding="utf-8") as fh:
+                with open(self.rundir.guest_logs_dir / f"{s.microvm_id}.jsonl", "a", encoding="utf-8") as fh:
                     for line in (log_tail if isinstance(log_tail, list) else str(log_tail).splitlines()):
                         fh.write((json.dumps(line, sort_keys=True) if isinstance(line, dict) else str(line)) + "\n")
             except Exception as exc:
-                self._log("WARN", f"guest log tail for {s.session_id} not saved: {exc}")
+                self._log("WARN", f"guest log tail for {s.microvm_id} not saved: {exc}")
 
         guest_clock_ns = _int_or_none(body.get("guest_clock_ns"))
         clock_offset_ns = _int_or_none(_pick(body, "clock_offset_ns", "host.clock_offset_ns"))
@@ -342,7 +349,7 @@ class TrialRunner:
 
         row = {
             "run_id": cfg.run_id, "trial_id": self.trial_id, "backend": cfg.backend,
-            "level_n": cfg.level_n, "repeat": cfg.repeat, "session_id": s.session_id, "slot": s.slot,
+            "density": cfg.density, "trial_number": self.trial_number, "microvm_id": s.microvm_id, "slot": s.slot,
             "task_id": task_id, "product_id": product.product_id, "dispatch_ts": reply.send_ts,
             "task_ms": to_float(body.get("task_ms")), "wall_ms": round(reply.wall_ms, 3), "ok": ok,
             "failure_category": category, "failed_step": body.get("failed_step") or "",
@@ -353,7 +360,7 @@ class TrialRunner:
             "screenshot_path": screenshot_path, "trace_id": self.span.trace_id,
             "clock_offset_ns": clock_offset_ns, "error": error,
             "timing_valid": body.get("timing_valid") if isinstance(body.get("timing_valid"), bool) else None,
-            "guestd_cpu_ms": to_float(body.get("guestd_cpu_ms")), "kind": cfg.kind,
+            "guestd_cpu_ms": to_float(body.get("guestd_cpu_ms")), "trial_kind": cfg.trial_kind,
         }
         self.w.tasks.append(row)
         with self._lock:
@@ -390,7 +397,7 @@ class TrialRunner:
             self.step_rows.extend(step_rows)
         samples = body.get("proc_samples") if isinstance(body.get("proc_samples"), list) else []
         self.w.guest_metrics.append_many(
-            guest_metric_rows(samples, self.trial_id, s.session_id, task_id, guest_clock_ns, clock_offset_ns))
+            guest_metric_rows(samples, self.trial_id, s.microvm_id, task_id, guest_clock_ns, clock_offset_ns))
         s.task = {"task_id": task_id, "ok": ok, "failure_category": category, "failed_step": row["failed_step"],
                   "task_ms": row["task_ms"], "wall_ms": row["wall_ms"], "http_status": reply.status,
                   "steps": len(steps), "error": error, "screenshot_path": screenshot_path,
@@ -403,11 +410,11 @@ class TrialRunner:
             span.error(f"{category}: {error}")
         span.end()
         try:
-            s.info = self.client.get_session(s.session_id)
+            s.info = self.client.get_microvm(s.microvm_id)
             s.state_after_task = s.state
         except HostError as exc:
             s.state_after_task = f"unknown ({exc})"
-        self._log("INFO" if ok else "WARN", f"task {task_id} {category}", session_id=s.session_id,
+        self._log("INFO" if ok else "WARN", f"task {task_id} {category}", microvm_id=s.microvm_id,
                   wall_ms=row["wall_ms"], task_ms=row["task_ms"], failed_step=row["failed_step"],
                   state_after=s.state_after_task, error=error if not ok else "")
 
@@ -430,22 +437,22 @@ class TrialRunner:
         return saved
 
     def _cleanup(self) -> None:
-        with self.tr.start_span("cleanup", self.span, {"fleetkit.count": len(self.sessions)}) as sp:
-            with ThreadPoolExecutor(max_workers=max(1, len(self.sessions)), thread_name_prefix="destroy") as pool:
-                list(pool.map(lambda s: self._destroy_one(s, sp), self.sessions))
-            for s in self.sessions:
-                self._write_session_row(s)
-        self._log("INFO", "cleanup done", sessions=len(self.sessions))
+        with self.tr.start_span("cleanup", self.span, {"fleetkit.count": len(self.microvms)}) as sp:
+            with ThreadPoolExecutor(max_workers=max(1, len(self.microvms)), thread_name_prefix="destroy") as pool:
+                list(pool.map(lambda s: self._destroy_one(s, sp), self.microvms))
+            for s in self.microvms:
+                self._write_microvm_row(s)
+        self._log("INFO", "cleanup done", microvms=len(self.microvms))
 
-    def _destroy_one(self, s: SessionRec, parent: Span) -> None:
-        reply = self.client.delete_session(s.session_id, self._headers(parent))
+    def _destroy_one(self, s: MicrovmRec, parent: Span) -> None:
+        reply = self.client.delete_microvm(s.microvm_id, self._headers(parent))
         if reply.transport_error or reply.status >= 400 and reply.status != 404:
             s.driver_error = (s.driver_error + "; " if s.driver_error else "") + \
                 f"DELETE: {reply.transport_error or 'HTTP ' + str(reply.status)}"
         deadline = time.monotonic() + DESTROY_GRACE_S
         while True:
             try:
-                s.info = self.client.get_session(s.session_id)
+                s.info = self.client.get_microvm(s.microvm_id)
             except HostError as exc:
                 if exc.status == 404:
                     break  # gone entirely
@@ -459,20 +466,20 @@ class TrialRunner:
                 break
             time.sleep(READY_POLL_INTERVAL_S)
 
-    def _write_session_row(self, s: SessionRec) -> None:
+    def _write_microvm_row(self, s: MicrovmRec) -> None:
         if s.csv_written:
             return
         s.csv_written = True
         cfg, i = self.cfg, s.info
         outcome = s.outcome
-        if outcome not in schemas.SESSION_OUTCOMES:
+        if outcome not in schemas.MICROVM_OUTCOMES:
             if s.failed and not outcome:
                 outcome = "startup_timeout" if "deadline" in s.driver_error else (outcome or "startup_error")
             elif s.ready and s.task is not None and not outcome:
                 outcome = "completed"
         err = "; ".join(x for x in (str(i.get("error") or ""), s.driver_error) if x)
-        self.w.sessions.append({
-            "run_id": cfg.run_id, "trial_id": self.trial_id, "session_id": s.session_id, "slot": s.slot,
+        self.w.microvms.append({
+            "run_id": cfg.run_id, "trial_id": self.trial_id, "microvm_id": s.microvm_id, "slot": s.slot,
             "backend": cfg.backend, "vcpus": cfg.vcpus, "mem_mib": cfg.mem_mib,
             "created_ts": i.get("created_ts"), "process_started_ts": i.get("process_started_ts"),
             "ready_ts": i.get("ready_ts"), "destroyed_ts": i.get("destroyed_ts"),
@@ -499,31 +506,31 @@ class TrialRunner:
     # ---- trial.json --------------------------------------------------------------------
     def _write_trial_json(self, final: bool = False) -> dict:
         cfg = self.cfg
-        n = cfg.level_n
-        sessions_ready = sum(1 for s in self.sessions if s.ready)
-        sessions_failed = sum(1 for s in self.sessions if s.failed)
-        tasks = [s.task for s in self.sessions if s.task]
+        n = cfg.density
+        microvms_ready = sum(1 for s in self.microvms if s.ready)
+        microvms_failed = sum(1 for s in self.microvms if s.failed)
+        tasks = [s.task for s in self.microvms if s.task]
         tasks_ok = sum(1 for t in tasks if t["ok"])
         by_cat = collections.Counter(t["failure_category"] for t in tasks)
         by_outcome = collections.Counter()
-        for s in self.sessions:
+        for s in self.microvms:
             o = s.outcome or ("startup_timeout" if s.failed and "deadline" in s.driver_error else "")
             if o:
                 by_outcome[o] += 1
         clean = bool(self.verify_clean and self.verify_clean.get("clean"))
         complete = final and not self._interrupted
-        level_passed = (complete and len(self.sessions) == n and sessions_ready == n and len(tasks) == n
-                        and tasks_ok == n and clean and self.error is None)
-        if not complete or self.error or not self.sessions or sessions_ready == 0 or not clean:
+        protocol_ok = (complete and len(self.microvms) == n and microvms_ready == n and len(tasks) == n
+                       and tasks_ok == n and clean and self.error is None)
+        if not complete or self.error or not self.microvms or microvms_ready == 0 or not clean:
             status = "failed"
-        elif sessions_failed or tasks_ok < len(tasks) or len(tasks) < n:
+        elif microvms_failed or tasks_ok < len(tasks) or len(tasks) < n:
             status = "degraded"
         else:
             status = "ok"
 
         step_rows: dict[str, list[float]] = collections.defaultdict(list)
         task_ms, wall_ms, overhead, failed_elapsed, bytes_, reqs = [], [], [], [], [], []
-        for s in self.sessions:
+        for s in self.microvms:
             if not s.task:
                 continue
             t = s.task
@@ -554,8 +561,8 @@ class TrialRunner:
 
         doc = {
             "run_id": cfg.run_id, "trial_id": self.trial_id, "trace_id": self.span.trace_id if self.span else "",
-            "kind": cfg.kind,
-            "backend": cfg.backend, "level_n": n, "repeat": cfg.repeat, "fault": cfg.fault,
+            "sequence": self.sequence, "trial_kind": cfg.trial_kind,
+            "backend": cfg.backend, "density": n, "trial_number": self.trial_number, "fault": cfg.fault,
             "vcpus": cfg.vcpus, "mem_mib": cfg.mem_mib, "host_id": cfg.host_id,
             "timeouts": cfg.timeouts.as_dict(),
             "fixture": {"check_url": cfg.fixture_check_url, "guest_base_url": cfg.guest_fixture_base_url(),
@@ -564,33 +571,32 @@ class TrialRunner:
             "pre_trial": self.pre_trial,
             "sample_interval_ms": cfg.sample_interval_ms, "screenshot_each_step": bool(cfg.screenshot_each_step),
             "counts": {
-                "sessions_requested": n, "sessions_created": len(self.sessions),
-                "sessions_ready": sessions_ready, "sessions_failed_startup": sessions_failed,
-                "sessions_by_outcome": dict(by_outcome),
+                "microvms_requested": n, "microvms_created": len(self.microvms),
+                "microvms_ready": microvms_ready, "microvms_failed_startup": microvms_failed,
+                "microvms_by_outcome": dict(by_outcome),
                 "tasks_dispatched": len(tasks), "tasks_ok": tasks_ok,
                 "tasks_by_failure_category": dict(by_cat),
             },
-            "actual_concurrency": len(tasks),
-            "status": status, "complete": complete, "phase": self.phase, "level_passed": level_passed,
+            "status": status, "complete": complete, "phase": self.phase,
             "error": self.error,
             "verify_clean": self.verify_clean,
             "percentiles": {
-                "steps": {name: {"n": len(v), "p50": percentile(v, 50), "p95": percentile(v, 95)}
+                "steps": {name: {"count": len(v), "p50": percentile(v, 50), "p95": percentile(v, 95)}
                           for name, v in step_rows.items()},
-                "task_ms": {"n": len(task_ms), "p50": percentile(task_ms, 50), "p95": percentile(task_ms, 95)},
-                "wall_ms": {"n": len(wall_ms), "p50": percentile(wall_ms, 50), "p95": percentile(wall_ms, 95)},
+                "task_ms": {"count": len(task_ms), "p50": percentile(task_ms, 50), "p95": percentile(task_ms, 95)},
+                "wall_ms": {"count": len(wall_ms), "p50": percentile(wall_ms, 50), "p95": percentile(wall_ms, 95)},
                 "harness_overhead_ms": summary(overhead),
                 "failed_task_elapsed_ms": summary(failed_elapsed),
-                "startup_ms": summary([to_float(s.info.get("startup_ms")) for s in self.sessions]),
-                "cleanup_ms": summary([to_float(s.info.get("cleanup_ms")) for s in self.sessions]),
+                "startup_ms": summary([to_float(s.info.get("startup_ms")) for s in self.microvms]),
+                "cleanup_ms": summary([to_float(s.info.get("cleanup_ms")) for s in self.microvms]),
             },
             "means": {"bytes_received": mean(bytes_), "request_count": mean(reqs)},
-            "sessions": [{
-                "session_id": s.session_id, "slot": s.slot, "address": s.address, "state": s.state,
+            "microvms": [{
+                "microvm_id": s.microvm_id, "slot": s.slot, "address": s.address, "state": s.state,
                 "outcome": s.outcome, "startup_ms": s.info.get("startup_ms"), "cleanup_ms": s.info.get("cleanup_ms"),
                 "ready": s.ready, "failed_startup": s.failed, "state_after_task": s.state_after_task,
                 "error": s.info.get("error"), "driver_error": s.driver_error, "task": s.task,
-            } for s in self.sessions],
+            } for s in self.microvms],
             "written_at": time.time(),
         }
         doc["criteria"] = cfg.criteria
@@ -599,12 +605,11 @@ class TrialRunner:
             with self._lock:
                 task_rows, step_rows = list(self.task_rows), list(self.step_rows)
             doc["evaluation"] = evaluate_trial(doc, task_rows, step_rows, cfg.criteria)
-        # level_passed used to mean "protocol ok" only, so a trial that missed its latency
-        # targets still read as passed (cap-baseline-1, n=12). It is now the trial's verdict
-        # against its criteria; the protocol-only flag is kept as protocol_ok.
-        doc["protocol_ok"] = level_passed
-        if doc["evaluation"] is not None:
-            doc["level_passed"] = bool(doc["evaluation"].get("passed"))
+        # ``protocol_ok`` says only that the protocol held (every microVM ready, every task ok,
+        # verify-clean clean). ``passed`` is the trial's verdict against its criteria, equal to
+        # evaluation.passed, and stays null until the trial is final.
+        doc["protocol_ok"] = protocol_ok
+        doc["passed"] = bool(doc["evaluation"].get("passed")) if doc["evaluation"] is not None else None
         write_json_atomic(self.rundir.trial_json_path(self.trial_id), doc)
         return doc
 
@@ -623,7 +628,7 @@ def categorize(status: int, body, transport_error: str | None) -> tuple[str, str
             return "assertion_failed", err or "guest reported failure_category ok with ok=false"
         return cat, err
     if status == 409:
-        return "session_not_ready", err or "HTTP 409"
+        return "microvm_not_ready", err or "HTTP 409"
     if status == 0 or status >= 500:
         return "guest_unreachable", err or f"HTTP {status}: {_short(body)}"
     return "guest_unreachable", err or f"HTTP {status} with unknown failure_category {cat!r}: {_short(body)}"
@@ -633,7 +638,7 @@ GUEST_SAMPLE_SCALARS = ("cpu_total_ms", "cpu_idle_ms", "mem_available", "psi_cpu
 GUEST_GROUP_FIELDS = ("cpu_ms", "rss_bytes", "procs")
 
 
-def guest_metric_rows(samples, trial_id: str, session_id: str, task_id: str,
+def guest_metric_rows(samples, trial_id: str, microvm_id: str, task_id: str,
                       guest_clock_ns, clock_offset_ns) -> list[dict]:
     """guest_metrics.csv rows (long format) from a task result's ``proc_samples``. ``t_ns`` shares the
     steps' zero (task receipt), so ts = (guest_clock_ns + t_ns + clock_offset_ns) / 1e9. Nulls are skipped."""
@@ -642,7 +647,7 @@ def guest_metric_rows(samples, trial_id: str, session_id: str, task_id: str,
         if not isinstance(smp, dict):
             continue
         ts = _step_ts(smp.get("t_ns"), guest_clock_ns, clock_offset_ns)
-        base = {"ts": ts, "trial_id": trial_id, "session_id": session_id, "task_id": task_id}
+        base = {"ts": ts, "trial_id": trial_id, "microvm_id": microvm_id, "task_id": task_id}
         for k in GUEST_SAMPLE_SCALARS:
             v = smp.get(k)
             if _is_num(v):

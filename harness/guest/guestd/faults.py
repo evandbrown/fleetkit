@@ -3,12 +3,12 @@ init from ``fleetkit.fault=`` on the kernel command line).
 
 The closed set from design section 4 and its expected results:
 
-- ``crash_on_start``   the daemon exits non-zero at once (session ``startup_error``)
-- ``never_ready``      ``/health`` answers 503 forever (session ``startup_timeout``)
+- ``crash_on_start``   the daemon exits non-zero at once (microVM ``startup_error``)
+- ``never_ready``      ``/health`` answers 503 forever (microVM ``startup_timeout``)
 - ``hang_task``        ``POST /task`` never answers (task ``guest_unreachable`` at the host's
-                       proxy deadline; the session is destroyed)
+                       proxy deadline; the microVM is destroyed)
 - ``hang_step``        hangs inside the ``search`` step, under the step deadline
-                       (task ``step_timeout``, ``failed_step`` = ``search``; session stays ready)
+                       (task ``step_timeout``, ``failed_step`` = ``search``; microVM stays ready)
 - ``slow_step:<ms>``   sleeps ``ms`` inside the ``search`` step, under the step deadline
                        (``step_timeout`` when ms exceeds the step timeout)
 """
@@ -35,7 +35,7 @@ class Fault:
 
 
 def parse_fault(text: Optional[str]) -> Optional[Fault]:
-    """Parse the fault spec; None for empty. Raises ValueError on an unknown fault."""
+    """Parse a ``FLEETKIT_FAULT`` value; None for empty. Raises ValueError on an unknown fault."""
     if text is None:
         return None
     text = text.strip()
