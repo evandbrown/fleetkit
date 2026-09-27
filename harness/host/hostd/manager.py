@@ -14,7 +14,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .backends.base import Backend, BackendError
 from .guest import GuestClient, GuestError, boot_phases, guest_info
-from .model import Defaults, FailureCategory, MicroVM, Outcome, State, TraceContext, validate_fault
+from .model import (Defaults, FailureCategory, MicroVM, Outcome, State, TraceContext, hypervisor_problems,
+                    validate_fault)
 from .telemetry import Telemetry
 
 
@@ -126,6 +127,12 @@ class Manager:
             fault = validate_fault(request.get("fault"))
         except ValueError as e:
             raise ApiError(400, str(e))
+        # The spec's hypervisor section: refused unless this backend can carry it out, so what a
+        # run records is what ran. Absent, the microVM runs the backend as it always has.
+        problems = hypervisor_problems(self.backend, request.get("hypervisor"))
+        if problems:
+            raise ApiError(400, "; ".join(problems))
+        hypervisor = {"name": self.backend.name, **(request.get("hypervisor") or {})}
         run_id = request.get("run_id") or ctx.run_id
         trial_id = request.get("trial_id") or ctx.trial_id
 
@@ -153,7 +160,7 @@ class Manager:
                             address=self.backend.address(slot), vcpus=vcpus, mem_mib=mem_mib, fault=fault,
                             ready_timeout_s=ready_timeout_s, max_lifetime_s=max_lifetime_s,
                             idle_timeout_s=idle_timeout_s, fixture_base_url=self.backend.fixture_base_url,
-                            run_id=run_id, trial_id=trial_id)
+                            run_id=run_id, trial_id=trial_id, hypervisor=dict(hypervisor))
                 self.microvms[s.id] = s
                 created.append(s)
 

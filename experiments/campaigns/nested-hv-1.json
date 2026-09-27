@@ -1,0 +1,36 @@
+{
+  "name": "nested-hv-1",
+  "question": "On a nested m8i.4xlarge, with microVMs of 2 vCPUs and 2 GiB that have the same devices (PCI and a random-number device), does Cloud Hypervisor reach the same density as Firecracker? A third spec runs Firecracker as cap-baseline-1 did, to show whether the devices alone move the result.",
+  "replicas": 2,
+  "shutdown_after_minutes": 45,
+  "base": {
+    "worker_host": { "instance_type": "m8i.4xlarge" },
+    "hypervisor": { "name": "firecracker", "virtio_transport": "pci", "virtio_rng": true },
+    "microvm": { "vcpus": 2, "memory_mib": 2048 },
+    "densities": [1, 4, 8, 9, 10, 11, 12, 14, 16],
+    "criteria": {
+      "step_p50_target_ms": 1000,
+      "step_p95_target_ms": 2000,
+      "task_p95_target_ms": 5000,
+      "ready_timeout_s": 180,
+      "step_timeout_ms": 10000,
+      "task_timeout_ms": 45000
+    },
+    "procedure": { "trials_per_density": 1, "boundary_trials": 2, "settle_s": 10 },
+    "support_host": { "instance_type": "m8i.xlarge" }
+  },
+  "specs": {
+    "firecracker": {},
+    "cloud-hypervisor": {
+      "hypervisor": { "name": "cloud-hypervisor" }
+    },
+    "firecracker-mmio": {
+      "hypervisor": { "virtio_transport": "mmio", "virtio_rng": false }
+    }
+  },
+  "why": {
+    "firecracker": "Firecracker with the devices Cloud Hypervisor always has, so the two differ only in the hypervisor.",
+    "cloud-hypervisor": "The alternative hypervisor, which only offers PCI devices and always adds a random-number device.",
+    "firecracker-mmio": "Firecracker as cap-baseline-1 ran it, so a difference from the firecracker spec is the devices' doing, and the result links back to that run."
+  }
+}

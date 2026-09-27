@@ -2,7 +2,8 @@
 # Design: docs/harness-design.md. Every target is safe to re-run; `make help` lists them.
 #
 #   make venv         python venv for telemetry, host daemon, driver and guest tests (harness/.venv)
-#   make test         offline pytest suites under harness/*
+#   make test         offline pytest suites under harness/*, experiments/schema, experiments/launcher, site/build
+#   make ignore-check the root .gitignore keeps generated files out and site/build's source in (run by make test)
 #   make guest-image  build fleetkit-guest:dev from images/guest/Dockerfile
 #   make rootfs       pack guest.ext4 (Linux host only; prints a skip on macOS)
 #   make fixture      build the static shopping site into fixture/dist
@@ -56,7 +57,7 @@ HOSTD_LOG_DIR ?= $(RESULTS)/hostd
 HAVE_COMPOSE := $(shell docker compose version >/dev/null 2>&1 && echo 1)
 COMPOSE := docker compose -f observability/compose.yaml
 
-.PHONY: help venv test guest-image rootfs fixture up down lgtm-check hostd host-setup smoke clean clean-lgtm distclean
+.PHONY: help venv test ignore-check guest-image rootfs fixture up down lgtm-check hostd host-setup smoke clean clean-lgtm distclean
 
 help: ## list targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(firstword $(MAKEFILE_LIST)) | sed 's/:.*## /\t/' | sort | column -t -s $$'\t'
@@ -73,9 +74,30 @@ venv: $(VENV)/bin/activate ## create harness/.venv and install the telemetry, ho
 	@for req in harness/host/requirements.txt harness/driver/requirements.txt harness/guest/requirements.txt; do \
 	  if [ -f $$req ]; then echo "pip install -r $$req"; $(VENV)/bin/pip install -q -r $$req; fi; done
 
-test: venv ## offline pytest suites under harness/telemetry, harness/host, harness/driver, harness/guest
+test: venv ignore-check ## offline pytest suites under harness/*, experiments/schema, experiments/launcher and site/build (the dataset builder)
 	@for comp in telemetry host driver guest; do \
 	  if [ -d harness/$$comp/tests ]; then echo "== harness/$$comp"; (cd harness/$$comp && $(ROOT)/$(PY) -m pytest -q tests) || exit 1; fi; done
+	@$(VENV)/bin/pip install -q -r site/build/requirements.txt  # Pillow, for the dataset builder; not on the hosts
+	@for dir in experiments/schema experiments/launcher site/build; do \
+	  echo "== $$dir"; $(ROOT)/$(PY) -m pytest -q $(ROOT)/$$dir/tests || exit 1; done
+
+# Paths the root .gitignore must ignore, and the site's dataset builder (site/build), which is source and must
+# not be; a bare build/ rule anywhere would hide it. Checked against the root file alone, then the checkout.
+IGNORED := build/x harness/driver/build/x results/x private/x CLAUDE.local.md site/build/.staging/index.json \
+	site/build/.staging/img/a.jpg site/build/__pycache__/x.pyc site/build/tests/__pycache__/x.pyc site/build/.pytest_cache/x
+NOT_IGNORED := site/build/build_data.py site/build/tests/test_build.py site/build/.gitignore site/build/README.md
+
+ignore-check: ## check the root .gitignore: generated files ignored, site/build's source not
+	@git -C $(ROOT) rev-parse --git-dir >/dev/null 2>&1 || { echo "ignore-check: skipped (not a git checkout)"; exit 0; }; \
+	tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; git init -q "$$tmp"; cp $(ROOT)/.gitignore "$$tmp/"; bad=0; \
+	for repo in "$$tmp" $(ROOT); do \
+	  where=$$([ "$$repo" = "$$tmp" ] && echo "the root .gitignore alone" || echo "this checkout"); \
+	  for p in $(IGNORED); do git -C "$$repo" check-ignore -q --no-index "$$p"; \
+	    [ $$? -eq 0 ] || { echo "ignore-check: $$p is not ignored ($$where)"; bad=1; }; done; \
+	  for p in $(NOT_IGNORED); do git -C "$$repo" check-ignore -q --no-index "$$p"; \
+	    [ $$? -eq 1 ] || { echo "ignore-check: $$p is ignored ($$where): $$(git -C "$$repo" check-ignore -v --no-index "$$p")"; bad=1; }; done; \
+	done; \
+	[ $$bad -eq 0 ] && echo "ignore-check: ok"; exit $$bad
 
 # --- images ------------------------------------------------------------------------------
 

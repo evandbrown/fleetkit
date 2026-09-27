@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "campaign.schema.json",
+  "title": "Campaign definition",
+  "description": "A named set of runs launched together to answer one question. The base is a complete spec. Each named spec is written as its changes from the base and expands to the base with those changes merged in: objects merge key by key, arrays and values replace. A named spec may change only the worker host, the hypervisor, the microVM and the densities; the criteria, the procedure and the support host are set once in the base, so every run is tested and judged the same way. Each spec gets `replicas` runs, each on its own worker host. Run k of spec S is S-rk, and its results go in results/<campaign>/S-rk/.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "question", "replicas", "shutdown_after_minutes", "base", "specs"],
+  "properties": {
+    "name": {
+      "$ref": "#/$defs/name",
+      "allOf": [{ "not": { "const": "dev" }, "x-message": "dev is reserved for local runs" }],
+      "description": "The campaign's name, and its directory under results/.",
+      "x-builder": { "tier": "basic", "label": "Campaign name" }
+    },
+    "question": {
+      "type": "string",
+      "minLength": 10,
+      "maxLength": 500,
+      "description": "The one question the campaign's runs answer together.",
+      "x-builder": { "tier": "basic", "label": "Question" }
+    },
+    "replicas": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 5,
+      "default": 2,
+      "description": "How many runs each spec gets, each on its own worker host. Replicas show how much a result varies from host to host.",
+      "x-builder": { "tier": "basic", "label": "Replicas" }
+    },
+    "shutdown_after_minutes": {
+      "type": "integer",
+      "minimum": 20,
+      "maximum": 240,
+      "default": 45,
+      "description": "Every host shuts itself down this many minutes after it boots, whatever else happens. The worst-case cost assumes every host runs until then. A run still going when it fires stopped early.",
+      "x-builder": { "tier": "advanced", "label": "Shut down after", "unit": "min" }
+    },
+    "base": {
+      "$ref": "spec.schema.json",
+      "description": "The complete spec every named spec starts from. It is not run by itself: a named spec {} runs it as it is.",
+      "x-builder": { "label": "Base spec" }
+    },
+    "specs": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 12,
+      "propertyNames": { "$ref": "#/$defs/name" },
+      "additionalProperties": { "$ref": "#/$defs/spec_changes" },
+      "description": "The campaign's specs by name, in the order written, each holding only its changes from the base.",
+      "x-builder": { "label": "Specs" }
+    },
+    "why": {
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/name" },
+      "additionalProperties": { "type": "string", "minLength": 10, "maxLength": 300 },
+      "description": "Optional: for each spec by name, one sentence on why it is in the campaign. Shown beside the spec.",
+      "x-builder": { "tier": "basic", "label": "Why each spec" }
+    }
+  },
+  "$defs": {
+    "name": {
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 40,
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+      "x-message": "a name has 2 to 40 lowercase letters, digits and single hyphens, and starts with a letter"
+    },
+    "spec_changes": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "One named spec: its changes from the base.",
+      "properties": {
+        "worker_host": { "$ref": "spec.schema.json#/$defs/worker_host" },
+        "hypervisor": { "$ref": "spec.schema.json#/$defs/hypervisor" },
+        "microvm": { "$ref": "spec.schema.json#/$defs/microvm" },
+        "densities": { "$ref": "spec.schema.json#/$defs/densities" },
+        "criteria": { "not": {}, "x-message": "shared by every spec in a campaign; set it in the base" },
+        "procedure": { "not": {}, "x-message": "shared by every spec in a campaign; set it in the base" },
+        "support_host": { "not": {}, "x-message": "shared by every spec in a campaign; set it in the base" }
+      }
+    }
+  }
+}

@@ -33,6 +33,10 @@ CLAUDE.local.md
 # Evidence pulled down from the results bucket after an experiment.
 results/
 build/
+# ...except the site's dataset builder, which is source. Its staging output stays ignored
+# (caches are covered by __pycache__/ and .pytest_cache/). `make ignore-check` tests these rules.
+!site/build/
+site/build/.staging/
 harness/.venv/
 .pytest_cache/
 *.egg-info/

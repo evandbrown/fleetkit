@@ -12,7 +12,9 @@ import csv
 import json
 import os
 import re
+import shutil
 import threading
+import time
 from pathlib import Path
 
 from . import legacy, schemas
@@ -58,6 +60,33 @@ class CsvAppender:
         with self._lock:
             self._writer.writerows(clean)
             self._fh.flush()
+
+    def move_rows(self, predicate, dest: Path) -> int:
+        """Move the rows ``predicate`` picks to ``dest`` (created with this file's header), keeping
+        the rest here; the file stays open for appending. Returns how many rows moved."""
+        with self._lock:
+            self._fh.close()
+            with open(self.path, newline="", encoding="utf-8") as fh:
+                rows = list(csv.DictReader(fh))
+            moved = [r for r in rows if predicate(r)]
+            if moved:
+                tmp = self.path.with_suffix(self.path.suffix + ".tmp")
+                with open(tmp, "w", newline="", encoding="utf-8") as fh:
+                    w = csv.DictWriter(fh, fieldnames=self.columns, extrasaction="ignore")
+                    w.writeheader()
+                    w.writerows(r for r in rows if not predicate(r))
+                os.replace(tmp, self.path)
+                dest = Path(dest)
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                new = not dest.exists()
+                with open(dest, "a", newline="", encoding="utf-8") as fh:
+                    w = csv.DictWriter(fh, fieldnames=self.columns, extrasaction="ignore")
+                    if new:
+                        w.writeheader()
+                    w.writerows(moved)
+            self._fh = open(self.path, "a", newline="", encoding="utf-8")
+            self._writer = csv.DictWriter(self._fh, fieldnames=self.columns, extrasaction="ignore")
+            return len(moved)
 
     def close(self) -> None:
         with self._lock:
@@ -144,6 +173,9 @@ class RunDir:
         self.smoke_report_md = self.root / "smoke-report.md"
         self.smoke_state_json = self.root / "smoke-state.json"
         self.run_json = self.root / "run.json"
+        # Operational record: why a trial ran again, why a density is not tested. Never a result.
+        self.ops_jsonl = self.root / "ops.jsonl"
+        self.set_aside_dir = self.root / "ops" / "set-aside"
         self._legacy: bool | None = None
         self._legacy_ids: dict[str, dict] | None = None
 
@@ -213,6 +245,42 @@ class RunDir:
         while f"{label}-{k}" in names:
             k += 1
         return f"{label}-{k}"
+
+    def log_ops(self, event: str, **fields) -> dict:
+        """Append one event to ops.jsonl, the run's operational log."""
+        rec = {"ts": round(time.time(), 3), "event": event, **fields}
+        with open(self.ops_jsonl, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(rec, sort_keys=True, default=str) + "\n")
+        return rec
+
+    def set_aside(self, trial_id: str, writers: "Writers | None", microvm_ids=()) -> Path:
+        """Take a trial that isn't a result out of the run: its trial.json, its rows in the trial
+        tables, its screenshots and its microVMs' guest logs move to ops/set-aside/<trial>-<k>/,
+        and the trial's id and place in the run's order are free for the trial that replaces it."""
+        k = 1
+        while (self.set_aside_dir / f"{trial_id}-{k}").exists():
+            k += 1
+        dest = self.set_aside_dir / f"{trial_id}-{k}"
+        dest.mkdir(parents=True)
+        src = self.trials_dir / trial_id
+        if src.exists():
+            for p in src.iterdir():
+                shutil.move(str(p), str(dest / p.name))
+            src.rmdir()
+        mine = (lambda r: r.get("trial_id") == trial_id)
+        if writers is not None:
+            for name in ("tasks", "steps", "microvms", "guest_metrics"):
+                getattr(writers, name).move_rows(mine, dest / f"{name}.csv")
+        if self.screenshots_dir.exists():
+            for p in self.screenshots_dir.glob(f"{trial_id}-slot*"):
+                (dest / "screenshots").mkdir(exist_ok=True)
+                shutil.move(str(p), str(dest / "screenshots" / p.name))
+        for mid in microvm_ids:
+            p = self.guest_logs_dir / f"{mid}.jsonl"
+            if mid and p.exists():
+                (dest / "guest-logs").mkdir(exist_ok=True)
+                shutil.move(str(p), str(dest / "guest-logs" / p.name))
+        return dest
 
     def update_run_json(self, **fields) -> None:
         cur = read_json(self.run_json, {}) or {}

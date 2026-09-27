@@ -53,6 +53,8 @@ class TrialConfig:
     settle_s: float = 0.0  # wait before the trial, recording host cpu_util as trial.json pre_trial
     sample_interval_ms: int = 200  # guest proc sampling interval, sent in every task payload (0 = off)
     screenshot_each_step: bool = False  # untimed per-step screenshots (the illustration trial)
+    hypervisor: dict | None = None  # the spec's hypervisor section, sent with every create (None: the daemon's own)
+    release_after_ready_s: float = 0.0  # wait between every microVM ready and the tasks' release
 
     def guest_fixture_base_url(self) -> str:
         if self.fixture_base_url:
@@ -64,6 +66,7 @@ class TrialConfig:
 DEFAULT_FIXTURE_BASE_URL = {
     "docker": "http://fixture",
     "firecracker": "http://10.200.0.1:8081",
+    "cloud-hypervisor": "http://10.200.0.1:8081",
 }
 
 DEFAULT_HOST_URL = "http://127.0.0.1:8090"

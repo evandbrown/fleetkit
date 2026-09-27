@@ -1,4 +1,4 @@
-"""python3 -m hostd --backend docker|firecracker --port 8090 [--metrics-period 1.0] [--dry-run] [--render ...]"""
+"""python3 -m hostd --backend docker|firecracker|cloud-hypervisor --port 8090 [--metrics-period 1.0] [--dry-run] [--render ...]"""
 from __future__ import annotations
 
 import argparse
@@ -9,9 +9,9 @@ import threading
 from typing import List, Optional
 
 from . import __version__
-from .backends import BACKENDS
+from .backends import BACKENDS, DEFAULT_CLOUD_HYPERVISOR, make_hypervisor_backend
 from .backends.docker import DockerBackend
-from .backends.firecracker import DEFAULT_FIRECRACKER, DEFAULT_KERNEL, DEFAULT_ROOTFS, FirecrackerBackend
+from .backends.firecracker import DEFAULT_FIRECRACKER, DEFAULT_KERNEL, DEFAULT_ROOTFS
 from .manager import Manager
 from .metrics import HostSampler
 from .model import Defaults, MicroVM, validate_fault
@@ -43,6 +43,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--network", default="fleetkit")
     # firecracker
     p.add_argument("--firecracker", default=os.environ.get("FLEETKIT_FIRECRACKER", DEFAULT_FIRECRACKER))
+    p.add_argument("--cloud-hypervisor", default=os.environ.get("FLEETKIT_CLOUD_HYPERVISOR", DEFAULT_CLOUD_HYPERVISOR))
     p.add_argument("--kernel", default=os.environ.get("FLEETKIT_KERNEL", DEFAULT_KERNEL))
     p.add_argument("--rootfs", default=os.environ.get("FLEETKIT_ROOTFS", DEFAULT_ROOTFS))
     p.add_argument("--run-root", default="/run/fleetkit")
@@ -58,8 +59,9 @@ def build_parser() -> argparse.ArgumentParser:
 def make_backend(args: argparse.Namespace, runner: Runner):
     if args.backend == "docker":
         return DockerBackend(runner, args.log_dir, image=args.image, network=args.network)
-    return FirecrackerBackend(runner, args.log_dir, firecracker_bin=args.firecracker, kernel=args.kernel,
-                              rootfs=args.rootfs, run_root=args.run_root)
+    binary = args.cloud_hypervisor if args.backend == "cloud-hypervisor" else args.firecracker
+    return make_hypervisor_backend(args.backend, runner, args.log_dir, binary=binary, kernel=args.kernel,
+                                   rootfs=args.rootfs, run_root=args.run_root)
 
 
 def render(args: argparse.Namespace) -> int:
@@ -110,7 +112,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         problems = backend.check_host()
         for prob in problems:
             tel.log("host check: %s" % prob, severity="WARN")
-        fatal = [p for p in problems if args.backend == "firecracker" or "not reachable" in p]
+        fatal = [p for p in problems if args.backend != "docker" or "not reachable" in p]
         if fatal:
             tel.log("refusing to start: %s" % "; ".join(fatal), severity="ERROR")
             tel.close()

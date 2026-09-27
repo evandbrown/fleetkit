@@ -1,0 +1,47 @@
+{
+  "name": "hv-host-1",
+  "question": "Do the hypervisor (Firecracker or Cloud Hypervisor, with the same devices) and the host kind (a nested m8i.4xlarge or a whole m8i.metal-48xl) change the density per host vCPU that meets the targets, and the cost per 1,000 tasks? The mmio spec shows whether Firecracker's devices alone move the result.",
+  "replicas": 2,
+  "shutdown_after_minutes": 80,
+  "base": {
+    "worker_host": { "instance_type": "m8i.4xlarge" },
+    "hypervisor": { "name": "firecracker", "virtio_transport": "pci", "virtio_rng": true },
+    "microvm": { "vcpus": 2, "memory_mib": 2048 },
+    "densities": [1, 4, 8, 9, 10, 11, 12, 14, 16],
+    "criteria": {
+      "step_p50_target_ms": 1000,
+      "step_p95_target_ms": 2000,
+      "task_p95_target_ms": 5000,
+      "ready_timeout_s": 180,
+      "step_timeout_ms": 10000,
+      "task_timeout_ms": 45000
+    },
+    "procedure": { "trials_per_density": 1, "boundary_trials": 2, "settle_s": 10 },
+    "support_host": { "instance_type": "m8i.4xlarge" }
+  },
+  "specs": {
+    "firecracker-nested": {},
+    "firecracker-nested-mmio": {
+      "hypervisor": { "virtio_transport": "mmio", "virtio_rng": false }
+    },
+    "cloud-hypervisor-nested": {
+      "hypervisor": { "name": "cloud-hypervisor" }
+    },
+    "firecracker-metal": {
+      "worker_host": { "instance_type": "m8i.metal-48xl" },
+      "densities": [1, 24, 48, 96, 108, 120, 132, 144, 160, 176, 192]
+    },
+    "cloud-hypervisor-metal": {
+      "worker_host": { "instance_type": "m8i.metal-48xl" },
+      "hypervisor": { "name": "cloud-hypervisor" },
+      "densities": [1, 24, 48, 96, 108, 120, 132, 144, 160, 176, 192]
+    }
+  },
+  "why": {
+    "firecracker-nested": "Firecracker on the nested host every earlier campaign used, with the devices Cloud Hypervisor always has.",
+    "firecracker-nested-mmio": "Firecracker as cap-baseline-1 ran it, to show whether the devices alone move the result.",
+    "cloud-hypervisor-nested": "Cloud Hypervisor on the same nested host, so the nested pair differs only in the hypervisor.",
+    "firecracker-metal": "The whole metal host, with no nested virtualization underneath; its ladder steps by 12 through the same 0.5 to 0.75 per host vCPU where the nested host turned from pass to fail, and goes on to 1.0.",
+    "cloud-hypervisor-metal": "Cloud Hypervisor on the whole metal host, the pair that says which hypervisor to run in production."
+  }
+}

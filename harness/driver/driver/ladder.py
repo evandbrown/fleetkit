@@ -11,6 +11,10 @@ Rules (``driver trial``), over the spec's densities in the order given:
   density passes all of its trials or none is left. The first failing density stays a miss whatever
   its boundary trials do: a density passes only if every one of its trials passes.
 
+A trial that fails outside the experiment never reaches the planner (driver/clean.py): the driver
+runs it again, and if it still isn't clean the run stops there (``summary(not_clean=True)``, stop
+reason ``not_clean``). The densities it didn't test are ``densities_not_run``.
+
 The boundary is read with the report's rule: ``last_pass`` is the highest density that passed with
 every lower density run also passing (the run's result, "tested successfully"); ``first_miss`` is the
 lowest density run that did not pass. Boundary trials and the walk-down need densities in strictly
@@ -113,7 +117,7 @@ class LadderPlanner:
         return None
 
     # ---- summary (run.json plan) ------------------------------------------------------------
-    def summary(self, history, interrupted: bool = False) -> dict:
+    def summary(self, history, interrupted: bool = False, not_clean: bool = False) -> dict:
         per_pos, nxt, stopped = self._ladder_state(history)
         run = self._densities_run(per_pos)
         lpass = self._ladder_pass(per_pos)
@@ -135,6 +139,8 @@ class LadderPlanner:
         done = self.next(history) is None
         if interrupted:
             stop_reason = "interrupted"
+        elif not_clean:
+            stop_reason = "not_clean"  # a trial couldn't be run cleanly; the cause is in ops.jsonl
         elif not done:
             stop_reason = None  # still running
         elif stopped:
@@ -154,7 +160,7 @@ class LadderPlanner:
             } for d in run],
             "densities_not_run": [d for d in self.densities if d not in run],
             "stop_reason": stop_reason,
-            "complete": done and not interrupted,
+            "complete": done and not interrupted and not not_clean,
             "boundary": {
                 "last_pass": last_pass, "first_miss": first_miss,
                 "last_pass_trials": len(by_density.get(last_pass, [])) if last_pass is not None else 0,

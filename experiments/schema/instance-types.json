@@ -1,0 +1,17 @@
+{
+  "description": "The EC2 instance types a spec may name. The host kind is metal when metal is true, otherwise nested. Prices are on-demand, Linux, shared tenancy, us-east-1, in USD per hour; they are assumed, not measured, and used for cost per 1,000 tasks and a campaign's cost estimates.",
+  "prices_read": "2026-09-27",
+  "estimate_rule": "A price marked estimated is its vCPUs times a per-vCPU rate. m8i: 0.05292 per vCPU-hour, the rate every listed m8i price works out to. c8i: the m8i rate times 0.88542, the per-vCPU ratio of c7i.metal-24xl ($4.284) to m7i.metal-24xl ($4.8384). Replace an estimate with the AWS price list before reporting a cost from it.",
+  "types": {
+    "m8i.large":      { "vcpus": 2,   "memory_gib": 8,   "metal": false, "usd_per_hour": 0.10584,  "estimated": true },
+    "m8i.xlarge":     { "vcpus": 4,   "memory_gib": 16,  "metal": false, "usd_per_hour": 0.21168,  "estimated": false },
+    "m8i.2xlarge":    { "vcpus": 8,   "memory_gib": 32,  "metal": false, "usd_per_hour": 0.42336,  "estimated": true },
+    "m8i.4xlarge":    { "vcpus": 16,  "memory_gib": 64,  "metal": false, "usd_per_hour": 0.84672,  "estimated": false },
+    "m8i.metal-48xl": { "vcpus": 192, "memory_gib": 768, "metal": true,  "usd_per_hour": 10.16064, "estimated": false },
+    "c8i.large":      { "vcpus": 2,   "memory_gib": 4,   "metal": false, "usd_per_hour": 0.09371,  "estimated": true },
+    "c8i.xlarge":     { "vcpus": 4,   "memory_gib": 8,   "metal": false, "usd_per_hour": 0.18743,  "estimated": true },
+    "c8i.2xlarge":    { "vcpus": 8,   "memory_gib": 16,  "metal": false, "usd_per_hour": 0.37485,  "estimated": true },
+    "c8i.4xlarge":    { "vcpus": 16,  "memory_gib": 32,  "metal": false, "usd_per_hour": 0.7497,   "estimated": true },
+    "c8i.metal-48xl": { "vcpus": 192, "memory_gib": 384, "metal": true,  "usd_per_hour": 8.9964,   "estimated": true }
+  }
+}

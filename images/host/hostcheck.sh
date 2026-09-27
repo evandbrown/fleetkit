@@ -4,6 +4,11 @@
 # a tap and waits for the guest daemon's /health, then kills it and cleans up.
 # Everything that can hang is under timeout. Run as root.
 #
+# The microVM boots with the hypervisor the spec names, through the same backend code
+# the host daemon uses (hostd.backends.bootcheck): the spec's hypervisor section comes
+# from SPEC (a resolved spec, or `expand.py --run` output) or HYPERVISOR (the section as
+# JSON), else Firecracker with its defaults. Both hypervisors' versions are checked.
+#
 # With FIXTURE_URL set (the support host's fixture) the fixture checks go there and
 # FIXTURE_MATCH compares its manifest.json with the local build; with OTLP_ENDPOINT
 # set, OTLP posts one span to the collector. GUEST_EGRESS always runs: the test VM
@@ -27,6 +32,8 @@ modprobe kvm_intel 2>/dev/null; lsmod | grep -q '^kvm_intel' && res KVM_INTEL PA
 
 echo "== binaries =="; firecracker --version 2>&1 | head -1
 firecracker --version 2>/dev/null | grep -q "${FIRECRACKER_VERSION:-v1.17.0}" && res FIRECRACKER PASS || res FIRECRACKER FAIL
+cloud-hypervisor --version 2>&1 | head -1
+cloud-hypervisor --version 2>/dev/null | grep -q "${CLOUD_HYPERVISOR_VERSION:-v53.0}" && res CLOUD_HYPERVISOR PASS || res CLOUD_HYPERVISOR FAIL
 docker version --format '{{.Server.Version}}' 2>&1 && res DOCKER PASS || res DOCKER FAIL
 python3.12 --version 2>&1 && res PYTHON PASS || res PYTHON FAIL
 [ -x /opt/fleetkit/harness/.venv/bin/python ] && res VENV PASS || res VENV FAIL
@@ -58,39 +65,30 @@ fi
 echo "== services =="
 systemctl is-active fleetkit-hostd 2>&1; systemctl is-active --quiet fleetkit-hostd && curl -fsS -m 5 http://127.0.0.1:8090/health >/dev/null && res HOSTD PASS || res HOSTD FAIL
 
-echo "== one microVM to /health (slot 99: 10.200.0.109) =="
-TAP=fc-check; GIP=10.200.0.109; MAC=06:00:0A:C8:00:6D
-ip link del "$TAP" 2>/dev/null; ip tuntap add dev "$TAP" mode tap && ip link set "$TAP" master fcbr0 && ip link set "$TAP" up
-cat > "$EV/hostcheck-vm.json" <<EOF
-{"boot-source":{"kernel_image_path":"$FK/vmlinux","boot_args":"console=ttyS0 reboot=k panic=1 ip=$GIP::10.200.0.1:255.255.255.0:vmcheck:eth0:off:10.42.0.2 init=/sbin/init"},
- "drives":[{"drive_id":"rootfs","path_on_host":"$FK/guest.ext4","is_root_device":true,"is_read_only":true}],
- "machine-config":{"vcpu_count":2,"mem_size_mib":2048,"smt":false},
- "network-interfaces":[{"iface_id":"eth0","guest_mac":"$MAC","host_dev_name":"$TAP"}]}
-EOF
-rm -f /run/fleetkit-check.sock
-firecracker --api-sock /run/fleetkit-check.sock --config-file "$EV/hostcheck-vm.json" > "$EV/hostcheck-console.log" 2>&1 &
-FCPID=$!
-( sleep 150; kill -9 "$FCPID" 2>/dev/null ) & WATCHDOG=$!
-t0=$(date +%s); ready=FAIL
-for _ in $(seq 1 90); do
-  if curl -fsS -m 2 "http://$GIP:8080/health" > "$EV/hostcheck-health.json" 2>/dev/null; then ready=PASS; break; fi
-  kill -0 $FCPID 2>/dev/null || break
-  sleep 1
+if [ -n "${SPEC:-}" ]; then HYPERVISOR=$(jq -c '.spec.hypervisor // .hypervisor' "$SPEC"); fi
+HYPERVISOR=${HYPERVISOR:-'{"name":"firecracker"}'}
+echo "== one microVM to /health (slot 99: 10.200.0.109), hypervisor $HYPERVISOR =="
+# bootcheck prints NAME_RESULT lines (HYPERVISOR_HOST, GUEST_HEALTH, GUEST_EGRESS, SAMPLE,
+# NO_LEFTOVER_VM); the guest fetches the fixture itself for GUEST_EGRESS.
+PY=/opt/fleetkit/harness/.venv/bin/python; [ -x "$PY" ] || PY=python3.12
+BOOT="$EV/bootcheck"; seen=""
+while IFS= read -r line; do
+  case "$line" in
+    *_RESULT=*) res "${line%%_RESULT=*}" "${line#*_RESULT=}"; seen="$seen ${line%%_RESULT=*}" ;;
+    *) echo "$line" ;;
+  esac
+done < <(cd /opt/fleetkit/harness/host && timeout 300 "$PY" -m hostd.backends.bootcheck --hypervisor "$HYPERVISOR" \
+  --slot 99 --timeout 90 --egress-url "$FIX/index.html" --run-root /run/fleetkit-check --log-dir "$BOOT" --out "$BOOT" 2>&1)
+for check in GUEST_HEALTH GUEST_EGRESS NO_LEFTOVER_VM; do
+  case "$seen " in *" $check "*) ;; *) res "$check" FAIL ;; esac
 done
-echo "guest /health after $(( $(date +%s) - t0 )) s: $(cat "$EV/hostcheck-health.json" 2>/dev/null)"
-res GUEST_HEALTH $ready
-if [ "$ready" = PASS ]; then
-  # The guest fetches the fixture itself (guest daemon, 5 s timeout); PASS needs ok and HTTP 200.
-  curl -fsS -m 20 -G --data-urlencode "url=$FIX/index.html" "http://$GIP:8080/egress-check" > "$EV/hostcheck-egress.json" 2>/dev/null
-  echo "guest egress-check: $(cat "$EV/hostcheck-egress.json" 2>/dev/null)"
-  jq -e '.ok == true and .status == 200' "$EV/hostcheck-egress.json" >/dev/null 2>&1 && res GUEST_EGRESS PASS || res GUEST_EGRESS FAIL
-else
-  res GUEST_EGRESS FAIL
-fi
-kill -9 "$FCPID" 2>/dev/null; wait "$FCPID" 2>/dev/null; kill "$WATCHDOG" 2>/dev/null
-pkill -9 -f 'fleetkit-check.sock' 2>/dev/null; ip link del "$TAP" 2>/dev/null; rm -f /run/fleetkit-check.sock
-sleep 1; if pgrep -a firecracker >/dev/null; then pgrep -a firecracker; res NO_LEFTOVER_VM FAIL; else res NO_LEFTOVER_VM PASS; fi
-echo "console lines: $(wc -l < "$EV/hostcheck-console.log")"; grep -m3 -E 'Linux version|fleetkit-init|starting guestd|BusyBox|Kernel panic|attempted to kill init' "$EV/hostcheck-console.log" || true
+case "$seen " in *" NO_LEFTOVER_VM "*) ;; *)
+  # bootcheck did not finish: remove what it may have left
+  systemctl kill --signal=SIGKILL fc-vm99.scope ch-vm99.scope 2>/dev/null
+  ip link del fc-99 2>/dev/null; ip link del ch-99 2>/dev/null; rm -rf /run/fleetkit-check ;;
+esac
+echo "console lines: $(wc -l < "$BOOT/console.log" 2>/dev/null || echo 0)"
+grep -m3 -E 'Linux version|fleetkit-init|starting guestd|BusyBox|Kernel panic|attempted to kill init' "$BOOT/console.log" 2>/dev/null || true
 
 echo "== results bucket =="
 if [ -n "$BUCKET" ]; then

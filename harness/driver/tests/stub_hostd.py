@@ -51,6 +51,9 @@ class StubOptions:
         self.host_info = kw.get("host_info", True)  # False: GET /host/info answers 404 (an older daemon)
         self.ec2 = kw.get("ec2")  # the /host/info ec2 object (None off EC2)
         self.cpu_count = kw.get("cpu_count", 16)
+        self.backend = kw.get("backend", "docker")  # what /health and /host/info say the daemon runs
+        self.max_slots = kw.get("max_slots")  # /host/info max_slots (None: absent, as on an older daemon)
+        self.hypervisor_options = kw.get("hypervisor_options")  # /host/info hypervisor_options (None: absent)
 
 
 class MicroVM:
@@ -331,10 +334,15 @@ class StubHost:
                              for s in live]}
 
     def info(self) -> dict:
-        return {"host_id": self.o.host_id, "backend": "docker", "hostd_version": "stub", "kernel_release": "stub-kernel",
-                "cpu_model": "Stub CPU @ 3.00GHz", "cpu_count": self.o.cpu_count, "threads_per_core": 1,
-                "cores_per_socket": self.o.cpu_count, "sockets": 1, "mem_total": 8_000_000_000,
+        info = {"host_id": self.o.host_id, "backend": self.o.backend, "hostd_version": "stub",
+                "kernel_release": "stub-kernel", "cpu_model": "Stub CPU @ 3.00GHz", "cpu_count": self.o.cpu_count,
+                "threads_per_core": 1, "cores_per_socket": self.o.cpu_count, "sockets": 1, "mem_total": 8_000_000_000,
                 "virtualized": True, "kvm": False, "ec2": self.o.ec2, "metrics_period_s": 1.0, "firecracker": None}
+        if self.o.max_slots is not None:
+            info["max_slots"] = self.o.max_slots
+        if self.o.hypervisor_options is not None:
+            info["hypervisor_options"] = self.o.hypervisor_options
+        return info
 
     def verify_clean(self) -> dict:
         leftovers = [f"container for microVM {s.id}" for s in self.microvms.values() if s.container_present]
@@ -462,7 +470,8 @@ class Handler(BaseHTTPRequestHandler):
         h = self.host
         p = self.path.split("?", 1)[0]
         if p == "/health":
-            return self._send(200, {"ok": True, "backends": ["docker"], "stub": True, "host_id": h.o.host_id})
+            return self._send(200, {"ok": True, "backends": ["docker"], "backend": h.o.backend, "stub": True,
+                                    "host_id": h.o.host_id, "uptime_s": time.time() - h.started})
         if p == "/host/metrics":
             return self._send(200, h.metrics())
         if p == "/host/info":

@@ -1,0 +1,230 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "spec.schema.json",
+  "title": "Run spec",
+  "description": "Everything fixed about one run: one worker host carrying out this spec from start to finish. Every field is required. Values that follow from other fields (the host kind, the host's vCPUs and price) are never fields. docs/spec.md explains each field and the rules expand.py checks beyond this schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["worker_host", "hypervisor", "microvm", "densities", "criteria", "procedure", "support_host"],
+  "properties": {
+    "worker_host": {
+      "$ref": "#/$defs/worker_host",
+      "required": ["instance_type"]
+    },
+    "hypervisor": {
+      "$ref": "#/$defs/hypervisor",
+      "required": ["name", "virtio_transport", "virtio_rng"],
+      "if": {
+        "properties": { "name": { "const": "cloud-hypervisor" } },
+        "required": ["name"]
+      },
+      "then": {
+        "properties": {
+          "virtio_transport": { "const": "pci", "x-message": "Cloud Hypervisor always uses pci" },
+          "virtio_rng": { "const": true, "x-message": "Cloud Hypervisor always has a random-number device, so this must be true" }
+        }
+      }
+    },
+    "microvm": {
+      "$ref": "#/$defs/microvm",
+      "required": ["vcpus", "memory_mib"]
+    },
+    "densities": {
+      "$ref": "#/$defs/densities"
+    },
+    "criteria": {
+      "$ref": "#/$defs/criteria",
+      "required": ["step_p50_target_ms", "step_p95_target_ms", "task_p95_target_ms", "ready_timeout_s", "step_timeout_ms", "task_timeout_ms"]
+    },
+    "procedure": {
+      "$ref": "#/$defs/procedure",
+      "required": ["trials_per_density", "boundary_trials", "settle_s"]
+    },
+    "support_host": {
+      "$ref": "#/$defs/support_host",
+      "required": ["instance_type"]
+    }
+  },
+  "$defs": {
+    "worker_host": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The EC2 instance whose capacity the run measures.",
+      "x-builder": { "label": "Worker host" },
+      "properties": {
+        "instance_type": {
+          "type": "string",
+          "enum": ["m8i.large", "m8i.xlarge", "m8i.2xlarge", "m8i.4xlarge", "m8i.metal-48xl", "c8i.large", "c8i.xlarge", "c8i.2xlarge", "c8i.4xlarge", "c8i.metal-48xl"],
+          "default": "m8i.4xlarge",
+          "description": "The worker host's EC2 instance type. Its host kind (metal or nested), vCPUs, memory and price follow from it (instance-types.json).",
+          "x-builder": { "tier": "basic", "label": "Worker instance type" }
+        }
+      }
+    },
+    "hypervisor": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The program on the worker host that runs each microVM, and how it presents devices to the guest.",
+      "x-builder": { "label": "Hypervisor" },
+      "properties": {
+        "name": {
+          "type": "string",
+          "enum": ["firecracker", "cloud-hypervisor"],
+          "default": "firecracker",
+          "description": "Firecracker or Cloud Hypervisor.",
+          "x-builder": { "tier": "basic", "label": "Hypervisor" }
+        },
+        "virtio_transport": {
+          "type": "string",
+          "enum": ["mmio", "pci"],
+          "default": "mmio",
+          "description": "How each microVM's virtio devices reach its guest kernel. Firecracker can use either; Cloud Hypervisor only pci.",
+          "x-builder": { "tier": "advanced", "label": "Device transport" }
+        },
+        "virtio_rng": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether each microVM has a virtio random-number device. A choice for Firecracker; Cloud Hypervisor always has one.",
+          "x-builder": { "tier": "advanced", "label": "Random-number device" }
+        }
+      }
+    },
+    "microvm": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The size of each microVM. The guest it boots and the task it runs are the same in every run.",
+      "x-builder": { "label": "MicroVM" },
+      "properties": {
+        "vcpus": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8,
+          "default": 2,
+          "description": "Virtual CPUs in each microVM.",
+          "x-builder": { "tier": "basic", "label": "MicroVM vCPUs" }
+        },
+        "memory_mib": {
+          "type": "integer",
+          "minimum": 512,
+          "maximum": 16384,
+          "multipleOf": 256,
+          "default": 2048,
+          "description": "Guest memory of each microVM.",
+          "x-builder": { "tier": "basic", "label": "MicroVM memory", "unit": "MiB" }
+        }
+      }
+    },
+    "densities": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20,
+      "items": { "type": "integer", "minimum": 1, "maximum": 200 },
+      "default": [1, 2, 4, 8, 12, 16],
+      "description": "The densities to test, in increasing order. A trial at density N starts N microVMs at the same moment. Make the steps fine where the host is expected to fail: a result is only as precise as the step between the last pass and the first failure.",
+      "x-builder": { "tier": "basic", "label": "Densities", "unit": "microVMs" }
+    },
+    "criteria": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "What a trial must meet to pass, besides every microVM ready, every task succeeding and nothing left on the host.",
+      "x-builder": { "label": "Pass criteria" },
+      "properties": {
+        "step_p50_target_ms": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 60000,
+          "default": 1000,
+          "description": "For each of the five steps, the median over the trial's tasks must be at most this.",
+          "x-builder": { "tier": "basic", "label": "Step median target", "unit": "ms" }
+        },
+        "step_p95_target_ms": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 60000,
+          "default": 2000,
+          "description": "For each of the five steps, the 95th percentile over the trial's tasks must be at most this.",
+          "x-builder": { "tier": "basic", "label": "Step p95 target", "unit": "ms" }
+        },
+        "task_p95_target_ms": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 600000,
+          "default": 5000,
+          "description": "The 95th percentile of whole-task time over the trial's tasks must be at most this.",
+          "x-builder": { "tier": "basic", "label": "Task p95 target", "unit": "ms" }
+        },
+        "ready_timeout_s": {
+          "type": "number",
+          "minimum": 10,
+          "maximum": 900,
+          "default": 180,
+          "description": "Every microVM must report its browser ready within this many seconds of being started.",
+          "x-builder": { "tier": "rare", "label": "Ready within", "unit": "s" }
+        },
+        "step_timeout_ms": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 120000,
+          "default": 10000,
+          "description": "A step that takes longer than this fails its task.",
+          "x-builder": { "tier": "rare", "label": "Step time limit", "unit": "ms" }
+        },
+        "task_timeout_ms": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 600000,
+          "default": 45000,
+          "description": "A task that takes longer than this fails.",
+          "x-builder": { "tier": "rare", "label": "Task time limit", "unit": "ms" }
+        }
+      }
+    },
+    "procedure": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "How the run steps through its densities. The order, the stop at the first failing density, the warm-up and the illustration are the same in every run (docs/method.md).",
+      "x-builder": { "label": "Procedure" },
+      "properties": {
+        "trials_per_density": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5,
+          "default": 1,
+          "description": "Trials at each density on the way up.",
+          "x-builder": { "tier": "advanced", "label": "Trials per density" }
+        },
+        "boundary_trials": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5,
+          "default": 2,
+          "description": "Extra trials, once the run stops going up, at the highest passing density and at the lowest failing one, to check the result holds.",
+          "x-builder": { "tier": "advanced", "label": "Boundary trials" }
+        },
+        "settle_s": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 300,
+          "default": 10,
+          "description": "Seconds the worker host sits idle before every trial, so the last trial's cleanup is finished.",
+          "x-builder": { "tier": "rare", "label": "Idle before each trial", "unit": "s" }
+        }
+      }
+    },
+    "support_host": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The separate instance that serves the test shopping site and collects telemetry, one per run.",
+      "x-builder": { "label": "Support host" },
+      "properties": {
+        "instance_type": {
+          "type": "string",
+          "enum": ["m8i.xlarge", "m8i.2xlarge", "m8i.4xlarge"],
+          "default": "m8i.xlarge",
+          "description": "The support host's EC2 instance type. A bigger worker host needs a bigger support host, so the support host is never what runs out.",
+          "x-builder": { "tier": "advanced", "label": "Support instance type" }
+        }
+      }
+    }
+  }
+}

@@ -185,7 +185,8 @@ def test_collect_host_info_docker(tmp_path):
     assert time.monotonic() - t0 < 1.0
     assert set(info) == {"host_id", "backend", "hostd_version", "kernel_release", "cpu_model", "cpu_count",
                          "threads_per_core", "cores_per_socket", "sockets", "mem_total", "virtualized", "kvm",
-                         "ec2", "metrics_period_s", "firecracker"}
+                         "ec2", "metrics_period_s", "hypervisor", "firecracker", "max_slots",
+                         "hypervisor_options"}
     assert info["host_id"] == "local" and info["backend"] == "docker" and info["hostd_version"]
     assert info["cpu_model"] == "Intel(R) Xeon(R) 6975P-C" and info["virtualized"] is True
     assert (info["threads_per_core"], info["cores_per_socket"], info["sockets"]) == (2, 8, 1)
@@ -222,6 +223,7 @@ def test_collect_host_info_firecracker(tmp_path, monkeypatch):
     info = collect_host_info(b, "i-0abc", 0.2, imds_url="http://127.0.0.1:%d" % closed_port(), lscpu=lambda: None)
     assert info["backend"] == "firecracker" and info["metrics_period_s"] == 0.2
     f = info["firecracker"]
+    assert info["hypervisor"] == f
     assert f == {"version": "Firecracker v1.12.1", "kernel_path": str(kernel), "kernel_bytes": 1234,
                  "rootfs_path": str(rootfs), "rootfs_bytes": 4096,
                  "boot_args_example": "console=ttyS0 reboot=k panic=1 pci=off "

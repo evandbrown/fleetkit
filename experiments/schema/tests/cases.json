@@ -1,0 +1,361 @@
+{
+  "description": "Cases that expand.py and the site's campaign builder must both pass. A case's campaign is a file (\"file\", a path relative to experiments/), a file with a JSON merge patch applied (\"from\" and \"patch\", RFC 7386: objects merge, null removes a key, anything else replaces), or written out whole (\"campaign\"). \"valid\" is the expected outcome. Every string in \"errors\" and \"warnings\" must appear inside one of the messages produced; a valid case produces no errors, and a case produces exactly as many warnings as it lists. \"runs\", \"waves\", \"too_big_for_quota\" and \"differs\" (the fields whose values differ between specs) must match exactly; \"expected_usd\" and \"worst_case_usd\" to the cent. Waves are under limits.json's vCPU quota, or under the case's \"quota\" when it gives one.",
+  "cases": [
+    {
+      "name": "nested-sizes-1",
+      "quota": 32,
+      "file": "campaigns/nested-sizes-1.json",
+      "valid": true,
+      "warnings": [],
+      "runs": ["m8i-4xlarge-r1", "m8i-4xlarge-r2", "m8i-2xlarge-r1", "m8i-2xlarge-r2"],
+      "differs": ["worker_host.instance_type", "densities"],
+      "expected_usd": 1.22,
+      "worst_case_usd": 2.54,
+      "waves": [["m8i-4xlarge-r1", "m8i-2xlarge-r1"], ["m8i-4xlarge-r2", "m8i-2xlarge-r2"]],
+      "too_big_for_quota": []
+    },
+    {
+      "name": "nested-mem-1",
+      "quota": 32,
+      "file": "campaigns/nested-mem-1.json",
+      "valid": true,
+      "warnings": ["specs.c8i-4xlarge.densities: at density 14 the microVMs' memory adds up to 56 GiB"],
+      "runs": ["m8i-4xlarge-r1", "m8i-4xlarge-r2", "c8i-4xlarge-r1", "c8i-4xlarge-r2"],
+      "differs": ["worker_host.instance_type"],
+      "expected_usd": 1.48,
+      "worst_case_usd": 3.03,
+      "waves": [["m8i-4xlarge-r1"], ["m8i-4xlarge-r2"], ["c8i-4xlarge-r1"], ["c8i-4xlarge-r2"]],
+      "too_big_for_quota": []
+    },
+    {
+      "name": "nested-hv-1",
+      "quota": 32,
+      "file": "campaigns/nested-hv-1.json",
+      "valid": true,
+      "warnings": [],
+      "runs": ["firecracker-r1", "firecracker-r2", "cloud-hypervisor-r1", "cloud-hypervisor-r2", "firecracker-mmio-r1", "firecracker-mmio-r2"],
+      "differs": ["hypervisor.name", "hypervisor.virtio_transport", "hypervisor.virtio_rng"],
+      "expected_usd": 2.33,
+      "worst_case_usd": 4.76,
+      "waves": [["firecracker-r1"], ["firecracker-r2"], ["cloud-hypervisor-r1"], ["cloud-hypervisor-r2"], ["firecracker-mmio-r1"], ["firecracker-mmio-r2"]],
+      "too_big_for_quota": []
+    },
+    {
+      "name": "hv-host-1, the metal example",
+      "quota": 32,
+      "file": "campaigns/examples/hv-host-1.json",
+      "valid": true,
+      "warnings": [
+        "specs.firecracker-metal.worker_host.instance_type: a run needs 208 vCPUs",
+        "specs.cloud-hypervisor-metal.worker_host.instance_type: a run needs 208 vCPUs"
+      ],
+      "differs": ["worker_host.instance_type", "hypervisor.name", "hypervisor.virtio_transport", "hypervisor.virtio_rng", "densities"],
+      "expected_usd": 42.62,
+      "worst_case_usd": 72.25,
+      "too_big_for_quota": ["firecracker-metal-r1", "firecracker-metal-r2", "cloud-hypervisor-metal-r1", "cloud-hypervisor-metal-r2"]
+    },
+    {
+      "name": "nested-sizes-1 under limits.json's quota",
+      "file": "campaigns/nested-sizes-1.json",
+      "valid": true,
+      "warnings": [],
+      "waves": [["m8i-4xlarge-r1", "m8i-4xlarge-r2", "m8i-2xlarge-r1", "m8i-2xlarge-r2"]],
+      "too_big_for_quota": []
+    },
+    {
+      "name": "one spec that runs the base as it is",
+      "quota": 32,
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "specs": { "m8i-2xlarge": null }, "why": { "m8i-2xlarge": null } },
+      "valid": true,
+      "warnings": [],
+      "runs": ["m8i-4xlarge-r1", "m8i-4xlarge-r2"],
+      "differs": [],
+      "waves": [["m8i-4xlarge-r1"], ["m8i-4xlarge-r2"]]
+    },
+    {
+      "name": "why is optional",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "why": null },
+      "valid": true,
+      "warnings": []
+    },
+    {
+      "name": "whole numbers written with a decimal point are fine",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "base": { "microvm": { "vcpus": 2.0, "memory_mib": 2048.0 }, "criteria": { "task_timeout_ms": 45000.0 } } },
+      "valid": true,
+      "warnings": []
+    },
+    {
+      "name": "replicas and the timer written with a decimal point",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "replicas": 2.0, "shutdown_after_minutes": 21.0 },
+      "valid": false,
+      "errors": ["shutdown_after_minutes: a run of m8i-4xlarge is expected to take about 22 minutes, longer than the 21-minute timer"]
+    },
+    {
+      "name": "replicas 2.0 is two replicas, and 1e1 is 10",
+      "quota": 32,
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "replicas": 2.0, "shutdown_after_minutes": 45.0, "base": { "procedure": { "settle_s": 1e1 } } },
+      "valid": true,
+      "warnings": [],
+      "runs": ["m8i-4xlarge-r1", "m8i-4xlarge-r2", "m8i-2xlarge-r1", "m8i-2xlarge-r2"],
+      "differs": ["worker_host.instance_type", "densities"],
+      "expected_usd": 1.22,
+      "worst_case_usd": 2.54
+    },
+    {
+      "name": "one replica of several specs",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "replicas": 1 },
+      "valid": true,
+      "warnings": ["replicas: with 1 replica per spec"],
+      "runs": ["m8i-4xlarge-r1", "m8i-2xlarge-r1"]
+    },
+    {
+      "name": "Cloud Hypervisor from a base on mmio without a random-number device",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "specs": { "chv": { "hypervisor": { "name": "cloud-hypervisor" } } } },
+      "valid": false,
+      "errors": [
+        "specs.chv.hypervisor.virtio_transport: Cloud Hypervisor always uses pci",
+        "specs.chv.hypervisor.virtio_rng: Cloud Hypervisor always has a random-number device"
+      ]
+    },
+    {
+      "name": "a Cloud Hypervisor base without a random-number device",
+      "from": "campaigns/nested-hv-1.json",
+      "patch": { "base": { "hypervisor": { "name": "cloud-hypervisor", "virtio_rng": false } }, "specs": { "cloud-hypervisor": null }, "why": { "cloud-hypervisor": null } },
+      "valid": false,
+      "errors": ["base.hypervisor.virtio_rng: Cloud Hypervisor always has a random-number device"]
+    },
+    {
+      "name": "an unknown hypervisor",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "specs": { "qemu": { "hypervisor": { "name": "qemu" } } } },
+      "valid": false,
+      "errors": ["specs.qemu.hypervisor.name: must be one of firecracker, cloud-hypervisor"]
+    },
+    {
+      "name": "a named spec changes the criteria",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "specs": { "m8i-2xlarge": { "criteria": { "task_p95_target_ms": 20000 } } } },
+      "valid": false,
+      "errors": ["specs.m8i-2xlarge.criteria: shared by every spec in a campaign; set it in the base"]
+    },
+    {
+      "name": "a named spec changes the procedure",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "specs": { "m8i-2xlarge": { "procedure": { "trials_per_density": 3 } } } },
+      "valid": false,
+      "errors": ["specs.m8i-2xlarge.procedure: shared by every spec in a campaign"]
+    },
+    {
+      "name": "a named spec changes the support host",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "specs": { "m8i-2xlarge": { "support_host": { "instance_type": "m8i.4xlarge" } } } },
+      "valid": false,
+      "errors": ["specs.m8i-2xlarge.support_host: shared by every spec in a campaign"]
+    },
+    {
+      "name": "an unknown field in a named spec",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "specs": { "m8i-2xlarge": { "ladder": [1, 2] } } },
+      "valid": false,
+      "errors": ["specs.m8i-2xlarge.ladder: not a field"]
+    },
+    {
+      "name": "an unknown field in the base",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "base": { "microvm": { "count": 2 } } },
+      "valid": false,
+      "errors": ["base.microvm.count: not a field"]
+    },
+    {
+      "name": "no method version",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "base": { "method_version": 2 } },
+      "valid": false,
+      "errors": ["base.method_version: not a field"]
+    },
+    {
+      "name": "no prediction",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "prediction": "The two hosts come out within 0.1 microVMs per host vCPU." },
+      "valid": false,
+      "errors": ["prediction: not a field"]
+    },
+    {
+      "name": "a base field missing",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "base": { "procedure": null, "criteria": { "ready_timeout_s": null } } },
+      "valid": false,
+      "errors": ["base.procedure: required", "base.criteria.ready_timeout_s: required"]
+    },
+    {
+      "name": "densities out of order",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "specs": { "m8i-2xlarge": { "densities": [8, 4, 2] } } },
+      "valid": false,
+      "errors": ["specs.m8i-2xlarge.densities: must be in increasing order, each density once, got [8, 4, 2]"]
+    },
+    {
+      "name": "a density twice",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "base": { "densities": [1, 2, 2, 4] } },
+      "valid": false,
+      "errors": ["base.densities: must be in increasing order, each density once"]
+    },
+    {
+      "name": "density 0 and density 201",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "specs": { "m8i-2xlarge": { "densities": [0, 201] } } },
+      "valid": false,
+      "errors": ["specs.m8i-2xlarge.densities[0]: must be at least 1", "specs.m8i-2xlarge.densities[1]: must be at most 200"]
+    },
+    {
+      "name": "no densities",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "specs": { "m8i-2xlarge": { "densities": [] } } },
+      "valid": false,
+      "errors": ["specs.m8i-2xlarge.densities: needs at least 1 value"]
+    },
+    {
+      "name": "microVM memory not a multiple of 256",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "specs": { "m8i-2xlarge": { "microvm": { "memory_mib": 3000 } } } },
+      "valid": false,
+      "errors": ["specs.m8i-2xlarge.microvm.memory_mib: must be a multiple of 256"]
+    },
+    {
+      "name": "a random-number device written as text",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "specs": { "m8i-2xlarge": { "hypervisor": { "virtio_rng": "yes" } } } },
+      "valid": false,
+      "errors": ["specs.m8i-2xlarge.hypervisor.virtio_rng: must be true or false"]
+    },
+    {
+      "name": "an unknown worker instance type",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "specs": { "m8i-2xlarge": { "worker_host": { "instance_type": "m7i.2xlarge" } } } },
+      "valid": false,
+      "errors": ["specs.m8i-2xlarge.worker_host.instance_type: must be one of"]
+    },
+    {
+      "name": "a metal support host",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "base": { "support_host": { "instance_type": "m8i.metal-48xl" } } },
+      "valid": false,
+      "errors": ["base.support_host.instance_type: must be one of m8i.xlarge, m8i.2xlarge, m8i.4xlarge"]
+    },
+    {
+      "name": "the step median target above the step p95 target",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "base": { "criteria": { "step_p50_target_ms": 3000 } } },
+      "valid": false,
+      "errors": ["base.criteria.step_p50_target_ms: must be at most criteria.step_p95_target_ms"]
+    },
+    {
+      "name": "the task p95 target at the task time limit",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "base": { "criteria": { "task_p95_target_ms": 45000 } } },
+      "valid": false,
+      "errors": ["base.criteria.task_p95_target_ms: must be below criteria.task_timeout_ms"]
+    },
+    {
+      "name": "the step time limit above the task time limit",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "base": { "criteria": { "step_timeout_ms": 50000 } } },
+      "valid": false,
+      "errors": ["base.criteria.step_timeout_ms: must be at most criteria.task_timeout_ms"]
+    },
+    {
+      "name": "the campaign name dev",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "name": "dev" },
+      "valid": false,
+      "errors": ["name: dev is reserved for local runs"]
+    },
+    {
+      "name": "names with stray hyphens or a leading digit",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "name": "1-sizes", "specs": { "b--c": { "densities": [1, 2] } } },
+      "valid": false,
+      "errors": ["name: a name has 2 to 40 lowercase letters", "specs.b--c: a name has 2 to 40 lowercase letters"]
+    },
+    {
+      "name": "a name ending in a newline",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "name": "nested-sizes-2\n" },
+      "valid": false,
+      "errors": ["name: a name has 2 to 40 lowercase letters"]
+    },
+    {
+      "name": "a spec name ending in a newline",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "specs": { "m8i-2xlarge": null, "m8i-2xlarge\n": { "worker_host": { "instance_type": "m8i.2xlarge" }, "densities": [1, 2, 3, 4, 5, 6, 7, 8] } }, "why": { "m8i-2xlarge": null } },
+      "valid": false,
+      "errors": ["specs.m8i-2xlarge\n: a name has 2 to 40 lowercase letters"]
+    },
+    {
+      "name": "no specs",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "specs": { "m8i-4xlarge": null, "m8i-2xlarge": null }, "why": null },
+      "valid": false,
+      "errors": ["specs: needs at least 1"]
+    },
+    {
+      "name": "two specs that expand to the same spec",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "specs": { "again": { "microvm": { "vcpus": 2.0 } } } },
+      "valid": false,
+      "errors": ["specs.again: expands to the same spec as m8i-4xlarge; to run a spec again, raise replicas"]
+    },
+    {
+      "name": "a why for a spec that isn't there",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "why": { "m8i-xlarge": "A host with a quarter of the vCPUs." } },
+      "valid": false,
+      "errors": ["why.m8i-xlarge: no spec named m8i-xlarge"]
+    },
+    {
+      "name": "a why too short to say anything",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "why": { "m8i-2xlarge": "smaller" } },
+      "valid": false,
+      "errors": ["why.m8i-2xlarge: must be at least 10 characters"]
+    },
+    {
+      "name": "a question too short",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "question": "Faster?" },
+      "valid": false,
+      "errors": ["question: must be at least 10 characters"]
+    },
+    {
+      "name": "no replicas",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "replicas": 0 },
+      "valid": false,
+      "errors": ["replicas: must be at least 1"]
+    },
+    {
+      "name": "a worst case over the limit for one campaign",
+      "quota": 32,
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "replicas": 4, "shutdown_after_minutes": 120, "specs": { "m8i-4xlarge": { "worker_host": { "instance_type": "m8i.metal-48xl" } } } },
+      "valid": false,
+      "errors": ["shutdown_after_minutes: the worst case is $88.06, above the $75.00 limit for one campaign"],
+      "warnings": ["specs.m8i-4xlarge.worker_host.instance_type: a run needs 196 vCPUs with its support host, more than the quota of 32"]
+    },
+    {
+      "name": "a timer shorter than a run",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "shutdown_after_minutes": 21 },
+      "valid": false,
+      "errors": ["shutdown_after_minutes: a run of m8i-4xlarge is expected to take about 22 minutes, longer than the 21-minute timer"]
+    }
+  ]
+}

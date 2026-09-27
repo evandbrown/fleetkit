@@ -1,6 +1,6 @@
 #!/bin/bash
 # One validation stage on the host, run over SSM Run Command as root:
-#   stage.sh trial-n1 | trial-n24 | smoke | capacity | bundle
+#   stage.sh trial-n1 | trial-n24 | smoke | capacity | run | bundle
 # Each driver invocation runs as a transient systemd unit so an SSM timeout can't
 # kill it; the evidence directory is synced to the results bucket on every exit.
 #
@@ -8,6 +8,11 @@
 # address 10.200.0.1:8081), OTLP_ENDPOINT (collector on the support host; without it
 # the driver runs with --no-lgtm), CAPACITY_CONFIG (capacity stage: which
 # experiments/capacity/<name>.env to run, default baseline).
+#
+# The run stage carries out one run of a campaign (experiments/launcher/launch.py) from its
+# spec, SPEC_FILE (default $OUT/spec.json), what experiments/schema/expand.py --run prints.
+# FLEETKIT_RUN_ID is then <campaign>/<run>. Optional: SUPPORT_HEALTH_URL (the support host's
+# health service, http://<ip>:8082), RUN_TIMEOUT_S (bound on the driver, default 7200).
 set -uo pipefail
 STAGE=${1:?stage}
 cd /opt/fleetkit
@@ -37,6 +42,25 @@ run_unit() {
   systemctl reset-failed "fleetkit-$name" >/dev/null 2>&1 || true
   systemd-run --wait --pipe --collect --unit "fleetkit-$name" -p WorkingDirectory=/opt/fleetkit \
     -p "RuntimeMaxSec=$to" -E "PYTHONPATH=$PYTHONPATH" -E "FLEETKIT_HOST_ID=$IID" -E "FLEETKIT_GIT_COMMIT=$GIT_COMMIT" "$@"
+}
+
+# ensure_backend <name>: the host daemon runs the spec's hypervisor, restarted with it if not.
+# A backend this host can't run keeps the daemon from starting, and the run from starting.
+hostd_backend() { curl -fsS -m 5 http://127.0.0.1:8090/health 2>/dev/null | jq -r '.backend // empty' 2>/dev/null; }
+ensure_backend() {
+  local want=$1 have
+  have=$(hostd_backend)
+  [ "$have" = "$want" ] && return 0
+  t "host daemon runs '${have:-nothing}', the spec asks for '$want': restarting it with --backend $want"
+  sed -i -E "s/--backend [a-z-]+/--backend $want/" /etc/systemd/system/fleetkit-hostd.service
+  systemctl daemon-reload && systemctl restart fleetkit-hostd
+  for _ in $(seq 1 30); do
+    [ "$(hostd_backend)" = "$want" ] && return 0
+    sleep 1
+  done
+  t "THE HOST DAEMON CAN'T RUN $want HERE; not running"
+  journalctl -u fleetkit-hostd -n 30 --no-pager 2>/dev/null
+  return 1
 }
 
 summarize_trial() {
@@ -120,6 +144,29 @@ case "$STAGE" in
     rc=$?; t "driver exit $rc"; summarize_trial "$OUT/capacity"
     jq -c '.plan // empty' "$OUT/capacity/run.json" 2>/dev/null
     exit $rc ;;
+  run)
+    SPEC=${SPEC_FILE:-$OUT/spec.json}
+    [ -s "$SPEC" ] || { t "SPEC MISSING: $SPEC"; exit 2; }
+    want=$(jq -r '(.spec // .).worker_host.instance_type // empty' "$SPEC")
+    hv=$(jq -r '(.spec // .).hypervisor.name // empty' "$SPEC")
+    ITYPE=$(imds instance-type)
+    if [ -z "$want" ] || [ "$ITYPE" != "$want" ]; then
+      t "INSTANCE TYPE MISMATCH: this host is '${ITYPE:-unknown}', the spec asks for '${want:-nothing}'; not running"
+      exit 2
+    fi
+    ensure_backend "$hv" || exit 2
+    period=$(curl -fsS -m 5 http://127.0.0.1:8090/host/info 2>/dev/null | jq -r '.metrics_period_s // empty' 2>/dev/null)
+    [ "$period" = "0.2" ] || t "WARNING: the host daemon samples every ${period:-?} s; the driver samples five times a second"
+    args=(--spec "$SPEC" --host-url http://127.0.0.1:8090 --fixture-check-url "$FIX" --fixture-base-url "$FIX"
+          --host-id "$IID" "${LGTM_ARGS[@]}" --quiet)
+    [ -n "${SUPPORT_HEALTH_URL:-}" ] && args+=(--support-health-url "$SUPPORT_HEALTH_URL")
+    to=${RUN_TIMEOUT_S:-7200}
+    t "run: $(jq -r '[.campaign, .run] | map(. // "?") | join("/")' "$SPEC") on $ITYPE, $hv, fixture $FIX, unit bound ${to}s"
+    run_unit run "$to" "$PY" -m driver trial "${args[@]}" --out "$OUT/run"
+    rc=$?; t "driver exit $rc"; summarize_trial "$OUT/run"
+    jq -c '.plan | {stop_reason, complete, boundary, densities_not_run}' "$OUT/run/run.json" 2>/dev/null
+    [ -s "$OUT/run/ops.jsonl" ] && { t "operational log:"; cat "$OUT/run/ops.jsonl"; }
+    exit $rc ;;
   bundle)
     cp -f /var/log/cloud-init-output.log "$OUT/" 2>/dev/null
     cp -f "$FK/render-slot0.txt" "$OUT/" 2>/dev/null
@@ -145,6 +192,18 @@ case "$STAGE" in
       "$PY" -m driver bundle --run "$OUT/capacity" --aws --strict --hostd-dir "$FK/runs/hostd" --cloud-init-log /var/log/cloud-init-output.log \
         --hostcheck-output "$OUT/hostcheck.txt" --lock-env images/lock.env --guest-manifest "$FK/guest-amd64.manifest.json" \
         --instance-type "$ITYPE" || { t "bundle $OUT/capacity reported missing items"; rc=1; }
+    fi
+    if [ -d "$OUT/run" ]; then
+      # A campaign run: the criteria come from its run.json, the price from instance-types.json.
+      ITYPE=$(imds instance-type)
+      PRICE=$(jq -r --arg t "$ITYPE" '.types[$t].usd_per_hour // empty' experiments/schema/instance-types.json)
+      t "report $OUT/run ($ITYPE at \$${PRICE:-?}/h)"
+      "$PY" -m driver report --run "$OUT/run" --price-per-hour "${PRICE:?no price for $ITYPE}" --instance "$ITYPE" \
+        --fixture-manifest fixture/dist/manifest.json --quiet || rc=1
+      t "bundle $OUT/run"
+      "$PY" -m driver bundle --run "$OUT/run" --aws --strict --hostd-dir "$FK/runs/hostd" --cloud-init-log /var/log/cloud-init-output.log \
+        --hostcheck-output "$OUT/hostcheck.txt" --lock-env images/lock.env --guest-manifest "$FK/guest-amd64.manifest.json" \
+        --instance-type "$ITYPE" || { t "bundle $OUT/run reported missing items"; rc=1; }
     fi
     curl -fsS -m 5 http://127.0.0.1:8090/host/verify-clean > "$OUT/verify-clean.json" 2>/dev/null; cat "$OUT/verify-clean.json"; echo
     exit $rc ;;

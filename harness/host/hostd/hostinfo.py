@@ -22,6 +22,7 @@ from typing import Any, Callable, Dict, Optional
 
 from . import __version__
 from .metrics import read_meminfo
+from .model import hypervisor_options
 from .procfs import PROC_ROOT, read_text
 
 IMDS_URL = "http://169.254.169.254"
@@ -150,9 +151,9 @@ def collect_host_info(backend: Any, host_id: str, metrics_period_s: Optional[flo
     topo = (topology_from_lscpu(lscpu()) if lscpu else None) or topology_from_sys(sys_cpu_root) \
         or {k: None for k in _TOPOLOGY_KEYS}
     try:
-        firecracker = backend.info()
+        facts = backend.info()
     except Exception:
-        firecracker = None
+        facts = None
     return {
         "host_id": host_id,
         "backend": backend.name,
@@ -168,5 +169,12 @@ def collect_host_info(backend: Any, host_id: str, metrics_period_s: Optional[flo
         "kvm": os.path.exists(dev_kvm),
         "ec2": ec2_identity(imds_url, imds_timeout_s),
         "metrics_period_s": metrics_period_s,
-        "firecracker": firecracker,
+        # The hypervisor's own facts (version, kernel, rootfs), whichever hypervisor runs. "firecracker" is
+        # the key runs recorded before Cloud Hypervisor, kept for their readers; it is set on Firecracker only.
+        "hypervisor": facts,
+        "firecracker": facts if backend.name == "firecracker" else None,
+        # What a spec may ask of this daemon: the most microVMs at once, and the hypervisor
+        # options its backend can carry out. The driver refuses a spec that asks for more.
+        "max_slots": getattr(backend, "max_slots", None),
+        "hypervisor_options": hypervisor_options(backend),
     }

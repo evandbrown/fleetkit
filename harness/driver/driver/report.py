@@ -178,7 +178,7 @@ def _headline(density_rows: list[dict], host_vcpus=None) -> dict:
                 "observed": cost["observed"] * 1000 if cost.get("observed") is not None else None,
             },
             "note": "docker is the development backend; real numbers come only from firecracker on AWS"
-            if b == "docker" else "firecracker measurement backend",
+            if b == "docker" else f"{b} measurement backend",
             "boundary": {
                 "last_pass": last_pass["density"] if last_pass else None,
                 "last_pass_trials": last_pass["trial_count"] if last_pass else 0,

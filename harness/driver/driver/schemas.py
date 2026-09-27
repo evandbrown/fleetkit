@@ -68,7 +68,7 @@ COUNTED_TRIAL_KINDS = ("ladder", "boundary", "smoke")
 # Guest process groups in proc_samples (guest daemon, /proc/<pid>/cmdline)
 GUEST_GROUPS = ("browser", "renderer", "gpu", "network", "utility", "zygote", "chromium_other", "guestd", "other")
 
-BACKENDS = ("docker", "firecracker")
+BACKENDS = ("docker", "firecracker", "cloud-hypervisor")
 
 FAULTS = ("crash_on_start", "never_ready", "hang_task", "hang_step", "slow_step")
 

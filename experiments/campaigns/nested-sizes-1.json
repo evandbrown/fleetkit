@@ -1,0 +1,33 @@
+{
+  "name": "nested-sizes-1",
+  "question": "Does a nested m8i.2xlarge (8 vCPUs) reach the same density per host vCPU as a nested m8i.4xlarge (16 vCPUs), for Firecracker microVMs of 2 vCPUs and 2 GiB? It should, so this tests the comparison itself: a difference larger than the spread between replicas points at the tooling before the hosts.",
+  "replicas": 2,
+  "shutdown_after_minutes": 45,
+  "base": {
+    "worker_host": { "instance_type": "m8i.4xlarge" },
+    "hypervisor": { "name": "firecracker", "virtio_transport": "mmio", "virtio_rng": false },
+    "microvm": { "vcpus": 2, "memory_mib": 2048 },
+    "densities": [1, 4, 8, 9, 10, 11, 12, 14, 16],
+    "criteria": {
+      "step_p50_target_ms": 1000,
+      "step_p95_target_ms": 2000,
+      "task_p95_target_ms": 5000,
+      "ready_timeout_s": 180,
+      "step_timeout_ms": 10000,
+      "task_timeout_ms": 45000
+    },
+    "procedure": { "trials_per_density": 1, "boundary_trials": 2, "settle_s": 10 },
+    "support_host": { "instance_type": "m8i.xlarge" }
+  },
+  "specs": {
+    "m8i-4xlarge": {},
+    "m8i-2xlarge": {
+      "worker_host": { "instance_type": "m8i.2xlarge" },
+      "densities": [1, 2, 3, 4, 5, 6, 7, 8]
+    }
+  },
+  "why": {
+    "m8i-4xlarge": "The host cap-baseline-1 ran on, where density 8 passed and 12 failed, so it anchors the comparison; the ladder steps by one microVM between 8 and 12.",
+    "m8i-2xlarge": "Half the vCPUs of the same family, so if density per host vCPU is a fair scale it should fail between 4 and 6, the same 0.5 to 0.75 per host vCPU."
+  }
+}

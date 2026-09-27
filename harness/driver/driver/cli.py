@@ -13,11 +13,13 @@ from pathlib import Path
 from . import __version__, schemas
 from .config import (DEFAULT_FIXTURE_BASE_URL, DEFAULT_FIXTURE_CHECK_URL, DEFAULT_HOST_URL, DEFAULT_OTLP_ENDPOINT,
                      DEFAULT_SAMPLE_INTERVAL_MS, Timeouts, TrialConfig)
+from .clean import SupportHealth, outside_cause
 from .criteria import make_criteria
 from .hostclient import HostClient, HostError
 from .ladder import LadderPlanner, Outcome
 from .metrics import HostMetricsSampler
-from .outputs import LegacyRunDirError, RunDir
+from .outputs import LegacyRunDirError, RunDir, read_json
+from .spec import HARNESS, SPEC_OWNED_OPTIONS, RunSpec, SpecError, load as load_spec, refusals, same_spec
 from .telemetry import Tracer
 from .trial import TrialRunner
 
@@ -27,7 +29,9 @@ def _default_run_id() -> str:
 
 
 def _add_common(p: argparse.ArgumentParser, need_backend: bool = True) -> None:
-    p.add_argument("--backend", choices=("docker", "firecracker"), required=need_backend)
+    p.add_argument("--backend", choices=("docker", "firecracker", "cloud-hypervisor"), required=need_backend,
+                   help="the host daemon's backend (with --spec: the spec's hypervisor.name, or docker to check "
+                        "the run locally; a Docker run is never a result)")
     p.add_argument("--host-url", default=DEFAULT_HOST_URL, help="host daemon base URL")
     p.add_argument("--fixture-check-url", default=DEFAULT_FIXTURE_CHECK_URL,
                    help="fixture URL the driver checks before a trial")
@@ -63,7 +67,14 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="command", required=True)
 
     t = sub.add_parser("trial", help="run trials at several densities and write the run directory")
-    _add_common(t)
+    _add_common(t, need_backend=False)
+    t.add_argument("--spec", default=None,
+                   help="run one run from a spec (what experiments/schema/expand.py CAMPAIGN --run RUN prints): the "
+                        "densities, procedure, criteria, microVM and hypervisor come from it, and the options that "
+                        "would set them are refused")
+    t.add_argument("--support-health-url", default=None,
+                   help="the support host's health service (http://<support>:8082); with --spec, a trial during "
+                        "which the support host was unhealthy or overloaded is not a result and runs again")
     t.add_argument("--densities", default="2,4",
                    help="comma-separated densities to test, in order (microVMs started at once per trial), e.g. 2,4")
     t.add_argument("--trials-per-density", type=int, default=1, help="ladder trials at each density")
@@ -224,7 +235,7 @@ def _run_spec(a, criteria: dict, densities: list[int]) -> dict:
         "sample_interval_ms": a.sample_interval_ms,
         "fixture_probe": not a.no_fixture_probe and not a.no_host_metrics,
         "fixture_check_url": a.fixture_check_url,
-        "fixture_base_url": a.fixture_base_url or DEFAULT_FIXTURE_BASE_URL[a.backend],
+        "fixture_base_url": a.fixture_base_url or DEFAULT_FIXTURE_BASE_URL.get(a.backend),
         "otlp_endpoint": None if a.no_lgtm else a.otlp_endpoint,
         "git_commit": os.environ.get("FLEETKIT_GIT_COMMIT") or _git_commit(),
     }
@@ -242,7 +253,86 @@ def _refuse_legacy(exc: LegacyRunDirError) -> int:
     return 2
 
 
+def _spec_mode(a, argv: list[str]) -> RunSpec:
+    """Read and check --spec, refuse options that would override it, and set ``a`` from it."""
+    given = sorted({tok.split("=", 1)[0] for tok in argv} & set(SPEC_OWNED_OPTIONS))
+    # The one override: --backend docker checks the run end to end on this machine. Docker has no hypervisor,
+    # so the spec's hypervisor section isn't sent, and the run records backend docker: never a result (D39).
+    if a.backend == "docker":
+        given = [opt for opt in given if opt != "--backend"]
+    if given:
+        raise SpecError([f"{opt}: comes from the spec with --spec" for opt in given])
+    rs = load_spec(a.spec)
+    s, c, p = rs.spec, rs.spec["criteria"], rs.spec["procedure"]
+    t = rs.timeouts()
+    a.backend = "docker" if a.backend == "docker" else rs.backend
+    a.densities = ",".join(str(d) for d in rs.densities)
+    a.trials_per_density, a.boundary_trials, a.settle_s = p["trials_per_density"], p["boundary_trials"], float(p["settle_s"])
+    a.warmup, a.illustration = HARNESS["warmup_trials"], HARNESS["illustration"]
+    a.stop_at_first_miss, a.fault = HARNESS["stop_at_first_miss"], None
+    a.metrics_hz, a.sample_interval_ms = HARNESS["metrics_hz"], HARNESS["sample_interval_ms"]
+    a.no_host_metrics = a.no_fixture_probe = False
+    a.step_p50_target_ms, a.step_p95_target_ms = c["step_p50_target_ms"], c["step_p95_target_ms"]
+    a.task_p95_target_ms = c["task_p95_target_ms"]
+    a.ready_timeout_s, a.step_timeout_ms, a.task_timeout_ms = t["ready_timeout_s"], t["step_timeout_ms"], t["task_timeout_ms"]
+    a.idle_timeout_s, a.max_lifetime_s, a.launch_interval_ms = t["idle_timeout_s"], t["max_lifetime_s"], t["launch_interval_ms"]
+    a.vcpus, a.mem_mib = s["microvm"]["vcpus"], s["microvm"]["memory_mib"]
+    return rs
+
+
+def _refuse_reuse(out: Path, rs: RunSpec) -> str | None:
+    """A run directory holds one spec: refuse one that holds trials of anything else."""
+    prior = read_json(out / "run.json", None)
+    has_trials = (out / "trials").exists() and any((out / "trials").iterdir())
+    if isinstance(prior, dict) and isinstance(prior.get("spec"), dict) and "argv" in prior["spec"]:
+        return f"{out} already holds trials run without this spec; use a new --out directory"
+    if isinstance(prior, dict) and "spec" in prior:
+        if not same_spec(prior["spec"], rs):
+            return f"{out} already holds a run of a different spec; use a new --out directory"
+    elif has_trials:
+        return f"{out} already holds trials run without this spec; use a new --out directory"
+    return None
+
+
+def _resume(inv: "Invocation") -> tuple[list[Outcome], int, bool]:
+    """The trials a run directory of this spec already holds: the ladder history, how many warm-up
+    trials ran, whether the illustration ran. A trial cut off before it finished is set aside."""
+    history: list[Outcome] = []
+    warmups, illustrated = 0, False
+    for t in inv.rundir.list_trials():
+        tid = t.get("trial_id")
+        if not t.get("complete"):
+            mids = [m.get("microvm_id") for m in t.get("microvms") or []]
+            where = inv.rundir.set_aside(tid, inv.writers, mids)
+            inv.rundir.log_ops("trial_set_aside", trial_id=tid, density=t.get("density"),
+                               trial_kind=t.get("trial_kind"), cause="interrupted before it finished",
+                               set_aside=str(where.relative_to(inv.rundir.root)), next="run again")
+            continue
+        kind = t.get("trial_kind")
+        if kind in ("ladder", "boundary") and t.get("passed") is not None:
+            history.append(Outcome(kind, int(t["density"]), bool(t["passed"]), tid))
+        elif kind == "warmup":
+            warmups += 1
+        elif kind == "illustration":
+            illustrated = True
+    if history or warmups or illustrated:
+        inv.rundir.log_ops("resumed", trials=len(history), warmups=warmups, illustration=illustrated)
+        inv.tracer.info(f"resuming: {len(history)} trials already in the run directory")
+    return history, warmups, illustrated
+
+
 def cmd_trial(a) -> int:
+    rs: RunSpec | None = None
+    if a.spec:
+        try:
+            rs = _spec_mode(a, list(getattr(a, "_argv", None) or []))
+        except SpecError as exc:
+            for prob in exc.problems:
+                print(f"spec: {prob}", file=sys.stderr)
+            return 2
+    elif not a.backend:
+        print("--backend is required without --spec", file=sys.stderr)
+        return 2
     densities = [int(x) for x in a.densities.split(",") if x.strip()]
     if not densities or any(n < 1 for n in densities):
         print("--densities must list positive integers", file=sys.stderr)
@@ -255,6 +345,23 @@ def cmd_trial(a) -> int:
         print("--metrics-hz must be positive; --boundary-trials, --warmup, --settle-s and --sample-interval-ms "
               "must not be negative", file=sys.stderr)
         return 2
+    if rs is not None:
+        why = _refuse_reuse(Path(a.out), rs)
+        if why:
+            print(why, file=sys.stderr)
+            return 2
+        probe = HostClient(a.host_url)
+        try:
+            health = probe.health()
+        except HostError as exc:
+            print(f"host daemon not reachable at {a.host_url}: {exc}", file=sys.stderr)
+            return 3
+        probs = refusals(rs, health if isinstance(health, dict) else None, probe.host_info(),
+                         local_docker=a.backend == "docker")
+        if probs:
+            for prob in probs:
+                print(f"spec: {prob}", file=sys.stderr)
+            return 2
     _install_signals()
     try:
         inv = Invocation(a)
@@ -267,66 +374,148 @@ def cmd_trial(a) -> int:
     history: list[Outcome] = []
     docs: list[dict] = []
     rc = 0
-    interrupted = False
+    interrupted = not_clean = False
+    support = SupportHealth(a.support_health_url) if rs is not None and a.support_health_url else None
+    support_said_nothing = False
     try:
-        spec = _run_spec(a, criteria, densities)
         observed = {"host_info": inv.client.host_info(),
                     "guest_info": None}  # filled from the first ready microVM's record
-        inv.rundir.update_run_json(criteria=criteria, spec=spec, observed=observed, plan=planner.summary(history))
+        if rs is not None:
+            record = rs.record()
+            record["harness"].update(_run_harness(a, rs))
+            inv.rundir.update_run_json(criteria=criteria, observed=observed, **record)
+            history, warmups_done, illustrated = _resume(inv)
+        else:
+            inv.rundir.update_run_json(criteria=criteria, spec=_run_spec(a, criteria, densities), observed=observed)
+            warmups_done, illustrated = 0, False
+        inv.rundir.update_run_json(plan=planner.summary(history))
         base = _timeouts(a)
         fault_label = f"fault-{schemas.fault_name(a.fault)}" if a.fault else None
 
-        def run_one(density: int, trial_kind: str, label: str | None = None, shots: bool = False) -> dict:
+        def run_one(density: int, trial_kind: str, label: str | None = None, shots: bool = False):
             cfg = TrialConfig(run_id=inv.run_id, backend=a.backend, density=density,
                               timeouts=copy.deepcopy(base), vcpus=a.vcpus, mem_mib=a.mem_mib, fault=a.fault,
                               fixture_check_url=a.fixture_check_url, fixture_base_url=a.fixture_base_url,
                               products_source=a.products, host_id=inv.host_id, trial_label=fault_label or label,
                               trial_kind="fault" if a.fault else trial_kind, criteria=criteria, settle_s=a.settle_s,
-                              sample_interval_ms=a.sample_interval_ms, screenshot_each_step=shots)
+                              sample_interval_ms=a.sample_interval_ms, screenshot_each_step=shots,
+                              hypervisor=rs.hypervisor if rs is not None and a.backend != "docker" else None,
+                              release_after_ready_s=HARNESS["release_after_ready_s"] if rs is not None else 0.0)
             runner = TrialRunner(cfg, inv.client, inv.rundir, inv.writers, inv.tracer, metrics=inv.sampler)
+            doc, harness_error = None, None
             try:
                 doc = runner.run()
+            except KeyboardInterrupt:
+                raise
+            except Exception as exc:
+                if rs is None:
+                    raise
+                harness_error = f"{type(exc).__name__}: {exc}"
+                doc = read_json(inv.rundir.trials_dir / runner.trial_id / "trial.json", None)
             finally:
                 if observed["guest_info"] is None:
                     gi = _first_guest_info(runner)
                     if gi is not None:
                         observed["guest_info"] = gi
                         inv.rundir.update_run_json(observed=observed)
-            docs.append(doc)
-            return doc
+            return runner, doc, harness_error
 
-        for _ in range(a.warmup):
-            run_one(1, "warmup", "warmup")
+        def run_clean(density: int, trial_kind: str, label: str | None = None, shots: bool = False):
+            """-> (the trial's doc, None) when it is a result; (None, cause) when it couldn't be run
+            cleanly even after running it again. Without a spec every trial is a result, as before."""
+            nonlocal support_said_nothing
+            if rs is None:
+                _, doc, _ = run_one(density, trial_kind, label, shots)
+                docs.append(doc)
+                return doc, None
+            cause = None
+            for attempt in range(1, HARNESS["reruns"] + 2):
+                t0 = time.time()
+                runner, doc, harness_error = run_one(density, trial_kind, label, shots)
+                t1 = time.time()
+                health, health_error = None, None
+                try:
+                    health = inv.client.health()
+                except HostError as exc:
+                    health_error = str(exc)
+                said = None
+                if support is not None:
+                    try:
+                        said = support.window(t0, t1)
+                    except Exception as exc:
+                        if not support_said_nothing:
+                            support_said_nothing = True
+                            inv.rundir.log_ops("support_health_unavailable", url=a.support_health_url,
+                                               error=f"{type(exc).__name__}: {exc}")
+                            inv.tracer.warn(f"the support host's health service did not answer: {exc}")
+                cause = outside_cause(doc, harness_error=harness_error, trial_s=t1 - t0,
+                                      health_after=health if isinstance(health, dict) else None,
+                                      health_error=health_error, support=said)
+                if cause is None:
+                    docs.append(doc)
+                    return doc, None
+                again = attempt <= HARNESS["reruns"]
+                mids = [m.get("microvm_id") for m in (doc or {}).get("microvms") or []]
+                where = inv.rundir.set_aside(runner.trial_id, inv.writers, mids)
+                inv.rundir.log_ops("trial_set_aside", trial_id=runner.trial_id, density=density,
+                                   trial_kind=trial_kind, attempt=attempt, cause=cause,
+                                   set_aside=str(where.relative_to(inv.rundir.root)),
+                                   next="run again" if again else "give up")
+                inv.tracer.warn(f"trial {runner.trial_id} is not a result ({cause}); "
+                                + ("running it again" if again else "not running it a third time"))
+            return None, cause
+
+        for _ in range(max(0, a.warmup - warmups_done)):
+            run_clean(1, "warmup", "warmup")
         while True:
             nxt = planner.next(history)
             if nxt is None:
                 break
-            doc = run_one(nxt.density, nxt.trial_kind)
+            doc, cause = run_clean(nxt.density, nxt.trial_kind)
+            if doc is None:
+                not_clean = True
+                if not any(o.density == nxt.density for o in history):
+                    inv.rundir.log_ops("density_not_tested", density=nxt.density, cause=cause)
+                inv.tracer.warn(f"density {nxt.density}: no clean trial ({cause}); the run goes no further")
+                break
             ev = doc.get("evaluation") or {}
             history.append(Outcome(nxt.trial_kind, nxt.density, bool(ev.get("passed")), doc["trial_id"]))
             inv.rundir.update_run_json(plan=planner.summary(history))
             inv.tracer.info(f"{nxt.trial_kind} trial {doc['trial_id']} {'passed' if ev.get('passed') else 'missed'}",
                             reasons="; ".join(ev.get("reasons") or []))
-        if a.illustration:
-            run_one(1, "illustration", "illustration", shots=True)
+        if a.illustration and not illustrated:
+            run_clean(1, "illustration", "illustration", shots=True)
     except KeyboardInterrupt:
         interrupted = True
         inv.tracer.warn("interrupted")
         rc = 130
     finally:
-        plan = planner.summary(history, interrupted=interrupted)
+        plan = planner.summary(history, interrupted=interrupted, not_clean=not_clean)
         inv.rundir.update_run_json(plan=plan)
         if not interrupted:
             inv.tracer.info("plan done", stop_reason=plan["stop_reason"], last_pass=plan["boundary"]["last_pass"],
                             first_miss=plan["boundary"]["first_miss"])
         inv.close()
     if rc == 0:
-        if ladder_mode:
+        if rs is not None:
+            # a missed density is a result; a run that couldn't finish cleanly exits 1 (ops.jsonl says why)
+            rc = 1 if not_clean else 0
+        elif ladder_mode:
             # a missed density is the experiment's result; only a trial that could not be measured fails the run
             rc = 1 if any(d.get("error") for d in docs) else 0
         else:
             rc = 1 if any(d.get("status") != "ok" for d in docs) else 0
     return rc
+
+
+def _run_harness(a, rs: RunSpec) -> dict:
+    """run.json ``harness``, beside the spec: how this run was carried out (HARNESS is added by the spec)."""
+    from .bundle import _git_commit
+    return {**rs.timeouts(), "backend": a.backend, "fixture_check_url": a.fixture_check_url,
+            "fixture_base_url": a.fixture_base_url or DEFAULT_FIXTURE_BASE_URL.get(a.backend),
+            "support_health_url": a.support_health_url, "otlp_endpoint": None if a.no_lgtm else a.otlp_endpoint,
+            "argv": list(getattr(a, "_argv", None) or []),
+            "git_commit": os.environ.get("FLEETKIT_GIT_COMMIT") or _git_commit()}
 
 
 def cmd_report(a) -> int:

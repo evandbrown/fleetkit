@@ -4,6 +4,7 @@ Everything here is the closed vocabulary from docs/harness-design.md section 4.
 """
 from __future__ import annotations
 
+import json
 import threading
 import uuid
 from dataclasses import dataclass, field
@@ -81,6 +82,42 @@ def validate_fault(fault: Optional[str]) -> Optional[str]:
     return fault
 
 
+# The spec's hypervisor section reaches a backend on every microVM as ``MicroVM.hypervisor``:
+# {"name": <backend name>, "virtio_transport": "mmio" | "pci", "virtio_rng": bool}, the keys
+# after "name" present only when the create request carried them. A backend says which values
+# it can carry out with a class attribute ``hypervisor_options`` ({option: [accepted values]});
+# a backend without one is taken to offer only what every backend did before the spec existed.
+DEFAULT_HYPERVISOR_OPTIONS: Dict[str, List[Any]] = {"virtio_transport": ["mmio"], "virtio_rng": [False]}
+
+
+def hypervisor_options(backend: Any) -> Dict[str, List[Any]]:
+    """The values `backend` can carry out, per hypervisor option (GET /host/info shows them)."""
+    opts = getattr(backend, "hypervisor_options", None)
+    return {k: list(v) for k, v in (opts if isinstance(opts, dict) else DEFAULT_HYPERVISOR_OPTIONS).items()}
+
+
+def hypervisor_problems(backend: Any, hypervisor: Any) -> List[str]:
+    """Why `backend` can't carry out this hypervisor section; empty when it can."""
+    if hypervisor is None:
+        return []
+    if not isinstance(hypervisor, dict):
+        return ["hypervisor must be an object"]
+    name = getattr(backend, "name", "")
+    problems = []
+    if hypervisor.get("name", name) != name:
+        problems.append("this daemon runs %s, not %s" % (name, hypervisor.get("name")))
+    offered = hypervisor_options(backend)
+    for key, value in hypervisor.items():
+        if key == "name":
+            continue
+        if key not in offered:
+            problems.append("the %s backend has no option %s" % (name, key))
+        elif not any(value == v and type(value) is type(v) for v in offered[key]):
+            problems.append("the %s backend can't carry out %s = %s (it offers %s)" % (
+                name, key, json.dumps(value), ", ".join(json.dumps(v) for v in offered[key])))
+    return problems
+
+
 class Defaults:
     """Section 4 timeout defaults; every one is overridable per trial."""
     STEP_TIMEOUT_MS = 10000
@@ -126,6 +163,8 @@ class MicroVM:
     fixture_base_url: str
     run_id: Optional[str] = None
     trial_id: Optional[str] = None
+    # The spec's hypervisor section this microVM was created with (see DEFAULT_HYPERVISOR_OPTIONS).
+    hypervisor: Dict[str, Any] = field(default_factory=dict)
     state: str = State.CREATING
     created_ts: Optional[float] = None
     process_started_ts: Optional[float] = None
@@ -202,6 +241,7 @@ class MicroVM:
             "idle_timeout_s": self.idle_timeout_s,
             "run_id": self.run_id,
             "trial_id": self.trial_id,
+            "hypervisor": dict(self.hypervisor),
             "console_log": self.console_log,
             "trace_id": self.trace.trace_id if self.trace else None,
             "kernel_start_ts": self.kernel_start_ts,

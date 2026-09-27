@@ -131,6 +131,9 @@ class TrialRunner:
             self._write_trial_json()
 
             ready = [s for s in self.microvms if s.ready]
+            if ready and cfg.release_after_ready_s > 0:
+                self.phase = "release_wait"
+                time.sleep(cfg.release_after_ready_s)
             if ready:
                 self.phase = "fixture_recheck"
                 try:
@@ -227,6 +230,8 @@ class TrialRunner:
             "idle_timeout_s": t.idle_timeout_s, "launch_interval_ms": t.launch_interval_ms,
             "fault": cfg.fault,
         }
+        if cfg.hypervisor is not None:
+            create_request["hypervisor"] = dict(cfg.hypervisor)
         with self.tr.start_span("microvms.create", self.span, {"fleetkit.count": cfg.density}) as sp:
             self.timestamps["create_start"] = time.time()
             created = self.client.create_microvms(create_request, self._headers(sp))
@@ -564,6 +569,7 @@ class TrialRunner:
             "sequence": self.sequence, "trial_kind": cfg.trial_kind,
             "backend": cfg.backend, "density": n, "trial_number": self.trial_number, "fault": cfg.fault,
             "vcpus": cfg.vcpus, "mem_mib": cfg.mem_mib, "host_id": cfg.host_id,
+            "hypervisor": cfg.hypervisor,
             "timeouts": cfg.timeouts.as_dict(),
             "fixture": {"check_url": cfg.fixture_check_url, "guest_base_url": cfg.guest_fixture_base_url(),
                         "products_source": self.products_source, "products": len(self.products)},

@@ -1,8 +1,9 @@
 #!/bin/bash
 # Host setup after cloud-init, run over SSM Run Command as root from /opt/fleetkit.
 # Idempotent: every step can be re-run after a fix. Does what cloud-init deliberately
-# doesn't: the Python venv, the fixture, the guest image and rootfs, the fixture
-# server on the bridge address, and the host daemon as a systemd unit.
+# doesn't: Cloud Hypervisor next to Firecracker, the Python venv, the fixture, the guest
+# image and rootfs, the fixture server on the bridge address, and the host daemon as a
+# systemd unit.
 #
 # Optional environment (the capacity plan of run-validation.sh sets all three;
 # without them the host is set up exactly as for the validation run):
@@ -25,6 +26,9 @@ t "commit $(git rev-parse --short HEAD)"
 TOKEN=$(curl -sfX PUT http://169.254.169.254/latest/api/token -H 'X-aws-ec2-metadata-token-ttl-seconds: 60')
 IID=$(curl -sf -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id)
 echo "$IID" > "$FK/instance-id"; t "instance $IID"
+
+t "hypervisors: Firecracker $FIRECRACKER_VERSION (cloud-init installed it) and Cloud Hypervisor $CLOUD_HYPERVISOR_VERSION"
+images/host/install-hypervisors.sh images/lock.env
 
 t "venv (python3.12)"
 make -s venv PYTHON3=python3.12 >/var/log/fleetkit/setup-venv.log 2>&1 || { tail -30 /var/log/fleetkit/setup-venv.log; exit 1; }

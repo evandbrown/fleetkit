@@ -38,8 +38,8 @@ Every trial at a density has identical inputs, down to which product each microV
 
 | Input | Meaning |
 |---|---|
-| **Spec** | Everything fixed about one run, including the list of densities to test. It covers the worker host, the hypervisor, the microVM's size and guest, the workload, the support host, the densities, the procedure, the pass criteria, and the sampling and attribution rules. |
-| **Campaign definition** | What the experiment builder produces: the question, a base spec, the named specs written as their changes from the base, and the number of replicas. |
+| **Spec** | Everything fixed about one run, including the list of densities to test. It covers the worker host, the hypervisor and the microVM's devices, the microVM's size, the densities, the pass criteria, the procedure and the support host; [spec.md](spec.md) lists every field. What is the same in every run, such as the guest, the task, and the sampling and attribution rules, is set by this page and the harness, not by the spec. |
+| **Campaign definition** | What the experiment builder produces: the question, a base spec, the named specs written as their changes from the base, the number of replicas, and optionally one sentence per spec on why it's there. |
 | **Replicas** | How many runs each spec gets, each on its own worker host. |
 
 Two kinds of value are never inputs:
@@ -57,7 +57,7 @@ Two kinds of value are never inputs:
 | **Density per host vCPU** | A run's result divided by the worker host's vCPUs. It puts hosts of different sizes on one scale. |
 | **Cost per 1,000 tasks** | What 1,000 tasks cost at a run's result, from the worker host's hourly price and the time the tasks took. It puts hosts at different prices on one scale. |
 
-Extra trials at one density show how much the same test varies on the same host. Replicas show how much it varies from host to host. A comparison between two specs means something only when the difference between them is larger than both.
+Extra trials at one density show how much the same test varies on the same host. Replicas show how much it varies from host to host. A difference between two specs means more the larger it is than both, so a comparison always shows every replica (see Compare, below).
 
 ### Words we don't use
 
@@ -105,6 +105,10 @@ A **density passes** only if every trial at it passed.
 
 A **run's result** is the highest density that passed with every lower density also passing, stated as "tested successfully".
 
+**A failure outside the experiment is not a result.** When a trial fails because of something the spec doesn't test, such as an overloaded support host, a harness error or an AWS problem, the harness runs it again once. If it still can't get a clean trial, that density is *not tested* and the run goes no higher. The cause goes in the run's operational log (`driver.log`), never in the results.
+
+**Missing data is labelled where it would be,** with no other result states: *not tested* for a density the run didn't reach or couldn't test cleanly; *warm-up, not judged* and *illustration, not judged* for the labelled trials; *stopped early* for a run that ended before its procedure finished, for example when its shutdown timer fired.
+
 ### 5. Record
 
 Every run records:
@@ -119,7 +123,7 @@ Every run records:
 
 ### 6. Attribute
 
-Each trial gets a verdict on which resource limited it. The verdict is computed by rules whose thresholds are fixed in the spec, from what was measured while the tasks ran:
+Each trial gets a verdict on which resource limited it. The verdict is computed by rules whose thresholds are fixed in the harness, the same for every run, from what was measured while the tasks ran:
 
 - host CPU
 - the microVM's own CPU allowance
@@ -133,6 +137,15 @@ Beside the verdict, the report names the process that used the resource: on the 
 ### 7. Compare
 
 A campaign runs several specs at once. Specs in a campaign differ only in the inputs being compared, and each spec runs on more than one worker host as replicas. Runs are compared by their results, by density per host vCPU and by cost per 1,000 tasks, so a small host and a large one, or a nested host and a metal one, read on one scale. After a result, the next campaign changes one input, chosen from what the evidence shows.
+
+**How two specs are compared.**
+
+1. Each replica's result spans from the highest density that passed to the lowest that failed, each divided by the worker host's vCPUs.
+2. Take the midpoint of that span.
+3. Average the midpoints of a spec's replicas.
+4. Compare specs by those averages, and show every replica's span beside them, so the spread between hosts is in view.
+
+For example, cap-baseline-1 passed density 8 and failed 12 on 16 vCPUs: its span is 0.5 to 0.75 microVMs per host vCPU, and its midpoint 0.625. A replica that found no failing density has no midpoint; its result reads "at least" its top density, and the comparison waits for a campaign that tests higher.
 
 ## Worked example: cap-baseline-1
 
@@ -155,6 +168,6 @@ At density 12, every microVM became ready and every task succeeded. Each trial f
 
 **Result:** density 8 was tested successfully on this worker host. Densities 9 to 11 were not tried.
 
-**Compared across hosts:** 0.5 microVMs per host vCPU (8 on 16). About $0.075 per 1,000 tasks counting only the time the tasks ran, or $0.19 counting startup and cleanup too, at the assumed $0.84672 an hour.
+**Compared across hosts:** 0.5 microVMs per host vCPU (8 on 16), and a span of 0.5 to 0.75 with its midpoint at 0.625. About $0.075 per 1,000 tasks counting only the time the tasks ran, or $0.19 counting startup and cleanup too, at the assumed $0.84672 an hour.
 
 **Attribution:** at density 12 the worker host's CPU was contended. Tasks were waiting for CPU for 35 to 47 percent of the time. The microVMs' virtual CPUs used almost all of it, and inside them Chromium's renderer processes did most of the work.
