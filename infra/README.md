@@ -46,7 +46,7 @@ The two CI roles trust GitHub's OIDC provider for this repository only, using th
 
 ## GitHub configuration
 
-**Repository variables** (Settings, Secrets and variables, Actions, Variables; or `gh variable set NAME --body VALUE`). All are plain variables, not secrets: account IDs and ARNs are not secret, and they show in plan output anyway. Note that the workflow log is public: the credentials step masks the management account ID, and the member account ID and the ARNs that embed it are `sensitive` outputs so an apply does not print them, but the member account ID still appears in plan and apply diffs wherever a resource carries it (the `[id=...]` line of the account resource, the budget's account filter, the SNS topic policy).
+**Repository variables** (Settings, Secrets and variables, Actions, Variables; or `gh variable set NAME --body VALUE`). All are plain variables, not secrets: account IDs and ARNs are not credentials. The workflow log is public, so the workflow keeps them out of it anyway: the credentials step masks the management account ID, the member account ID and the ARNs that embed it are `sensitive` outputs, every line of plan and apply output passes through a filter that replaces 12-digit account IDs and organization, root and OU IDs before it reaches the log or the step summary, and the optional `AWS_MEMBER_ACCOUNT_ID` variable registers the member account ID as a masked value for anything the filter doesn't see.
 
 | Variable | Value |
 |---|---|
@@ -56,6 +56,7 @@ The two CI roles trust GitHub's OIDC provider for this repository only, using th
 | `AWS_REGION` | Optional; defaults to `us-east-1`, the only region the guardrails allow |
 | `TF_VAR_account_email` | Root email of the member account. It must not belong to any other AWS account and cannot change without recreating the account |
 | `TF_VAR_alert_email` | Address that receives every budget notification |
+| `AWS_MEMBER_ACCOUNT_ID` | Optional; the `org` output `account_id` once it exists, so the log masks it everywhere |
 
 Every repository (or `aws` environment) variable named `TF_VAR_<name>` reaches Terraform as the input variable `<name>`, so a stack can gain a variable without a workflow change. The email variables are marked `sensitive` in the stacks, so Terraform redacts them in plan output; the repository and its workflow logs are public, so keep anything else you would not publish out of these variables.
 

@@ -14,6 +14,11 @@
 # pull requests, its main branch and the `aws` environment, so no AWS keys are
 # stored anywhere. Every account-specific value (state bucket, role ARNs, emails)
 # is a GitHub repository variable; see infra/README.md for the list.
+#
+# The log is public, so plan and apply output is piped through REDACT, which masks
+# account IDs and organization, root and OU IDs before they reach the log or the
+# step summary. The member account ID is also registered as a masked value when
+# the optional AWS_MEMBER_ACCOUNT_ID variable is set.
 name: terraform
 
 on:
@@ -41,6 +46,9 @@ env:
   TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
   # The project stack reads the org stack's outputs from the same bucket.
   TF_VAR_state_bucket: ${{ vars.TF_STATE_BUCKET }}
+  # sed program applied to every line of Terraform output that reaches the log.
+  # (No \b: it is not portable across sed implementations, so boundaries are spelled out.)
+  REDACT: 's/(^|[^0-9])[0-9]{12}([^0-9]|$)/\1<account-id>\2/g; s/(^|[^a-z0-9-])o-[a-z0-9]{10}([^a-z0-9]|$)/\1o-<redacted>\2/g; s/(^|[^a-z0-9-])ou-[a-z0-9]+-[a-z0-9]+([^a-z0-9-]|$)/\1ou-<redacted>\2/g; s/(^|[^a-z0-9-])r-[a-z0-9]{4,5}([^a-z0-9-]|$)/\1r-<redacted>\2/g'
 
 defaults:
   run:
@@ -100,6 +108,11 @@ jobs:
           for name in TF_STATE_BUCKET AWS_ROLE_ARN; do
             [ -n "${!name}" ] || { echo "::error::repository variable for $name is not set; see infra/README.md"; exit 1; }
           done
+      - name: Mask known IDs
+        env:
+          AWS_MEMBER_ACCOUNT_ID: ${{ vars.AWS_MEMBER_ACCOUNT_ID }}
+        run: |
+          [ -z "$AWS_MEMBER_ACCOUNT_ID" ] || echo "::add-mask::$AWS_MEMBER_ACCOUNT_ID"
       - uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ env.AWS_ROLE_ARN }}
@@ -145,7 +158,7 @@ jobs:
       - name: terraform plan
         if: matrix.stack != 'project' || steps.org_state.outputs.exists == 'true'
         run: |
-          terraform plan -no-color -lock-timeout=120s 2>&1 | tee "$RUNNER_TEMP/plan.txt"
+          terraform plan -no-color -lock-timeout=120s 2>&1 | sed -E "$REDACT" | tee "$RUNNER_TEMP/plan.txt"
           {
             echo "## terraform plan: ${{ matrix.stack }}"
             echo '```'
@@ -177,6 +190,11 @@ jobs:
           for name in TF_STATE_BUCKET AWS_ROLE_ARN; do
             [ -n "${!name}" ] || { echo "::error::repository variable for $name is not set; see infra/README.md"; exit 1; }
           done
+      - name: Mask known IDs
+        env:
+          AWS_MEMBER_ACCOUNT_ID: ${{ vars.AWS_MEMBER_ACCOUNT_ID }}
+        run: |
+          [ -z "$AWS_MEMBER_ACCOUNT_ID" ] || echo "::add-mask::$AWS_MEMBER_ACCOUNT_ID"
       - uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ env.AWS_ROLE_ARN }}
@@ -205,8 +223,8 @@ jobs:
       - name: terraform apply (org)
         working-directory: infra/org
         run: |
-          terraform plan -no-color -lock-timeout=120s -out=tfplan
-          terraform apply -no-color tfplan
+          terraform plan -no-color -lock-timeout=120s -out=tfplan 2>&1 | sed -E "$REDACT"
+          terraform apply -no-color tfplan 2>&1 | sed -E "$REDACT"
 
       - name: terraform init (project)
         working-directory: infra/project
@@ -220,5 +238,5 @@ jobs:
       - name: terraform apply (project)
         working-directory: infra/project
         run: |
-          terraform plan -no-color -lock-timeout=120s -out=tfplan
-          terraform apply -no-color tfplan
+          terraform plan -no-color -lock-timeout=120s -out=tfplan 2>&1 | sed -E "$REDACT"
+          terraform apply -no-color tfplan 2>&1 | sed -E "$REDACT"
