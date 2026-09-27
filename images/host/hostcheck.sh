@@ -49,8 +49,9 @@ cat > "$EV/hostcheck-vm.json" <<EOF
  "network-interfaces":[{"iface_id":"eth0","guest_mac":"$MAC","host_dev_name":"$TAP"}]}
 EOF
 rm -f /run/fleetkit-check.sock
-timeout -k 5 120 firecracker --api-sock /run/fleetkit-check.sock --config-file "$EV/hostcheck-vm.json" > "$EV/hostcheck-console.log" 2>&1 &
+firecracker --api-sock /run/fleetkit-check.sock --config-file "$EV/hostcheck-vm.json" > "$EV/hostcheck-console.log" 2>&1 &
 FCPID=$!
+( sleep 150; kill -9 "$FCPID" 2>/dev/null ) & WATCHDOG=$!
 t0=$(date +%s); ready=FAIL
 for _ in $(seq 1 90); do
   if curl -fsS -m 2 "http://$GIP:8080/health" > "$EV/hostcheck-health.json" 2>/dev/null; then ready=PASS; break; fi
@@ -63,7 +64,9 @@ if [ "$ready" = PASS ]; then
   # egress through NAT from inside the guest, via the guest daemon's own fetch if it has one; otherwise skip
   curl -fsS -m 20 "http://$GIP:8080/egress-check" 2>/dev/null && res GUEST_EGRESS PASS || echo "GUEST_EGRESS_RESULT=SKIP (no /egress-check endpoint)"
 fi
-kill -9 $FCPID 2>/dev/null; wait $FCPID 2>/dev/null; ip link del "$TAP" 2>/dev/null; rm -f /run/fleetkit-check.sock
+kill -9 "$FCPID" 2>/dev/null; wait "$FCPID" 2>/dev/null; kill "$WATCHDOG" 2>/dev/null
+pkill -9 -f 'fleetkit-check.sock' 2>/dev/null; ip link del "$TAP" 2>/dev/null; rm -f /run/fleetkit-check.sock
+sleep 1; if pgrep -a firecracker >/dev/null; then pgrep -a firecracker; res NO_LEFTOVER_VM FAIL; else res NO_LEFTOVER_VM PASS; fi
 echo "console lines: $(wc -l < "$EV/hostcheck-console.log")"; grep -m3 -E 'Linux version|fleetkit-init|starting guestd|BusyBox|Kernel panic|attempted to kill init' "$EV/hostcheck-console.log" || true
 
 echo "== results bucket =="
