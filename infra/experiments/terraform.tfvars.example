@@ -8,3 +8,5 @@ state_bucket = "fleetkit-tfstate-<management-account-id>"
 # instance_type          = "m8i.xlarge"
 # shutdown_after_minutes = 240
 # repo_ref               = "main"       # branch, tag or commit the hosts check out
+# The member account's access role, as a full role ARN (partition, account id, role/OrganizationAccountAccessRole).
+member_role_arn = "<member-account-access-role-arn>"

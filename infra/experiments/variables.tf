@@ -11,9 +11,15 @@ variable "project_tag" {
 }
 
 variable "aws_profile" {
-  description = "CLI profile that assumes a role into the member account; every resource is created through it. State and the project stack's outputs are read with the management-account profile named in backend.hcl instead."
+  description = "CLI profile with management-account credentials. The backend, the project stack's remote state and the provider all start from it; the provider then assumes member_role_arn."
   type        = string
-  default     = "fleetkit"
+  default     = "default"
+}
+
+variable "member_role_arn" {
+  description = "ARN of the member account's access role (OrganizationAccountAccessRole) that the provider assumes. Carries the account id, so it lives in the gitignored terraform.tfvars."
+  type        = string
+  sensitive   = true
 }
 
 variable "state_bucket" {
