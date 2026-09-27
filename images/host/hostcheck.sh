@@ -8,6 +8,7 @@ set -uo pipefail
 FK=/var/lib/fleetkit
 RUN_ID=${FLEETKIT_RUN_ID:-hostcheck}
 EV="$FK/runs/$RUN_ID"; mkdir -p "$EV"
+exec > >(tee "$EV/hostcheck.txt") 2>&1
 BUCKET=$(cat "$FK/results-bucket" 2>/dev/null || true)
 fail=0
 res() { echo "$1_RESULT=$2"; [ "$2" = PASS ] || fail=1; }
