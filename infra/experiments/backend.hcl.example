@@ -1,0 +1,10 @@
+# Copy to backend.hcl (gitignored) and fill in the bucket from the bootstrap stack's
+# state_bucket output. The state lives in the management account, so the backend
+# names that profile; the resources use aws_profile (variables.tf) instead.
+#   terraform init -backend-config=backend.hcl
+bucket       = "fleetkit-tfstate-<management-account-id>"
+key          = "experiments/terraform.tfstate"
+region       = "us-east-1"
+encrypt      = true
+use_lockfile = true
+profile      = "default"

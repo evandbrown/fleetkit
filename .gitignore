@@ -29,3 +29,6 @@ __pycache__/
 # The private workspace (its own local git repo) and the private working agreement. Never committed.
 private/
 CLAUDE.local.md
+
+# Evidence pulled down from the results bucket after an experiment.
+results/

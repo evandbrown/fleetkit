@@ -1,0 +1,110 @@
+#cloud-config
+# Experiment host, stage 0: only what has to happen before anything else, in
+# under five minutes. Rendered by infra/experiments/host.tf with templatefile(),
+# so the dollar-brace references below are Terraform template variables, filled
+# from the stack's variables and from images/lock.env. Shell code in this file
+# uses $VAR without braces, which Terraform leaves alone. Everything heavier
+# (guest image, rootfs, services) runs later over SSM Run Command. The rendered
+# user data carries the results bucket name and is never committed.
+
+bootcmd:
+  # The hard stop on cost, armed before anything else and on every boot. The
+  # instance terminates on shutdown (host.tf), so this ends the instance, not
+  # just the session. Cancel with `shutdown -c`, re-arm with `shutdown -h +N`.
+  - shutdown -h +${shutdown_after_minutes}
+
+# The AMI's frozen package snapshot is what the pin in ami.lock.json means.
+package_update: false
+packages:
+  - docker
+  - iptables-nft
+  - e2fsprogs
+  - git
+  - python3.12
+  - python3.12-pip
+  - tar
+  - curl-minimal
+
+write_files:
+  # Bridge and NAT for the Firecracker guests. Idempotent: rerun it after a
+  # Docker restart, which recreates the DOCKER-USER chain.
+  - path: /usr/local/sbin/fleetkit-net.sh
+    owner: root:root
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      # Bridge fcbr0 for Firecracker guests, IP forwarding and NAT for their
+      # egress. Every step checks before it changes anything.
+      set -euo pipefail
+
+      bridge=fcbr0
+      bridge_cidr=10.200.0.1/24
+      guest_net=10.200.0.0/24
+
+      # The interface that carries the default route is where guest traffic
+      # leaves (ens5 on AL2023). Reported for the log; the NAT rule matches on
+      # "not the bridge" so it also covers Docker's networks and does not depend
+      # on the name.
+      egress=$(ip -o route show default | awk '{ print $5; exit }')
+      if [ -z "$egress" ]; then
+        echo "fleetkit-net: no default route, nothing to NAT to" >&2
+        exit 1
+      fi
+      echo "fleetkit-net: egress interface $egress"
+
+      # Docker sets the FORWARD policy to DROP and evaluates DOCKER-USER first,
+      # so the accepts for guest traffic go there; the chain only exists once
+      # Docker has started.
+      if ! iptables -n -L DOCKER-USER >/dev/null 2>&1; then
+        echo "fleetkit-net: no DOCKER-USER chain; is docker running?" >&2
+        exit 1
+      fi
+
+      ip link show "$bridge" >/dev/null 2>&1 || ip link add "$bridge" type bridge
+      ip -o -4 addr show dev "$bridge" | grep -qF "inet $bridge_cidr " \
+        || ip addr add "$bridge_cidr" dev "$bridge"
+      ip link set "$bridge" up
+
+      sysctl -w net.ipv4.ip_forward=1
+
+      # ensure TABLE CHAIN (-I|-A) RULE...: add the rule unless it is present.
+      ensure() {
+        local table=$1 chain=$2 how=$3
+        shift 3
+        iptables -t "$table" -C "$chain" "$@" 2>/dev/null \
+          || iptables -t "$table" "$how" "$chain" "$@"
+      }
+      ensure filter DOCKER-USER -I -i "$bridge" -j ACCEPT
+      ensure filter DOCKER-USER -I -o "$bridge" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+      ensure nat POSTROUTING -A -s "$guest_net" ! -o "$bridge" -j MASQUERADE
+
+      echo "fleetkit-net: $bridge up at $bridge_cidr, NAT for $guest_net"
+
+# cloud-init joins these into one shell script, run once, in order. The first
+# line makes a failing step stop it, so the done marker at the end only exists
+# after a complete run and `cloud-init status` reports the failure.
+runcmd:
+  - set -eux
+  - systemctl enable --now docker
+  - /usr/local/sbin/fleetkit-net.sh
+  - mkdir -p /var/lib/fleetkit /var/log/fleetkit
+  - cd /var/lib/fleetkit
+  # Firecracker: the release tarball, checked against the checksum published
+  # with it and against the pin in images/lock.env, then just the binary.
+  - curl -fsSL --retry 5 --retry-delay 5 -O https://github.com/firecracker-microvm/firecracker/releases/download/${FIRECRACKER_VERSION}/firecracker-${FIRECRACKER_VERSION}-x86_64.tgz -O https://github.com/firecracker-microvm/firecracker/releases/download/${FIRECRACKER_VERSION}/firecracker-${FIRECRACKER_VERSION}-x86_64.tgz.sha256.txt
+  - sha256sum -c firecracker-${FIRECRACKER_VERSION}-x86_64.tgz.sha256.txt
+  - echo "${FIRECRACKER_X86_64_SHA256}  firecracker-${FIRECRACKER_VERSION}-x86_64.tgz" | sha256sum -c -
+  - tar -xzf firecracker-${FIRECRACKER_VERSION}-x86_64.tgz
+  - install -m 0755 release-${FIRECRACKER_VERSION}-x86_64/firecracker-${FIRECRACKER_VERSION}-x86_64 /usr/local/bin/firecracker
+  - /usr/local/bin/firecracker --version
+  # Guest kernel from Firecracker's CI bucket; the bucket publishes no checksums,
+  # so the pin recorded in images/lock.env is the only check.
+  - curl -fsSL --retry 5 --retry-delay 5 -o /var/lib/fleetkit/vmlinux ${KERNEL_BASE_URL}/${KERNEL_CI_PREFIX}/x86_64/vmlinux-${KERNEL_VERSION}
+  - echo "${KERNEL_X86_64_SHA256}  /var/lib/fleetkit/vmlinux" | sha256sum -c -
+  # This repository, at the ref the stack was applied with; the probe and every
+  # later step run from here.
+  - git clone https://github.com/evandbrown/fleetkit /opt/fleetkit
+  - git -C /opt/fleetkit checkout ${repo_ref}
+  # Where the host's scripts upload evidence.
+  - echo "${results_bucket}" > /var/lib/fleetkit/results-bucket
+  - touch /var/lib/fleetkit/cloud-init-done
