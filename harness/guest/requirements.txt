@@ -1,0 +1,5 @@
+# Development and test dependencies for the guest daemon, installed into harness/.venv.
+# In the guest image itself the only dependency is Debian's python3-websockets (10.4)
+# from apt; this pin keeps local tests on the same 10.x legacy asyncio API.
+websockets==10.4
+pytest>=7,<9

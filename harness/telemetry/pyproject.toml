@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fleetkit-telemetry"
+version = "0.1.0"
+description = "OpenTelemetry bootstrap shared by the fleetkit host daemon and driver"
+requires-python = ">=3.11"
+dependencies = [
+  "opentelemetry-sdk==1.45.0",
+  "opentelemetry-exporter-otlp-proto-http==1.45.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["fleetkit_telemetry*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

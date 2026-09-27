@@ -32,3 +32,10 @@ CLAUDE.local.md
 
 # Evidence pulled down from the results bucket after an experiment.
 results/
+build/
+harness/.venv/
+.pytest_cache/
+*.egg-info/
+fixture/dist/
+tfplan*
+*.tfplan

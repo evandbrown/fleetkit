@@ -1,0 +1,3 @@
+# Runtime is stdlib-only. psutil is optional: host memory/CPU figures on macOS (Linux reads /proc).
+psutil>=5.9
+pytest>=8

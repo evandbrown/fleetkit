@@ -1,0 +1,2 @@
+# The driver itself is standard-library only (Python 3.11+). Tests need pytest.
+pytest>=8,<9

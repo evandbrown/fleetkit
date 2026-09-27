@@ -1,0 +1,5 @@
+[
+  {"id": "sku-1001", "title": "Brass Desk Lamp", "price": "48.00", "query": "lamp", "blurb": "A small brass lamp with a linen shade."},
+  {"id": "sku-1002", "title": "Walnut Bookend Pair", "price": "22.00", "query": "bookend", "blurb": "Two solid walnut bookends, oiled."},
+  {"id": "sku-1003", "title": "Linen Table Runner", "price": "19.00", "query": "linen", "blurb": "Stonewashed linen, 180 cm."}
+]

@@ -1,0 +1,575 @@
+"""The trial protocol (design sections 4, 5, 6 and 11).
+
+One trial: fixture check, create N sessions, wait until all are ready or failed, release a barrier
+so N tasks start together (or spaced by launch_interval_ms), collect rows as they return, destroy
+every session, verify-clean, write trial.json. Every CSV row is appended as it arrives and
+trial.json is rewritten at each phase, so the run directory is valid after any interruption.
+"""
+from __future__ import annotations
+
+import base64
+import collections
+import json
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from . import schemas
+from .config import DESTROY_GRACE_S, READY_GRACE_S, READY_POLL_INTERVAL_S, TrialConfig
+from .hostclient import HostClient, HostError
+from .outputs import RunDir, Writers, write_json_atomic
+from .products import FixtureCheckError, Product, assign, fixture_check, load_products
+from .stats import percentile, mean, summary, to_float
+from .telemetry import Span, Tracer
+
+
+@dataclass
+class SessionRec:
+    session_id: str
+    slot: int
+    address: str = ""
+    info: dict = field(default_factory=dict)  # last GET /sessions/{id} body
+    ready: bool = False
+    failed: bool = False
+    driver_error: str = ""
+    task: dict | None = None
+    state_after_task: str | None = None
+    csv_written: bool = False
+
+    @property
+    def state(self) -> str:
+        return str(self.info.get("state") or "")
+
+    @property
+    def outcome(self) -> str:
+        return str(self.info.get("outcome") or "")
+
+
+class TrialRunner:
+    def __init__(self, cfg: TrialConfig, client: HostClient, rundir: RunDir, writers: Writers,
+                 tracer: Tracer, seq: int | None = None):
+        self.cfg = cfg
+        self.client = client
+        self.rundir = rundir
+        self.w = writers
+        self.tr = tracer
+        seq = seq if seq is not None else rundir.next_trial_seq()
+        label = cfg.trial_label or f"{cfg.backend}-n{cfg.level_n}-r{cfg.repeat}"
+        self.trial_id = f"t{seq:03d}-{label}"
+        self.trial_dir = rundir.trial_dir(self.trial_id)
+        self.sessions: list[SessionRec] = []
+        self.timestamps: dict[str, float | None] = {
+            "create_start": None, "all_ready": None, "barrier_release": None,
+            "last_task_return": None, "verify_clean_pass": None,
+        }
+        self.phase = "starting"
+        self.error: str | None = None
+        self.verify_clean: dict | None = None
+        self.fixture: dict | None = None
+        self.products: list[Product] = []
+        self.products_source = ""
+        self.span: Span | None = None
+        self._lock = threading.Lock()
+        self._interrupted = False
+
+    # ---- helpers -----------------------------------------------------------------------
+    def _log(self, level: str, msg: str, **attrs):
+        self.tr.log(level, msg, self.span, trial_id=self.trial_id, backend=self.cfg.backend,
+                    level_n=self.cfg.level_n, **attrs)
+
+    def _headers(self, span: Span | None = None) -> dict:
+        s = span or self.span
+        return {"traceparent": s.traceparent if s else "", "X-Fleetkit-Trial-Id": self.trial_id}
+
+    # ---- protocol ----------------------------------------------------------------------
+    def run(self) -> dict:
+        cfg = self.cfg
+        self.span = self.tr.start_span("trial", attributes={
+            "fleetkit.run_id": cfg.run_id, "fleetkit.trial_id": self.trial_id,
+            "fleetkit.backend": cfg.backend, "fleetkit.level_n": cfg.level_n,
+            "fleetkit.repeat": cfg.repeat, "fleetkit.fault": cfg.fault or "",
+            "fleetkit.host_id": cfg.host_id})
+        self._log("INFO", f"trial {self.trial_id} starting", fault=cfg.fault or "", trace_id=self.span.trace_id)
+        self._write_trial_json()
+        created = False
+        try:
+            self.phase = "fixture_check"
+            self._fixture_check_and_products()
+            self._write_trial_json()
+
+            self.phase = "create"
+            self._create_sessions()
+            created = True
+            self._write_trial_json()
+
+            self.phase = "wait_ready"
+            self._wait_all_ready()
+            self._write_trial_json()
+
+            ready = [s for s in self.sessions if s.ready]
+            if ready:
+                self.phase = "fixture_recheck"
+                try:
+                    fixture_check(cfg.fixture_check_url)
+                except FixtureCheckError as exc:
+                    self.error = f"fixture check failed before the barrier: {exc}"
+                    self._log("ERROR", self.error)
+                else:
+                    self.phase = "tasks"
+                    self._run_tasks(ready)
+            else:
+                self._log("WARN", "no session became ready; no tasks dispatched")
+            self._write_trial_json()
+        except KeyboardInterrupt:
+            self._interrupted = True
+            self.error = "interrupted"
+            self._log("WARN", "interrupted; cleaning up sessions")
+        except FixtureCheckError as exc:
+            self.error = f"fixture check failed: {exc}"
+            self._log("ERROR", f"trial {self.trial_id} aborted: {self.error}")
+        except HostError as exc:
+            self.error = f"host daemon: {exc}"
+            self._log("ERROR", f"trial {self.trial_id} aborted: {self.error}")
+        finally:
+            if created:
+                self.phase = "cleanup"
+                self._write_trial_json()
+                try:
+                    self._cleanup()
+                except KeyboardInterrupt:
+                    self._interrupted = True
+                    self.error = self.error or "interrupted during cleanup"
+                    self._log("WARN", "interrupted during cleanup; hostd's lifetime and idle reapers still apply")
+            self.phase = "verify_clean"
+            try:
+                self._verify_clean()
+            except HostError as exc:
+                self.verify_clean = {"clean": False, "leftovers": [], "error": str(exc)}
+                self._log("ERROR", f"verify-clean failed: {exc}")
+            self.phase = "done"
+            result = self._write_trial_json(final=True)
+            if result["status"] != "ok":
+                self.span.error(self.error or result["status"])
+            self.span.set(**{"fleetkit.status": result["status"]})
+            self.span.end()
+            self._log("INFO", f"trial {self.trial_id} {result['status']}",
+                      sessions_ready=result["counts"]["sessions_ready"],
+                      tasks_ok=result["counts"]["tasks_ok"], tasks=result["counts"]["tasks_dispatched"])
+        if self._interrupted:
+            raise KeyboardInterrupt
+        return result
+
+    def _fixture_check_and_products(self) -> None:
+        with self.tr.start_span("fixture_check", self.span) as sp:
+            self.fixture = fixture_check(self.cfg.fixture_check_url)
+            self.products, self.products_source = load_products(self.cfg.products_source,
+                                                                self.cfg.fixture_check_url)
+            sp.set(**{"fleetkit.products": len(self.products), "fleetkit.products_source": self.products_source})
+        self._log("INFO", "fixture check ok", url=self.cfg.fixture_check_url, products=len(self.products))
+
+    def _create_sessions(self) -> None:
+        cfg, t = self.cfg, self.cfg.timeouts
+        spec = {
+            "backend": cfg.backend, "count": cfg.level_n, "vcpus": cfg.vcpus, "mem_mib": cfg.mem_mib,
+            "ready_timeout_s": t.ready_timeout_s, "max_lifetime_s": t.max_lifetime_s,
+            "idle_timeout_s": t.idle_timeout_s, "launch_interval_ms": t.launch_interval_ms,
+            "fault": cfg.fault,
+        }
+        with self.tr.start_span("sessions.create", self.span, {"fleetkit.count": cfg.level_n}) as sp:
+            self.timestamps["create_start"] = time.time()
+            created = self.client.create_sessions(spec, self._headers(sp))
+            for i, c in enumerate(created):
+                sid = str(c.get("id") or c.get("session_id") or "")
+                if not sid:
+                    raise HostError(f"POST /sessions returned a session without an id: {c}")
+                self.sessions.append(SessionRec(sid, int(c.get("slot", i)), str(c.get("address") or "")))
+        self._log("INFO", f"created {len(self.sessions)} sessions", ids=",".join(s.session_id for s in self.sessions))
+
+    def _wait_all_ready(self) -> None:
+        t = self.cfg.timeouts
+        deadline = time.monotonic() + t.ready_timeout_s + READY_GRACE_S
+        with self.tr.start_span("wait_all_ready", self.span) as sp:
+            pending = {s.session_id: s for s in self.sessions}
+            while pending:
+                for sid in list(pending):
+                    s = pending[sid]
+                    try:
+                        s.info = self.client.get_session(sid)
+                    except HostError as exc:
+                        s.driver_error = str(exc)
+                        continue
+                    if s.state == "ready" or s.state == "busy":
+                        s.ready = True
+                        del pending[sid]
+                        self._log("INFO", "session ready", session_id=sid, slot=s.slot,
+                                  startup_ms=s.info.get("startup_ms"))
+                    elif s.state in schemas.TERMINAL_STATES or s.state == "destroying":
+                        s.failed = True
+                        del pending[sid]
+                        self._log("WARN", "session failed before ready", session_id=sid, slot=s.slot,
+                                  outcome=s.outcome, error=s.info.get("error"))
+                if pending and time.monotonic() > deadline:
+                    for sid, s in pending.items():
+                        s.failed = True
+                        s.driver_error = ("driver: readiness deadline exceeded without a terminal state "
+                                          f"from hostd (state={s.state or 'unknown'})")
+                        self._log("ERROR", s.driver_error, session_id=sid)
+                    break
+                if pending:
+                    time.sleep(READY_POLL_INTERVAL_S)
+            self.timestamps["all_ready"] = time.time()
+            n_ready = sum(1 for s in self.sessions if s.ready)
+            sp.set(**{"fleetkit.ready": n_ready, "fleetkit.failed": len(self.sessions) - n_ready})
+        self._log("INFO", "wait-all-ready done", ready=n_ready, failed=len(self.sessions) - n_ready,
+                  wait_s=round(self.timestamps["all_ready"] - self.timestamps["create_start"], 3))
+
+    def _run_tasks(self, ready: list[SessionRec]) -> None:
+        t = self.cfg.timeouts
+        release = threading.Event()
+        order = sorted(ready, key=lambda s: s.slot)
+        with self.tr.start_span("tasks", self.span, {"fleetkit.count": len(order)}) as sp:
+            with ThreadPoolExecutor(max_workers=len(order), thread_name_prefix="task") as pool:
+                futures = [pool.submit(self._task_worker, s, i, release) for i, s in enumerate(order)]
+                self.timestamps["barrier_release"] = time.time()
+                release.set()
+                self._log("INFO", "barrier released", tasks=len(order), launch_interval_ms=t.launch_interval_ms)
+                for f in futures:
+                    f.result()
+            sp.set(**{"fleetkit.tasks_ok": sum(1 for s in order if s.task and s.task["ok"])})
+
+    def _task_worker(self, s: SessionRec, index: int, release: threading.Event) -> None:
+        cfg, t = self.cfg, self.cfg.timeouts
+        release.wait()
+        if t.launch_interval_ms > 0 and index > 0:
+            time.sleep(index * t.launch_interval_ms / 1000.0)
+        product = assign(self.products, s.slot)
+        task_id = f"{self.trial_id}-slot{s.slot:03d}"
+        payload = {
+            "task_id": task_id, "fixture_base_url": cfg.guest_fixture_base_url(),
+            "product_id": product.product_id, "query": product.query,
+            "expected_title": product.expected_title,
+            "step_timeout_ms": t.step_timeout_ms, "task_timeout_ms": t.task_timeout_ms,
+        }
+        span = self.tr.start_span("task", self.span, {
+            "fleetkit.session_id": s.session_id, "fleetkit.task_id": task_id,
+            "fleetkit.slot": s.slot, "fleetkit.product_id": product.product_id})
+        headers = self._headers(span)
+        headers["X-Fleetkit-Task-Id"] = task_id
+        reply = self.client.run_task(s.session_id, payload, t.client_timeout_ms / 1000.0, headers)
+        body = reply.body if isinstance(reply.body, dict) else {}
+        category, error = categorize(reply.status, reply.body, reply.transport_error)
+        ok = category == "ok" and body.get("ok") is True
+        with self._lock:
+            lt = self.timestamps["last_task_return"]
+            self.timestamps["last_task_return"] = reply.recv_ts if lt is None else max(lt, reply.recv_ts)
+
+        # screenshot
+        screenshot_path = ""
+        b64 = body.get("screenshot_b64")
+        if b64:
+            try:
+                self.rundir.screenshots_dir.mkdir(parents=True, exist_ok=True)
+                p = self.rundir.screenshots_dir / f"{task_id}.jpg"
+                p.write_bytes(base64.b64decode(b64))
+                screenshot_path = str(p.relative_to(self.rundir.root))
+            except Exception as exc:
+                self._log("WARN", f"screenshot for {task_id} not saved: {exc}")
+
+        # guest log tail
+        log_tail = body.get("log_tail")
+        if log_tail:
+            try:
+                self.rundir.guest_logs_dir.mkdir(parents=True, exist_ok=True)
+                with open(self.rundir.guest_logs_dir / f"{s.session_id}.jsonl", "a", encoding="utf-8") as fh:
+                    for line in (log_tail if isinstance(log_tail, list) else str(log_tail).splitlines()):
+                        fh.write((json.dumps(line, sort_keys=True) if isinstance(line, dict) else str(line)) + "\n")
+            except Exception as exc:
+                self._log("WARN", f"guest log tail for {s.session_id} not saved: {exc}")
+
+        guest_clock_ns = _int_or_none(body.get("guest_clock_ns"))
+        clock_offset_ns = _int_or_none(_pick(body, "clock_offset_ns", "host.clock_offset_ns"))
+        if clock_offset_ns is None and guest_clock_ns is not None:
+            # design section 8; computed here only when the host daemon did not attach it
+            rtt_ns = int((reply.recv_ts - reply.send_ts) * 1e9)
+            clock_offset_ns = int(reply.send_ts * 1e9) + rtt_ns // 2 - guest_clock_ns
+
+        row = {
+            "run_id": cfg.run_id, "trial_id": self.trial_id, "backend": cfg.backend,
+            "level_n": cfg.level_n, "repeat": cfg.repeat, "session_id": s.session_id, "slot": s.slot,
+            "task_id": task_id, "product_id": product.product_id, "dispatch_ts": reply.send_ts,
+            "task_ms": to_float(body.get("task_ms")), "wall_ms": round(reply.wall_ms, 3), "ok": ok,
+            "failure_category": category, "failed_step": body.get("failed_step") or "",
+            "bytes_received": body.get("bytes_received"), "request_count": body.get("request_count"),
+            "guest_mem_available": _pick(body, "guest_mem_available", "guest_metrics.mem_available",
+                                         "guest.mem_available"),
+            "chromium_rss": _pick(body, "chromium_rss", "guest_metrics.chromium_rss", "guest.chromium_rss"),
+            "screenshot_path": screenshot_path, "trace_id": self.span.trace_id,
+            "clock_offset_ns": clock_offset_ns, "error": error,
+        }
+        self.w.tasks.append(row)
+        steps = body.get("steps") if isinstance(body.get("steps"), list) else []
+        failed_step = str(body.get("failed_step") or "")
+        step_rows = []
+        for st in steps:
+            if not isinstance(st, dict):
+                continue
+            name = str(st.get("name", ""))
+            step_rows.append({
+                "run_id": cfg.run_id, "trial_id": self.trial_id, "task_id": task_id, "step_index": len(step_rows),
+                "name": name,
+                "dispatch_ts": _step_ts(st.get("dispatch_ns"), guest_clock_ns, clock_offset_ns),
+                "settle_ts": _step_ts(st.get("settle_ns"), guest_clock_ns, clock_offset_ns),
+                "duration_ms": st.get("duration_ms"),
+                "error": error if (not ok and failed_step == name) else "",
+            })
+        if not ok and failed_step and not any(r["name"] == failed_step for r in step_rows):
+            # The guest returns only the steps completed so far (design section 4), so the step
+            # that failed has no record of its own: synthesize one so steps.csv carries the failed
+            # step and its error. It never settled, so settle_ts and duration_ms stay empty.
+            settled = [r["settle_ts"] for r in step_rows if r["settle_ts"] is not None]
+            step_rows.append({
+                "run_id": cfg.run_id, "trial_id": self.trial_id, "task_id": task_id, "step_index": len(step_rows),
+                "name": failed_step, "dispatch_ts": settled[-1] if settled else reply.send_ts,
+                "settle_ts": None, "duration_ms": None, "error": error,
+            })
+        for r in step_rows:
+            self.w.steps.append(r)
+        s.task = {"task_id": task_id, "ok": ok, "failure_category": category, "failed_step": row["failed_step"],
+                  "task_ms": row["task_ms"], "wall_ms": row["wall_ms"], "http_status": reply.status,
+                  "steps": len(steps), "error": error, "screenshot_path": screenshot_path,
+                  "dispatch_ts": reply.send_ts, "return_ts": reply.recv_ts}
+        span.set(**{"fleetkit.failure_category": category, "fleetkit.wall_ms": row["wall_ms"],
+                    "fleetkit.task_ms": row["task_ms"], "http.status_code": reply.status})
+        if not ok:
+            span.error(f"{category}: {error}")
+        span.end()
+        try:
+            s.info = self.client.get_session(s.session_id)
+            s.state_after_task = s.state
+        except HostError as exc:
+            s.state_after_task = f"unknown ({exc})"
+        self._log("INFO" if ok else "WARN", f"task {task_id} {category}", session_id=s.session_id,
+                  wall_ms=row["wall_ms"], task_ms=row["task_ms"], failed_step=row["failed_step"],
+                  state_after=s.state_after_task, error=error if not ok else "")
+
+    def _cleanup(self) -> None:
+        with self.tr.start_span("cleanup", self.span, {"fleetkit.count": len(self.sessions)}) as sp:
+            with ThreadPoolExecutor(max_workers=max(1, len(self.sessions)), thread_name_prefix="destroy") as pool:
+                list(pool.map(lambda s: self._destroy_one(s, sp), self.sessions))
+            for s in self.sessions:
+                self._write_session_row(s)
+        self._log("INFO", "cleanup done", sessions=len(self.sessions))
+
+    def _destroy_one(self, s: SessionRec, parent: Span) -> None:
+        reply = self.client.delete_session(s.session_id, self._headers(parent))
+        if reply.transport_error or reply.status >= 400 and reply.status != 404:
+            s.driver_error = (s.driver_error + "; " if s.driver_error else "") + \
+                f"DELETE: {reply.transport_error or 'HTTP ' + str(reply.status)}"
+        deadline = time.monotonic() + DESTROY_GRACE_S
+        while True:
+            try:
+                s.info = self.client.get_session(s.session_id)
+            except HostError as exc:
+                if exc.status == 404:
+                    break  # gone entirely
+                s.driver_error = (s.driver_error + "; " if s.driver_error else "") + f"GET after DELETE: {exc}"
+                break
+            if s.state in schemas.TERMINAL_STATES and s.info.get("destroyed_ts") is not None:
+                break
+            if time.monotonic() > deadline:
+                s.driver_error = (s.driver_error + "; " if s.driver_error else "") + \
+                    f"driver: not destroyed within {DESTROY_GRACE_S:.0f}s (state={s.state})"
+                break
+            time.sleep(READY_POLL_INTERVAL_S)
+
+    def _write_session_row(self, s: SessionRec) -> None:
+        if s.csv_written:
+            return
+        s.csv_written = True
+        cfg, i = self.cfg, s.info
+        outcome = s.outcome
+        if outcome not in schemas.SESSION_OUTCOMES:
+            if s.failed and not outcome:
+                outcome = "startup_timeout" if "deadline" in s.driver_error else (outcome or "startup_error")
+            elif s.ready and s.task is not None and not outcome:
+                outcome = "completed"
+        err = "; ".join(x for x in (str(i.get("error") or ""), s.driver_error) if x)
+        self.w.sessions.append({
+            "run_id": cfg.run_id, "trial_id": self.trial_id, "session_id": s.session_id, "slot": s.slot,
+            "backend": cfg.backend, "vcpus": cfg.vcpus, "mem_mib": cfg.mem_mib,
+            "created_ts": i.get("created_ts"), "process_started_ts": i.get("process_started_ts"),
+            "ready_ts": i.get("ready_ts"), "destroyed_ts": i.get("destroyed_ts"),
+            "startup_ms": i.get("startup_ms"), "cleanup_ms": i.get("cleanup_ms"),
+            "outcome": outcome, "error": err,
+        })
+        s.info["outcome"] = outcome
+
+    def _verify_clean(self) -> None:
+        with self.tr.start_span("verify_clean", self.span) as sp:
+            self.verify_clean = self.client.verify_clean()
+            clean = bool(self.verify_clean.get("clean"))
+            sp.set(**{"fleetkit.clean": clean})
+            if clean:
+                self.timestamps["verify_clean_pass"] = time.time()
+            else:
+                sp.error("leftovers")
+                self.error = self.error or f"verify-clean failed: {self.verify_clean.get('leftovers')}"
+        self._log("INFO" if clean else "ERROR", "verify-clean " + ("clean" if clean else "NOT clean"),
+                  leftovers=json.dumps(self.verify_clean.get("leftovers", [])))
+
+    # ---- trial.json --------------------------------------------------------------------
+    def _write_trial_json(self, final: bool = False) -> dict:
+        cfg = self.cfg
+        n = cfg.level_n
+        sessions_ready = sum(1 for s in self.sessions if s.ready)
+        sessions_failed = sum(1 for s in self.sessions if s.failed)
+        tasks = [s.task for s in self.sessions if s.task]
+        tasks_ok = sum(1 for t in tasks if t["ok"])
+        by_cat = collections.Counter(t["failure_category"] for t in tasks)
+        by_outcome = collections.Counter()
+        for s in self.sessions:
+            o = s.outcome or ("startup_timeout" if s.failed and "deadline" in s.driver_error else "")
+            if o:
+                by_outcome[o] += 1
+        clean = bool(self.verify_clean and self.verify_clean.get("clean"))
+        complete = final and not self._interrupted
+        level_passed = (complete and len(self.sessions) == n and sessions_ready == n and len(tasks) == n
+                        and tasks_ok == n and clean and self.error is None)
+        if not complete or self.error or not self.sessions or sessions_ready == 0 or not clean:
+            status = "failed"
+        elif sessions_failed or tasks_ok < len(tasks) or len(tasks) < n:
+            status = "degraded"
+        else:
+            status = "ok"
+
+        step_rows: dict[str, list[float]] = collections.defaultdict(list)
+        task_ms, wall_ms, overhead, failed_elapsed, bytes_, reqs = [], [], [], [], [], []
+        for s in self.sessions:
+            if not s.task:
+                continue
+            t = s.task
+            if t["ok"]:
+                # Timing percentiles describe the standard task, so only ok tasks count; a failed
+                # task's task_ms is its elapsed-to-failure (guestd task.py _failure) and is
+                # summarized separately as failed_task_elapsed_ms.
+                if t["task_ms"] is not None:
+                    task_ms.append(t["task_ms"])
+                    overhead.append(t["wall_ms"] - t["task_ms"])
+                wall_ms.append(t["wall_ms"])
+            elif t["task_ms"] is not None:
+                failed_elapsed.append(t["task_ms"])
+        # per-step percentiles come from the rows already appended for this trial
+        try:
+            from .outputs import read_csv
+            for r in read_csv(self.rundir.steps_csv):
+                if r.get("trial_id") == self.trial_id and r.get("duration_ms"):
+                    step_rows[r["name"]].append(float(r["duration_ms"]))
+            for r in read_csv(self.rundir.tasks_csv):
+                if r.get("trial_id") == self.trial_id:
+                    if r.get("bytes_received"):
+                        bytes_.append(float(r["bytes_received"]))
+                    if r.get("request_count"):
+                        reqs.append(float(r["request_count"]))
+        except Exception:
+            pass
+
+        doc = {
+            "run_id": cfg.run_id, "trial_id": self.trial_id, "trace_id": self.span.trace_id if self.span else "",
+            "backend": cfg.backend, "level_n": n, "repeat": cfg.repeat, "fault": cfg.fault,
+            "vcpus": cfg.vcpus, "mem_mib": cfg.mem_mib, "host_id": cfg.host_id,
+            "timeouts": cfg.timeouts.as_dict(),
+            "fixture": {"check_url": cfg.fixture_check_url, "guest_base_url": cfg.guest_fixture_base_url(),
+                        "products_source": self.products_source, "products": len(self.products)},
+            "timestamps": dict(self.timestamps),
+            "counts": {
+                "sessions_requested": n, "sessions_created": len(self.sessions),
+                "sessions_ready": sessions_ready, "sessions_failed_startup": sessions_failed,
+                "sessions_by_outcome": dict(by_outcome),
+                "tasks_dispatched": len(tasks), "tasks_ok": tasks_ok,
+                "tasks_by_failure_category": dict(by_cat),
+            },
+            "actual_concurrency": len(tasks),
+            "status": status, "complete": complete, "phase": self.phase, "level_passed": level_passed,
+            "error": self.error,
+            "verify_clean": self.verify_clean,
+            "percentiles": {
+                "steps": {name: {"n": len(v), "p50": percentile(v, 50), "p95": percentile(v, 95)}
+                          for name, v in step_rows.items()},
+                "task_ms": {"n": len(task_ms), "p50": percentile(task_ms, 50), "p95": percentile(task_ms, 95)},
+                "wall_ms": {"n": len(wall_ms), "p50": percentile(wall_ms, 50), "p95": percentile(wall_ms, 95)},
+                "harness_overhead_ms": summary(overhead),
+                "failed_task_elapsed_ms": summary(failed_elapsed),
+                "startup_ms": summary([to_float(s.info.get("startup_ms")) for s in self.sessions]),
+                "cleanup_ms": summary([to_float(s.info.get("cleanup_ms")) for s in self.sessions]),
+            },
+            "means": {"bytes_received": mean(bytes_), "request_count": mean(reqs)},
+            "sessions": [{
+                "session_id": s.session_id, "slot": s.slot, "address": s.address, "state": s.state,
+                "outcome": s.outcome, "startup_ms": s.info.get("startup_ms"), "cleanup_ms": s.info.get("cleanup_ms"),
+                "ready": s.ready, "failed_startup": s.failed, "state_after_task": s.state_after_task,
+                "error": s.info.get("error"), "driver_error": s.driver_error, "task": s.task,
+            } for s in self.sessions],
+            "written_at": time.time(),
+        }
+        write_json_atomic(self.rundir.trial_json_path(self.trial_id), doc)
+        return doc
+
+
+# ---- categorization ------------------------------------------------------------------------
+
+def categorize(status: int, body, transport_error: str | None) -> tuple[str, str]:
+    """Map a proxied task reply to a failure category from the closed set and an error string."""
+    if transport_error:
+        return "guest_unreachable", f"driver client: {transport_error}"
+    b = body if isinstance(body, dict) else {}
+    cat = b.get("failure_category")
+    err = str(b.get("error") or "")
+    if cat in schemas.FAILURE_CATEGORIES:
+        if cat == "ok" and b.get("ok") is not True:
+            return "assertion_failed", err or "guest reported failure_category ok with ok=false"
+        return cat, err
+    if status == 409:
+        return "session_not_ready", err or "HTTP 409"
+    if status == 0 or status >= 500:
+        return "guest_unreachable", err or f"HTTP {status}: {_short(body)}"
+    return "guest_unreachable", err or f"HTTP {status} with unknown failure_category {cat!r}: {_short(body)}"
+
+
+def _pick(body: dict, *paths):
+    for p in paths:
+        cur = body
+        for part in p.split("."):
+            if not isinstance(cur, dict) or part not in cur:
+                cur = None
+                break
+            cur = cur[part]
+        if cur is not None:
+            return cur
+    return None
+
+
+def _int_or_none(v):
+    try:
+        return None if v is None else int(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _step_ts(ns, guest_clock_ns, clock_offset_ns):
+    """Step timestamps arrive as monotonic offsets from task receipt (guest_clock_ns, realtime).
+    Converted to host Unix seconds with the clock offset. Absolute realtime ns pass through."""
+    n = _int_or_none(ns)
+    if n is None:
+        return None
+    if n > 10**17:  # already absolute realtime nanoseconds
+        return (n + (clock_offset_ns or 0)) / 1e9
+    if guest_clock_ns is None:
+        return None
+    return (guest_clock_ns + n + (clock_offset_ns or 0)) / 1e9
+
+
+def _short(obj, n: int = 160) -> str:
+    s = obj if isinstance(obj, str) else json.dumps(obj, default=str)
+    return s if len(s) <= n else s[:n] + "..."

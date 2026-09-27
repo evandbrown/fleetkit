@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Search - Selftest Shop</title>
+<link rel="stylesheet" href="/style.css">
+<script src="/app.js" defer></script>
+</head>
+<body>
+<header><a href="/">Selftest Shop</a><span>Cart: <span class="badge" data-testid="cart-count">0</span></span></header>
+<main>
+<form action="/search.html" method="get"><input name="q" type="search" autocomplete="off"><button type="submit">Search</button></form>
+<p data-testid="result-count">Searching...</p>
+<ul data-testid="results"></ul>
+</main>
+</body>
+</html>

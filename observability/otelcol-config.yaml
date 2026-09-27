@@ -1,0 +1,104 @@
+# Collector configuration for grafana/otel-lgtm:0.34.0, mounted over /otel-lgtm/otelcol-config.yaml.
+#
+# This is a full override: everything above the "fleetkit additions" markers is copied
+# verbatim from docker/otelcol-config.yaml at tag v0.34.0 of grafana/docker-otel-lgtm,
+# which is byte-identical to the file shipped inside the pinned image (checked with
+# `docker cp`). The additions are the three `file/*` exporters and their appearance in
+# the traces and logs pipelines plus a metrics/file pipeline, so a durable OTLP-JSON copy
+# of everything the harness sends lands in /otlp (bind-mounted from results/lgtm/otlp).
+# The metrics file is fed by the otlp receiver only: the default metrics pipeline also
+# scrapes the collector's own metrics every second, which measured 15.6 KB/s of JSON that
+# no bundle would keep (56 MB an hour). The diff against upstream is in observability/README.md.
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+        cors:
+          allowed_origins:
+            - http://*
+  prometheus/collector:
+    config:
+      scrape_configs:
+        - job_name: "opentelemetry-collector"
+          scrape_interval: 1s
+          static_configs:
+            - targets: ["127.0.0.1:8888"]
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+    path: "/ready"
+
+processors:
+  batch:
+
+exporters:
+  otlp_http/metrics:
+    endpoint: http://127.0.0.1:9090/api/v1/otlp
+    tls:
+      insecure: true
+  otlp_http/traces:
+    endpoint: http://127.0.0.1:4418
+    tls:
+      insecure: true
+  otlp_http/logs:
+    endpoint: http://127.0.0.1:3100/otlp
+    tls:
+      insecure: true
+  otlp_grpc/profiles:
+    endpoint: http://127.0.0.1:4040
+    tls:
+      insecure: true
+  debug/metrics:
+    verbosity: detailed
+  debug/traces:
+    verbosity: detailed
+  debug/logs:
+    verbosity: detailed
+  # --- fleetkit additions: durable OTLP-JSON copies, one Export*ServiceRequest per line.
+  # append: true so a collector restart mid-run never truncates evidence; no rotation, the
+  # files are per stack lifetime and `make clean-lgtm` removes them.
+  file/traces:
+    path: /otlp/traces.jsonl
+    format: json
+    append: true
+    flush_interval: 1s
+  file/metrics:
+    path: /otlp/metrics.jsonl
+    format: json
+    append: true
+    flush_interval: 1s
+  file/logs:
+    path: /otlp/logs.jsonl
+    format: json
+    append: true
+    flush_interval: 1s
+
+service:
+  extensions: [health_check]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp_http/traces, file/traces]          # fleetkit: file/traces appended
+      #exporters: [otlp_http/traces,debug/traces]
+    metrics:
+      receivers: [otlp, prometheus/collector]
+      processors: [batch]
+      exporters: [otlp_http/metrics]
+      #exporters: [otlp_http/metrics,debug/metrics]
+    metrics/file:                                          # fleetkit: durable copy of harness metrics only
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [file/metrics]
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp_http/logs, file/logs]              # fleetkit: file/logs appended
+      #exporters: [otlp_http/logs,debug/logs]
+    profiles:
+      receivers: [otlp]
+      exporters: [otlp_grpc/profiles]

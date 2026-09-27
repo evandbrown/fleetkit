@@ -1,0 +1,60 @@
+# Local observability stack and fixture server (design sections 3 and 8).
+#
+#   make up            starts both services; make up LGTM=0 starts only the fixture
+#   make down          stops them (results/lgtm/ is kept)
+#   make lgtm-check    proves the pipeline: one span in, one line in results/lgtm/otlp/traces.jsonl
+#
+# Images are pinned by digest (images/lock.env carries the same values). The network is
+# named exactly "fleetkit": the host daemon's docker backend attaches session containers to
+# it and guests reach the fixture as http://fixture. On the AWS host the fixture must be
+# published on the bridge address instead: FIXTURE_BIND=10.200.0.1 make up.
+name: fleetkit
+
+services:
+  lgtm:
+    image: grafana/otel-lgtm:0.34.0@sha256:b966ea107831d526d9eb8fe4d2d86c9e5731392fad9dce8296bcf2072031f07c
+    container_name: fleetkit-lgtm
+    labels:
+      fleetkit.role: observability
+    ports:
+      - "127.0.0.1:3000:3000"   # Grafana (anonymous admin, the image default)
+      - "127.0.0.1:4317:4317"   # OTLP/gRPC
+      - "127.0.0.1:4318:4318"   # OTLP/HTTP, what the driver and host daemon use
+    mem_limit: 2g
+    stop_grace_period: 60s
+    environment:
+      ENABLE_LOGS_OTELCOL: "true"   # collector logs in `docker compose logs lgtm` (the others stay quiet)
+    volumes:
+      - ../results/lgtm/data:/data                                   # Grafana, Loki, Tempo, Prometheus state
+      - ../results/lgtm/otlp:/otlp                                   # file exporters: traces/metrics/logs.jsonl
+      - ./otelcol-config.yaml:/otel-lgtm/otelcol-config.yaml:ro      # full override of the collector config
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/ready"]   # written by run-all.sh once every component answers
+      interval: 5s
+      timeout: 3s
+      retries: 36
+      start_period: 15s
+    networks:
+      - fleetkit
+
+  fixture:
+    image: nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de
+    container_name: fleetkit-fixture
+    labels:
+      fleetkit.role: fixture
+    ports:
+      - "${FIXTURE_BIND:-127.0.0.1}:8081:80"
+    volumes:
+      - ../fixture/dist:/usr/share/nginx/html:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 2s
+    networks:
+      - fleetkit
+
+networks:
+  fleetkit:
+    name: fleetkit

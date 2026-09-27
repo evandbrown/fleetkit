@@ -1,0 +1,4 @@
+# Shared telemetry package for the host daemon and the driver (installed into harness/.venv).
+opentelemetry-sdk==1.45.0
+opentelemetry-exporter-otlp-proto-http==1.45.0
+pytest>=8

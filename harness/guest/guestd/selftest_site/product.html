@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{{title}} - Selftest Shop</title>
+<link rel="stylesheet" href="/style.css">
+<script src="/app.js" defer></script>
+</head>
+<body>
+<header><a href="/">Selftest Shop</a><span>Cart: <span class="badge" data-testid="cart-count">0</span></span></header>
+<main>
+<h1 data-testid="product-title">{{title}}</h1>
+<p>{{blurb}}</p>
+<p>Price: {{price}}</p>
+<button data-testid="add-to-cart" data-product-id="{{id}}" data-title="{{title}}">Add to cart</button>
+<div data-testid="added" hidden>Added to cart.</div>
+<p><a href="/cart.html">View cart</a></p>
+</main>
+</body>
+</html>

@@ -1,0 +1,12 @@
+body { font: 16px/1.4 Liberation Sans, Arial, sans-serif; margin: 0; color: #222; background: #fafafa; }
+header { display: flex; justify-content: space-between; padding: 12px 24px; background: #234; color: #fff; }
+header a { color: #fff; text-decoration: none; font-weight: bold; }
+main { max-width: 800px; margin: 24px auto; padding: 0 16px; }
+form { display: flex; gap: 8px; }
+input[name=q] { flex: 1; padding: 8px; font-size: 16px; }
+button { padding: 8px 16px; font-size: 16px; cursor: pointer; }
+ul { list-style: none; padding: 0; }
+li[data-testid=result] { padding: 12px; border: 1px solid #ddd; margin-bottom: 8px; background: #fff; }
+li[data-testid=result] a { color: #135; }
+[data-testid=added] { margin-top: 12px; padding: 8px; background: #dfd; border: 1px solid #6a6; }
+.badge { background: #e63; color: #fff; border-radius: 12px; padding: 0 8px; }

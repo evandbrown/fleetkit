@@ -1,0 +1,4 @@
+# Build and test residue of the editable install and pytest.
+fleetkit_telemetry.egg-info/
+.pytest_cache/
+__pycache__/

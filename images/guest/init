@@ -1,0 +1,74 @@
+#!/bin/sh
+# fleetkit guest init (docs/harness-design.md, section 2).
+#
+# Runs as pid 1 inside a Firecracker microVM on a read-only root filesystem. It does the
+# minimum, writes a marker to the console after every step, and drops to a shell on the
+# console if anything fails, so a dead boot can be read from its console log.
+# Network setup is the kernel's job (ip= on the command line); the resolver it learned
+# is published in /proc/net/pnp and copied to /run/resolv.conf, where
+# /etc/resolv.conf points (a symlink patched in by build-rootfs.sh).
+
+CONSOLE=/dev/console
+
+say() {
+    # The console may not be usable before devtmpfs is mounted; fall back to stdout.
+    echo "fleetkit-init: $*" > "$CONSOLE" 2>/dev/null || echo "fleetkit-init: $*"
+}
+
+fail() {
+    say "FAILED: $*"
+    say "dropping to a shell on the console"
+    exec /bin/sh < "$CONSOLE" > "$CONSOLE" 2>&1
+}
+
+# CONFIG_DEVTMPFS_MOUNT=y already mounts /dev before we run; this is harmless if so.
+mount -t devtmpfs devtmpfs /dev 2>/dev/null
+say "devtmpfs ok"
+
+mount -t proc proc /proc || fail "mount /proc"
+say "proc ok"
+
+mount -t sysfs sysfs /sys || fail "mount /sys"
+say "sysfs ok"
+
+# The mount points are created here, not in the image, because /dev is devtmpfs.
+mkdir -p /dev/pts /dev/shm || fail "mkdir /dev/pts /dev/shm"
+mount -t devpts -o gid=5,mode=620,ptmxmode=666 devpts /dev/pts || fail "mount /dev/pts"
+say "devpts ok"
+
+mount -t tmpfs -o mode=1777,nosuid,nodev tmpfs /dev/shm || fail "mount /dev/shm"
+mount -t tmpfs -o mode=755,nosuid,nodev tmpfs /run || fail "mount /run"
+mount -t tmpfs -o mode=1777,nosuid,nodev tmpfs /tmp || fail "mount /tmp"
+say "tmpfs ok"
+
+# The kernel's ip= autoconfiguration exposes the resolver here.
+if [ -r /proc/net/pnp ]; then
+    cp /proc/net/pnp /run/resolv.conf || fail "cp /proc/net/pnp"
+    say "resolv.conf ok"
+else
+    : > /run/resolv.conf
+    say "resolv.conf empty (no /proc/net/pnp)"
+fi
+
+# Faults are pushed by the host on the kernel command line: fleetkit.fault=<name>.
+FLEETKIT_FAULT=""
+if [ -r /proc/cmdline ]; then
+    for word in $(cat /proc/cmdline); do
+        case "$word" in
+            fleetkit.fault=*) FLEETKIT_FAULT="${word#fleetkit.fault=}" ;;
+        esac
+    done
+fi
+export FLEETKIT_FAULT
+say "fault='${FLEETKIT_FAULT}'"
+
+# The kernel sets the hostname from ip=...:<hostname>:...; keep it, or name the VM.
+[ -n "$(hostname 2>/dev/null)" ] || hostname fleetkit-guest 2>/dev/null
+
+export HOME=/tmp
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PYTHONUNBUFFERED=1
+export LANG=C.UTF-8
+
+say "starting guestd"
+exec /usr/bin/tini -g -- python3 -m guestd
