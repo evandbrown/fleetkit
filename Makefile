@@ -7,13 +7,13 @@
 #   make rootfs       pack guest.ext4 (Linux host only; prints a skip on macOS)
 #   make fixture      build the static shopping site into fixture/dist
 #   make up           observability stack + fixture (LGTM=0: fixture only)
-#   make down         stop them (results/lgtm is kept)
-#   make lgtm-check   send one span, expect it in results/lgtm/otlp/traces.jsonl, ping Grafana
+#   make down         stop them (results/dev/lgtm is kept)
+#   make lgtm-check   send one span, expect it in results/dev/lgtm/otlp/traces.jsonl, ping Grafana
 #   make hostd        run the host daemon in the foreground on :8090
 #   make host-setup   set up an AWS experiment host (Linux, as root; prints a skip on macOS)
 #   make smoke        driver smoke suite against BACKEND (docker by default)
 #   make clean        build outputs, caches, stray session containers
-#   make distclean    clean + venv + results/lgtm
+#   make distclean    clean + venv + results/dev/lgtm
 
 SHELL := /bin/bash
 .DEFAULT_GOAL := help
@@ -40,7 +40,7 @@ export PYTHONPATH := $(ROOT)/harness/host:$(ROOT)/harness/driver:$(ROOT)/harness
 GUEST_IMAGE ?= fleetkit-guest:dev
 BACKEND ?= docker
 RUN_ID ?= $(shell date -u +%Y%m%dT%H%M%SZ)
-RESULTS ?= results
+RESULTS ?= results/dev
 LGTM ?= 1
 export FIXTURE_BIND ?= 127.0.0.1
 HOSTD_ARGS ?=
@@ -112,14 +112,14 @@ else
 endif
 	@echo "fixture: http://$(FIXTURE_BIND):8081  grafana: http://127.0.0.1:3000  otlp: http://127.0.0.1:4318"
 
-down: ## stop the observability stack and the fixture (results/lgtm is kept)
+down: ## stop the observability stack and the fixture (results/dev/lgtm is kept)
 ifeq ($(HAVE_COMPOSE),1)
 	$(COMPOSE) down --remove-orphans
 else
 	observability/run-plain.sh down
 endif
 
-lgtm-check: ## prove the pipeline: one span in, a line in results/lgtm/otlp/traces.jsonl, Grafana up
+lgtm-check: ## prove the pipeline: one span in, a line in results/dev/lgtm/otlp/traces.jsonl, Grafana up
 	$(PYTHON3) observability/check.py --otlp-dir $(RESULTS)/lgtm/otlp
 
 # --- run ---------------------------------------------------------------------------------
@@ -144,7 +144,7 @@ clean: ## remove build outputs, caches and any leftover session containers
 	find . -path ./$(VENV) -prune -o \( -name __pycache__ -o -name .pytest_cache -o -name '*.egg-info' \) -type d -print0 | xargs -0 rm -rf
 	@ids=$$(docker ps -aq -f label=fleetkit.role=session 2>/dev/null); if [ -n "$$ids" ]; then docker rm -f $$ids; fi
 
-clean-lgtm: down ## remove the observability stack's state and OTLP files under results/lgtm
+clean-lgtm: down ## remove the observability stack's state and OTLP files under results/dev/lgtm
 	rm -rf $(RESULTS)/lgtm
 
 distclean: clean clean-lgtm ## clean plus the venv

@@ -19,13 +19,13 @@ want_lgtm=1
 case "$cmd" in
   up)
     docker network inspect fleetkit >/dev/null 2>&1 || docker network create fleetkit >/dev/null
-    mkdir -p "$root/results/lgtm/data" "$root/results/lgtm/otlp"
+    mkdir -p "$root/results/dev/lgtm/data" "$root/results/dev/lgtm/otlp"
     if [[ $want_lgtm -eq 1 ]] && ! docker ps -q -f name='^fleetkit-lgtm$' | grep -q .; then
       docker rm -f fleetkit-lgtm >/dev/null 2>&1 || true
       docker run -d --name fleetkit-lgtm --label fleetkit.role=observability --network fleetkit \
         -p 127.0.0.1:3000:3000 -p 127.0.0.1:4317:4317 -p 127.0.0.1:4318:4318 \
         --memory 2g --stop-timeout 60 -e ENABLE_LOGS_OTELCOL=true \
-        -v "$root/results/lgtm/data:/data" -v "$root/results/lgtm/otlp:/otlp" \
+        -v "$root/results/dev/lgtm/data:/data" -v "$root/results/dev/lgtm/otlp:/otlp" \
         -v "$here/otelcol-config.yaml:/otel-lgtm/otelcol-config.yaml:ro" \
         "$LGTM_IMAGE" >/dev/null
       echo "started fleetkit-lgtm"

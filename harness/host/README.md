@@ -3,7 +3,7 @@
 One per host. Owns session lifecycle for two backends, enforces lifetime and idle timeouts, proxies tasks to the guest daemon, samples host and per-session resources, and is the telemetry hub for everything the guest reports. The contract is [docs/harness-design.md](../../docs/harness-design.md), sections 3, 4, 6 and 8.
 
 ```
-python3 -m hostd --backend docker|firecracker [--port 8090] [--log-dir results/hostd] [--host-id <id>] [--metrics-period 1.0] [--dry-run]
+python3 -m hostd --backend docker|firecracker [--port 8090] [--log-dir results/dev/hostd] [--host-id <id>] [--metrics-period 1.0] [--dry-run]
 make hostd                      # the same, from the repo root, in harness/.venv
 python3 -m hostd --backend firecracker --render --slot 3 --fault hang_task   # print one session's plan
 ```
@@ -49,7 +49,7 @@ Slot allocation is lowest-free. On the docker backend a candidate slot's host po
 
 ## Telemetry and evidence
 
-Under `--log-dir` (default `results/hostd`): `hostd.log` (human-readable), `logs.jsonl`, `spans.jsonl`, `host_metrics.jsonl`, and `sessions/<id>/console.log` (plus `firecracker.log` for VMs). Spans: `session.create` (parent: the caller's `traceparent`), `session.destroy`, `task.proxy`, and, under service `guest-daemon`, `guest.task` and `step.<name>` reconstructed from the guest's `guest_clock_ns` and step offsets after `clock_offset_ns = host_send_ns + rtt/2 - guest_clock_ns`, where `rtt` is that of a `/health` probe made just before the task rather than the task call itself. The guest's `log_tail` is forwarded as `guest-daemon` log records under the task's trace. Every record carries `fleetkit.run_id`, `trial_id`, `session_id`, `task_id`, `backend`, `host_id` where known.
+Under `--log-dir` (default `results/dev/hostd`): `hostd.log` (human-readable), `logs.jsonl`, `spans.jsonl`, `host_metrics.jsonl`, and `sessions/<id>/console.log` (plus `firecracker.log` for VMs). Spans: `session.create` (parent: the caller's `traceparent`), `session.destroy`, `task.proxy`, and, under service `guest-daemon`, `guest.task` and `step.<name>` reconstructed from the guest's `guest_clock_ns` and step offsets after `clock_offset_ns = host_send_ns + rtt/2 - guest_clock_ns`, where `rtt` is that of a `/health` probe made just before the task rather than the task call itself. The guest's `log_tail` is forwarded as `guest-daemon` log records under the task's trace. Every record carries `fleetkit.run_id`, `trial_id`, `session_id`, `task_id`, `backend`, `host_id` where known.
 
 OTLP/HTTP export (JSON encoding, `/v1/traces`, `/v1/logs`, `/v1/metrics`) goes to `--otlp-endpoint` (default `http://127.0.0.1:4318` or `OTEL_EXPORTER_OTLP_ENDPOINT`), best-effort with a two-second timeout and exponential back-off while the collector is away; `--no-otlp` disables it. The JSONL files are the durable copy and are written regardless. The driver copies the lines carrying its run id into the bundle.
 

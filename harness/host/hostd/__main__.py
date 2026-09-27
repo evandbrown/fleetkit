@@ -25,7 +25,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--backend", choices=sorted(BACKENDS), required=True)
     p.add_argument("--port", type=int, default=8090)
     p.add_argument("--bind", default="127.0.0.1", help="listen address (default 127.0.0.1)")
-    p.add_argument("--log-dir", default=os.environ.get("FLEETKIT_HOSTD_LOG_DIR", "results/hostd"),
+    p.add_argument("--log-dir", default=os.environ.get("FLEETKIT_HOSTD_LOG_DIR", "results/dev/hostd"),
                    help="hostd.log, spans.jsonl, logs.jsonl, host_metrics.jsonl and sessions/<id>/console.log")
     p.add_argument("--otlp-endpoint", default=os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:4318"),
                    help="OTLP/HTTP base URL; export is best-effort with a 2 s timeout")

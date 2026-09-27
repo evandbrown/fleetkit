@@ -8,14 +8,14 @@ with a two-second timeout (`--no-lgtm` on the driver, `--no-otlp` on the host da
 
 ```
 make up                 # both services, waits for health;   make up LGTM=0   fixture only
-make lgtm-check         # one span in -> results/lgtm/otlp/traces.jsonl, Grafana /api/health
-make down               # stop; results/lgtm/ is kept
-make clean-lgtm         # stop and delete results/lgtm/
+make lgtm-check         # one span in -> results/dev/lgtm/otlp/traces.jsonl, Grafana /api/health
+make down               # stop; results/dev/lgtm/ is kept
+make clean-lgtm         # stop and delete results/dev/lgtm/
 ```
 
 | Service | Container | Published | Mounts |
 |---|---|---|---|
-| `lgtm` | `fleetkit-lgtm` (label `fleetkit.role=observability`) | `127.0.0.1:3000` Grafana, `127.0.0.1:4317` OTLP/gRPC, `127.0.0.1:4318` OTLP/HTTP | `results/lgtm/data:/data` (all backends' state), `results/lgtm/otlp:/otlp` (file exporters), `otelcol-config.yaml:/otel-lgtm/otelcol-config.yaml:ro` |
+| `lgtm` | `fleetkit-lgtm` (label `fleetkit.role=observability`) | `127.0.0.1:3000` Grafana, `127.0.0.1:4317` OTLP/gRPC, `127.0.0.1:4318` OTLP/HTTP | `results/dev/lgtm/data:/data` (all backends' state), `results/dev/lgtm/otlp:/otlp` (file exporters), `otelcol-config.yaml:/otel-lgtm/otelcol-config.yaml:ro` |
 | `fixture` | `fleetkit-fixture` (label `fleetkit.role=fixture`) | `127.0.0.1:8081` (`FIXTURE_BIND=10.200.0.1` on the AWS host, the bridge address) | `fixture/dist:/usr/share/nginx/html:ro` |
 
 `mem_limit: 2g` and `stop_grace_period: 60s` on the LGTM container; its health is the
@@ -31,7 +31,7 @@ The image starts `otelcol-contrib` with `--config=file:./otelcol-config.yaml` fr
 `otelcol-config.yaml` is a full override: a verbatim copy of `docker/otelcol-config.yaml` at
 tag `v0.34.0` of `grafana/docker-otel-lgtm` (the file in the image is byte-identical; checked
 with `docker cp`), plus file exporters so a durable OTLP-JSON copy of what the collector
-receives lands in `results/lgtm/otlp/{traces,metrics,logs}.jsonl`:
+receives lands in `results/dev/lgtm/otlp/{traces,metrics,logs}.jsonl`:
 
 ```diff
  exporters:
@@ -87,7 +87,7 @@ docker run --rm -v "$PWD/observability/otelcol-config.yaml:/cfg.yaml:ro" \
 
 ## File format and bundling
 
-Each line of `results/lgtm/otlp/*.jsonl` is one `Export{Trace,Metrics,Logs}ServiceRequest`
+Each line of `results/dev/lgtm/otlp/*.jsonl` is one `Export{Trace,Metrics,Logs}ServiceRequest`
 in OTLP-JSON (camelCase, hex `traceId`/`spanId`, uint64 nanosecond timestamps as strings).
 The collector batches, so one line can hold spans from several requests. The components'
 own `spans.jsonl`/`logs.jsonl` written by `fleetkit_telemetry` use the same encoding with one
@@ -99,11 +99,11 @@ Snapshotting `/data` for the bundle, as the design describes:
 
 ```
 docker compose -f observability/compose.yaml stop lgtm       # honours the 60 s grace period
-tar -C results/lgtm -czf results/<run-id>/lgtm-data.tgz data
+tar -C results/dev/lgtm -czf results/<run-id>/lgtm-data.tgz data
 docker compose -f observability/compose.yaml start lgtm
 ```
 
-Re-mount: extract into an empty `results/lgtm/data` and `make up`.
+Re-mount: extract into an empty `results/dev/lgtm/data` and `make up`.
 
 ## On AWS: the support host
 

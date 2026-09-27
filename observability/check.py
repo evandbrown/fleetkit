@@ -4,7 +4,7 @@
 Sends one span as OTLP-JSON to the collector's HTTP receiver, then waits for it to show up
 in the file exporter's traces.jsonl and checks that Grafana answers. Exit 0 on success.
 
-    python3 observability/check.py [--endpoint http://127.0.0.1:4318] [--otlp-dir results/lgtm/otlp]
+    python3 observability/check.py [--endpoint http://127.0.0.1:4318] [--otlp-dir results/dev/lgtm/otlp]
                                    [--grafana http://127.0.0.1:3000] [--timeout 30]
 """
 from __future__ import annotations
@@ -21,7 +21,7 @@ import urllib.request
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     parser.add_argument("--endpoint", default=os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:4318"))
-    parser.add_argument("--otlp-dir", default="results/lgtm/otlp")
+    parser.add_argument("--otlp-dir", default="results/dev/lgtm/otlp")
     parser.add_argument("--grafana", default="http://127.0.0.1:3000")
     parser.add_argument("--timeout", type=float, default=30.0)
     args = parser.parse_args()

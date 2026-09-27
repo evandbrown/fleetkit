@@ -5,7 +5,7 @@
 # which is byte-identical to the file shipped inside the pinned image (checked with
 # `docker cp`). The additions are the three `file/*` exporters and their appearance in
 # the traces and logs pipelines plus a metrics/file pipeline, so a durable OTLP-JSON copy
-# of everything the harness sends lands in /otlp (bind-mounted from results/lgtm/otlp).
+# of everything the harness sends lands in /otlp (bind-mounted from results/dev/lgtm/otlp).
 # The metrics file is fed by the otlp receiver only: the default metrics pipeline also
 # scrapes the collector's own metrics every second, which measured 15.6 KB/s of JSON that
 # no bundle would keep (56 MB an hour). The diff against upstream is in observability/README.md.

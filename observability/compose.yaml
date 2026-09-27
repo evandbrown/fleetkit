@@ -1,8 +1,8 @@
 # Local observability stack and fixture server (design sections 3 and 8).
 #
 #   make up            starts both services; make up LGTM=0 starts only the fixture
-#   make down          stops them (results/lgtm/ is kept)
-#   make lgtm-check    proves the pipeline: one span in, one line in results/lgtm/otlp/traces.jsonl
+#   make down          stops them (results/dev/lgtm/ is kept)
+#   make lgtm-check    proves the pipeline: one span in, one line in results/dev/lgtm/otlp/traces.jsonl
 #
 # Images are pinned by digest (images/lock.env carries the same values). The network is
 # named exactly "fleetkit": the host daemon's docker backend attaches session containers to
@@ -25,8 +25,8 @@ services:
     environment:
       ENABLE_LOGS_OTELCOL: "true"   # collector logs in `docker compose logs lgtm` (the others stay quiet)
     volumes:
-      - ../results/lgtm/data:/data                                   # Grafana, Loki, Tempo, Prometheus state
-      - ../results/lgtm/otlp:/otlp                                   # file exporters: traces/metrics/logs.jsonl
+      - ../results/dev/lgtm/data:/data                                   # Grafana, Loki, Tempo, Prometheus state
+      - ../results/dev/lgtm/otlp:/otlp                                   # file exporters: traces/metrics/logs.jsonl
       - ./otelcol-config.yaml:/otel-lgtm/otelcol-config.yaml:ro      # full override of the collector config
     healthcheck:
       test: ["CMD", "test", "-f", "/tmp/ready"]   # written by run-all.sh once every component answers
