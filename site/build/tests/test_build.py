@@ -38,8 +38,11 @@ def read(root, *p):
 def test_index_lists_the_catalog_and_features_the_newest_complete_campaign(data):
     index = read(data, "index.json")
     assert index["schema"] == "fleetkit-site-data/2"
-    assert index["featured"] == "cap-baseline-1"
-    assert [c["id"] for c in index["campaigns"]] == ["cap-baseline-1"]
+    ids = [c["id"] for c in index["campaigns"]]
+    assert "cap-baseline-1" in ids
+    complete = [c for c in index["campaigns"] if c.get("status") == "complete"]
+    newest = max(complete, key=lambda c: c.get("started") or "")["id"]
+    assert index["featured"] == newest          # no "featured" in the catalog: the newest complete (D58)
     assert not any(c.get("synthetic") for c in index["campaigns"])
 
 
@@ -83,10 +86,11 @@ def test_a_trial_document(data):
 
 @needs_results
 def test_every_screenshot_is_published_once_in_both_sizes(data):
-    run = read(data, "campaigns/cap-baseline-1/runs/baseline-r1.json")
-    shas = {s for s in run["tasks"]["img"] if s}
-    for f in (data / "campaigns/cap-baseline-1/runs/baseline-r1").glob("*.json"):
-        shas |= {fr["img"] for fr in json.loads(f.read_text()).get("filmstrip", {}).get("frames", [])}
+    shas = set()
+    for run_doc in (data / "campaigns").glob("*/runs/*.json"):
+        shas |= {s for s in json.loads(run_doc.read_text())["tasks"]["img"] if s}
+        for f in run_doc.with_suffix("").glob("*.json"):
+            shas |= {fr["img"] for fr in json.loads(f.read_text()).get("filmstrip", {}).get("frames", [])}
     files = {p.name for p in (data / "img").iterdir()}
     assert files == {f"{s}.{k}.webp" for s in shas for k in ("t", "f")}
 

@@ -331,12 +331,16 @@ def test_outside_causes():
     assert outside_cause(_doc(), health_after={"uptime_s": 300.0}, trial_s=40.0) is None
     assert outside_cause(_doc(), support={"problems": ["a", "b"]}) == "support host: a; b"
     assert outside_cause(_doc(), support={"problems": []}) is None
+    changed = {"microvm_id": "s007", "task": {"error": "http://10.42.0.15:8081/: net::ERR_NETWORK_CHANGED",
+                                                "failure_category": "navigation_error"}}
+    assert outside_cause(_doc(microvms=[changed])) == "guest network: changed under a navigation in microVM s007"
 
 
 def test_what_the_experiment_itself_causes_is_a_result():
     # leftovers on the worker host, a slow task, a guest that stopped answering, a client timeout
     assert outside_cause(_doc(error="verify-clean failed: ['tap7']",
                               verify_clean={"clean": False, "leftovers": ["tap7"]})) is None
-    for err in ("", "step search timed out", "guest unreachable: 502", "driver client: timed out"):
+    for err in ("", "step search timed out", "guest unreachable: 502", "driver client: timed out",
+                "http://10.42.0.15:8081/: net::ERR_TIMED_OUT"):
         m = {"microvm_id": "a", "task": {"error": err, "failure_category": "step_timeout"}}
         assert outside_cause(_doc(microvms=[m])) is None

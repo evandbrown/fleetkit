@@ -7,7 +7,11 @@ A trial is clean unless something the spec doesn't test got in its way:
   during the trial), or the driver itself raised;
 * the support host reported its fixture unhealthy or itself overloaded during the trial,
   measured on the support host (experiments/launcher/support_health.py), not from the worker
-  host, whose own load is what the experiment measures.
+  host, whose own load is what the experiment measures;
+* Chromium in a microVM reported that the guest's network changed under a navigation
+  (``net::ERR_NETWORK_CHANGED``): the guest's network setup moved, which load doesn't cause.
+  Seen once in nested-hv-1 (Cloud Hypervisor, 230 ms into a home step). Other navigation
+  errors, such as timeouts, stay results.
 
 A trial that isn't clean is not a result: the driver sets it aside (``ops/set-aside/``) and runs
 it again once. If that isn't clean either, the density is not tested and the run goes no higher.
@@ -49,6 +53,8 @@ def outside_cause(doc: dict | None, *, harness_error: str | None = None, trial_s
         e = str(task.get("error") or "")
         if e.startswith("driver client:") and _NO_ANSWER.search(e):
             return f"host daemon: no answer to a task request ({e[len('driver client:'):].strip()})"
+        if "net::ERR_NETWORK_CHANGED" in e:
+            return f"guest network: changed under a navigation in microVM {m.get('microvm_id', '?')}"
     if health_error:
         return f"host daemon: no answer after the trial ({health_error})"
     up = (health_after or {}).get("uptime_s")
