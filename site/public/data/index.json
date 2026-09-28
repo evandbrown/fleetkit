@@ -1,7 +1,273 @@
 {
   "schema": "fleetkit-site-data/2",
-  "featured": "nested-sizes-1",
+  "featured": "nested-mem-1",
   "campaigns": [
+    {
+      "id": "nested-mem-1",
+      "title": "Host memory",
+      "question": "With 4 GiB microVMs, does half the host memory lower density?",
+      "started": "2026-09-28T01:13Z",
+      "status": "complete",
+      "replicas": 2,
+      "specs": [
+        {
+          "name": "m8i-4xlarge",
+          "label": "m8i.4xlarge"
+        },
+        {
+          "name": "c8i-4xlarge",
+          "label": "c8i.4xlarge"
+        }
+      ],
+      "runs": 4,
+      "outcomes": [
+        {
+          "spec": "m8i-4xlarge",
+          "replicas": [
+            {
+              "run": "m8i-4xlarge-r1",
+              "host_vcpus": 16,
+              "tested_successfully": 9,
+              "first_failed": 10,
+              "stopped_early": false,
+              "per_host_vcpu": 0.5625,
+              "midpoint_per_host_vcpu": 0.5938,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0619,
+                  0.0692
+                ],
+                "observed": [
+                  0.193,
+                  0.1976
+                ]
+              }
+            },
+            {
+              "run": "m8i-4xlarge-r2",
+              "host_vcpus": 16,
+              "tested_successfully": 8,
+              "first_failed": 9,
+              "stopped_early": false,
+              "per_host_vcpu": 0.5,
+              "midpoint_per_host_vcpu": 0.5312,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0621,
+                  0.0648
+                ],
+                "observed": [
+                  0.1933,
+                  0.1967
+                ]
+              }
+            }
+          ],
+          "midpoint_per_host_vcpu": 0.5625
+        },
+        {
+          "spec": "c8i-4xlarge",
+          "replicas": [
+            {
+              "run": "c8i-4xlarge-r1",
+              "host_vcpus": 16,
+              "tested_successfully": 9,
+              "first_failed": 10,
+              "stopped_early": false,
+              "per_host_vcpu": 0.5625,
+              "midpoint_per_host_vcpu": 0.5938,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0596,
+                  0.0624
+                ],
+                "observed": [
+                  0.1734,
+                  0.175
+                ]
+              }
+            },
+            {
+              "run": "c8i-4xlarge-r2",
+              "host_vcpus": 16,
+              "tested_successfully": 9,
+              "first_failed": 10,
+              "stopped_early": false,
+              "per_host_vcpu": 0.5625,
+              "midpoint_per_host_vcpu": 0.5938,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.055,
+                  0.0627
+                ],
+                "observed": [
+                  0.1719,
+                  0.1765
+                ]
+              }
+            }
+          ],
+          "midpoint_per_host_vcpu": 0.5938
+        }
+      ]
+    },
+    {
+      "id": "nested-hv-1",
+      "title": "Hypervisor",
+      "question": "Does Cloud Hypervisor fit as many microVMs as Firecracker?",
+      "started": "2026-09-28T01:13Z",
+      "status": "complete",
+      "replicas": 2,
+      "specs": [
+        {
+          "name": "firecracker",
+          "label": "Firecracker, pci, random-number device"
+        },
+        {
+          "name": "cloud-hypervisor",
+          "label": "Cloud Hypervisor, pci, random-number device"
+        },
+        {
+          "name": "firecracker-mmio",
+          "label": "Firecracker, mmio, no random-number device"
+        }
+      ],
+      "runs": 6,
+      "outcomes": [
+        {
+          "spec": "firecracker",
+          "replicas": [
+            {
+              "run": "firecracker-r1",
+              "host_vcpus": 16,
+              "tested_successfully": 9,
+              "first_failed": 10,
+              "stopped_early": false,
+              "per_host_vcpu": 0.5625,
+              "midpoint_per_host_vcpu": 0.5938,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0643,
+                  0.0706
+                ],
+                "observed": [
+                  0.1853,
+                  0.1884
+                ]
+              }
+            },
+            {
+              "run": "firecracker-r2",
+              "host_vcpus": 16,
+              "tested_successfully": 9,
+              "first_failed": 10,
+              "stopped_early": false,
+              "per_host_vcpu": 0.5625,
+              "midpoint_per_host_vcpu": 0.5938,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0663,
+                  0.0688
+                ],
+                "observed": [
+                  0.1795,
+                  0.1821
+                ]
+              }
+            }
+          ],
+          "midpoint_per_host_vcpu": 0.5938
+        },
+        {
+          "spec": "cloud-hypervisor",
+          "replicas": [
+            {
+              "run": "cloud-hypervisor-r1",
+              "host_vcpus": 16,
+              "tested_successfully": 9,
+              "first_failed": 10,
+              "stopped_early": false,
+              "per_host_vcpu": 0.5625,
+              "midpoint_per_host_vcpu": 0.5938,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0673,
+                  0.0714
+                ],
+                "observed": [
+                  0.1686,
+                  0.1746
+                ]
+              }
+            },
+            {
+              "run": "cloud-hypervisor-r2",
+              "host_vcpus": 16,
+              "tested_successfully": 9,
+              "first_failed": 10,
+              "stopped_early": false,
+              "per_host_vcpu": 0.5625,
+              "midpoint_per_host_vcpu": 0.5938,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0667,
+                  0.0709
+                ],
+                "observed": [
+                  0.1683,
+                  0.1708
+                ]
+              }
+            }
+          ],
+          "midpoint_per_host_vcpu": 0.5938
+        },
+        {
+          "spec": "firecracker-mmio",
+          "replicas": [
+            {
+              "run": "firecracker-mmio-r1",
+              "host_vcpus": 16,
+              "tested_successfully": 8,
+              "first_failed": 9,
+              "stopped_early": false,
+              "per_host_vcpu": 0.5,
+              "midpoint_per_host_vcpu": 0.5312,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0643,
+                  0.0651
+                ],
+                "observed": [
+                  0.184,
+                  0.1855
+                ]
+              }
+            },
+            {
+              "run": "firecracker-mmio-r2",
+              "host_vcpus": 16,
+              "tested_successfully": 9,
+              "first_failed": 10,
+              "stopped_early": false,
+              "per_host_vcpu": 0.5625,
+              "midpoint_per_host_vcpu": 0.5938,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.064,
+                  0.0697
+                ],
+                "observed": [
+                  0.1833,
+                  0.1881
+                ]
+              }
+            }
+          ],
+          "midpoint_per_host_vcpu": 0.5625
+        }
+      ]
+    },
     {
       "id": "nested-sizes-1",
       "title": "Host size",

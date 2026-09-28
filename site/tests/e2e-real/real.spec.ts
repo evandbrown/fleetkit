@@ -27,16 +27,16 @@ for (const e of index.campaigns) {
     const run = (density: number | null) => `./${href({ name: 'run', campaign: c.id, run: r.id, density })}`;
     const trial = (t: string, microvm: number | null = null) => `./${href({ name: 'trial', campaign: c.id, run: r.id, trial: t, microvm })}`;
     // A run page is titled by its spec (and replica), as the campaign labels it: checked below for cap-baseline-1.
-    ROUTES.push({ name: `run-${r.id}`, path: run(null), ready: 'What limited it' });
+    ROUTES.push({ name: `run-${c.id}-${r.id}`, path: run(null), ready: 'What limited it' });
     for (const d of r.by_density) {
       if (d.result === 'not_tested') continue;
-      ROUTES.push({ name: `run-${r.id}-density-${d.density}`, path: run(d.density), ready: 'Densities' });
+      ROUTES.push({ name: `run-${c.id}-${r.id}-density-${d.density}`, path: run(d.density), ready: 'Densities' });
     }
     for (const t of r.trials) {
-      ROUTES.push({ name: `trial-${r.id}-${t.id}`, path: trial(t.id), ready: 'Final screens' });
+      ROUTES.push({ name: `trial-${c.id}-${r.id}-${t.id}`, path: trial(t.id), ready: 'Final screens' });
     }
     const last = r.trials.filter((t) => t.counts).at(-1);
-    if (last) ROUTES.push({ name: `trial-${r.id}-${last.id}-microvm-3`, path: trial(last.id, 3), ready: 'Final screens' });
+    if (last) ROUTES.push({ name: `trial-${c.id}-${r.id}-${last.id}-microvm-3`, path: trial(last.id, 3), ready: 'Final screens' });
   }
 }
 ROUTES.push(

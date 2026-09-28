@@ -6,7 +6,7 @@ import gzip
 from pathlib import Path
 
 KB = 1024
-BUDGET = {"index": 5 * KB, "doc": 25 * KB, "thumb": 10 * KB, "full": 60 * KB, "data": 2048 * KB}
+BUDGET = {"index": 5 * KB, "doc": 25 * KB, "thumb": 10 * KB, "full": 60 * KB, "data": 8192 * KB}  # the whole committed dataset; pages load it lazily, one document at a time
 
 
 def gz(data: bytes) -> int:

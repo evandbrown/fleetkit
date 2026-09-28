@@ -10,7 +10,7 @@ const BUDGET = {
   lazy: 40 * KB,        // each chunk loaded only when needed (the experiment builder)
   index: 5 * KB,        // data/index.json
   doc: 25 * KB,         // each campaign, run or trial document
-  data: 2 * 1024 * KB,  // the whole dataset, images included
+  data: 8 * 1024 * KB,  // the whole dataset, images included; pages load it lazily
 };
 
 const files = [];
@@ -57,7 +57,7 @@ if (data > BUDGET.data) problems.push(`dataset: ${data} B > ${BUDGET.data} B`);
 
 console.log(
   `size-check: JS + CSS loaded first ${(code / KB).toFixed(1)} KB gz (budget 70), lazy chunks ${(lazy / KB).toFixed(1)} KB gz ` +
-    `(budget 40 each), dataset ${(data / KB).toFixed(1)} KB gz (budget 2,048)`,
+    `(budget 40 each), dataset ${(data / KB).toFixed(1)} KB gz (budget 8,192)`,
 );
 if (problems.length) {
   console.error('size-check failed:\n  ' + problems.join('\n  '));

@@ -20,6 +20,14 @@
     {
       "id": "nested-sizes-1",
       "title": "Host size"
+    },
+    {
+      "id": "nested-mem-1",
+      "title": "Host memory"
+    },
+    {
+      "id": "nested-hv-1",
+      "title": "Hypervisor"
     }
   ],
   "gate_allow": []
