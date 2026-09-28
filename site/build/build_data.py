@@ -13,6 +13,7 @@ refused, not repaired.
 from __future__ import annotations
 
 import argparse
+from functools import cache
 import json
 import os
 import shutil
@@ -49,6 +50,62 @@ def first_commit(repo: Path, path: str) -> str | None:
     except (OSError, subprocess.CalledProcessError):
         return None
     return out[-1] if out else None
+
+
+# The site links github.com/evandbrown/fleetkit (D73): files on its main branch, and the harness at a commit. What
+# GitHub has is judged from this clone's remote-tracking branches, as of its last fetch, so a file or commit that
+# exists only here (never pushed) is never linked: the link would be broken.
+PUBLIC_BRANCH = "origin/main"
+
+
+def git(repo: Path, *args: str) -> str | None:
+    try:
+        return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, check=True).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+
+@cache
+def on_github(repo: Path, commit: str) -> bool:
+    """Whether GitHub has ``commit``: it's on one of origin's branches."""
+    return bool((git(repo, "branch", "-r", "--list", "origin/*", "--contains", commit) or "").strip())
+
+
+def on_main(repo: Path, rel: str) -> str | None:
+    """The file ``rel`` as GitHub's main branch has it; None when it isn't there."""
+    return git(repo, "show", f"{PUBLIC_BRANCH}:{rel}")
+
+
+def definition_path(c: dict, definition: dict, preregistration: dict | None, repo: Path) -> str | None:
+    """Where the campaign's definition is public on GitHub's main branch (D73): experiments/campaigns/<id>.json, if
+    it's there and is the definition as launched. A reconstructed definition (cap-baseline-1) has no file of its own,
+    so its published pre-registration stands in: the document that fixed its spec and criteria first. None when
+    neither is."""
+    if c.get("before_campaigns"):
+        pre = (preregistration or {}).get("path")
+        if pre and on_main(repo, pre) is not None:
+            return pre
+        log(f"  note: {pre or 'no pre-registration'} isn't on GitHub's main branch; no definition linked")
+        return None
+    rel = f"experiments/campaigns/{c['id']}.json"
+    text = on_main(repo, rel)
+    if text is None:
+        log(f"  note: {rel} isn't on GitHub's main branch (push it, then rebuild); no definition linked")
+        return None
+    if json.loads(text) != definition:
+        log(f"  note: {rel} on GitHub's main branch differs from the definition as launched; no definition linked")
+        return None
+    return rel
+
+
+def unpushed_commits_unlinked(built: list[dict], repo: Path) -> None:
+    """A run's harness commit is linked only if GitHub has it (D73); otherwise the run links none."""
+    for b in built:
+        commit = b["entry"]["harness_commit"]
+        if commit and not on_github(repo, commit):
+            log(f"  note: {b['entry']['id']}: harness commit {commit[:7]} isn't on any of origin's branches "
+                "(push it, then rebuild); none linked")
+            b["entry"]["harness_commit"] = b["doc"]["harness_commit"] = None
 
 
 def reconstructed_definition(c: dict, recorded: dict) -> dict:
@@ -123,6 +180,7 @@ def build_campaign(c: dict, images: Images, repo: Path) -> tuple[dict, dict, lis
             + (", stopped early" if b["entry"]["stopped_early"] else ""))
         built.append(b)
 
+    unpushed_commits_unlinked(built, REPO)       # links are checked against this clone, whatever --repo reads
     rules = built[0]["rules"] if built else []
     for b in built[1:]:
         if b["rules"] != rules:
@@ -145,6 +203,7 @@ def build_campaign(c: dict, images: Images, repo: Path) -> tuple[dict, dict, lis
             doc["preregistration"] = {"path": c["preregistration"], "commit": commit}
         else:
             log(f"  note: no commit found for {c['preregistration']}; preregistration left out")
+    doc["definition_path"] = definition_path(c, definition, doc.get("preregistration"), REPO)
     doc.update({"definition": definition, "specs": specs, "runs": entries, "outcomes": outcomes, "rules": rules})
     if c.get("notes"):
         doc["notes"] = list(c["notes"])

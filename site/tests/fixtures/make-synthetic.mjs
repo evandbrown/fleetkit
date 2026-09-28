@@ -621,6 +621,7 @@ function makeRun(camp, specName, replica, sp) {
     stopped_early: Boolean(cfg.stopped_early),
     started: cfg.started,
     duration_s: clock + 900,
+    harness_commit: null, // nothing synthetic ran, so there's no harness to link (D73)
     host,
     result,
     by_density: by_density.map(({ density, result: r, passed, trials: n, trial_results }) => ({ density, result: r, passed, trials: n, trial_results })),
@@ -710,6 +711,7 @@ for (const camp of CAMPAIGNS) {
     ended: entries.map(endMinute).sort().at(-1),
     status: complete ? 'complete' : 'partial',
     synthetic: true,
+    definition_path: null, // not in the repository (D73)
     definition: def,
     specs: specs.map(([name, sp]) => specDoc(camp, name, sp)),
     runs: entries,

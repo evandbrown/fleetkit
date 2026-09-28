@@ -30,7 +30,11 @@ somewhere else; `--catalog` and `--repo` point it at another catalog and results
 3. **Builds every document field by field** ([assemble.py](assemble.py)), applying the rules in DATA.md
    ([rules.py](rules.py)), D60 midpoints included. It refuses, rather than repairs, anything that disagrees with
    the harness: a trial's pass value against rule 1, verdicts recomputed from the signals, each density's result,
-   the run's result, and cost.
+   the run's result, and cost. For the site's links to GitHub (D73) it records each run's harness commit (null if
+   the run recorded none, one with uncommitted changes, or one on none of origin's branches; refused if its records
+   disagree) and each campaign's `definition_path`: `experiments/campaigns/<id>.json` when `origin/main` has that
+   file and it equals the definition as launched, or a reconstructed campaign's pre-registration. Both are judged
+   from this clone's remote-tracking branches, so fetch first; a null link is logged as a note.
 4. **Scrubs** every string ([scrub.py](scrub.py)): account ids, ARNs, IP addresses, email addresses and EC2
    instance and image ids become aliases (`account-1`, `ip-2`). Screenshots become WebP thumbnails (320 px)
    and full-size copies (up to 1,280 px) with no metadata ([images.py](images.py)), one per distinct image.

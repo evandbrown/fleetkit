@@ -17,6 +17,7 @@ import { retiredWordsInJson } from './words';
 
 const ID = /^[a-z0-9][a-z0-9-]*$/;
 const WHEN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z$/;
+const COMMIT = /^[0-9a-f]{40}$/;
 const close = (a: number | null | undefined, b: number | null | undefined, tol = 1e-3) =>
   a === b || (typeof a === 'number' && typeof b === 'number' && Math.abs(a - b) <= tol * Math.max(1, Math.abs(b)));
 /** Deep equality that ignores key order. */
@@ -108,6 +109,20 @@ export function checkCampaign(doc: CampaignDoc, entry?: Index['campaigns'][numbe
   if (doc.before_campaigns && (doc.specs.length !== 1 || def.replicas !== 1)) p.push(`${w}: a campaign of one has one spec and one replica`);
   if (def.shutdown_after_minutes === undefined && !doc.reconstructed) p.push(`${w}: only a reconstructed definition lacks shutdown_after_minutes`);
 
+  // D73: what the site links on GitHub. A synthetic campaign links nothing; a real one its definition's file (a
+  // reconstructed definition, its pre-registration), and each run the full commit of the harness it used.
+  const defPath = doc.reconstructed ? doc.preregistration?.path : `experiments/campaigns/${doc.id}.json`;
+  if (doc.definition_path === undefined) p.push(`${w}: definition_path is missing (null when there is none)`);
+  else if (doc.definition_path !== null && (doc.synthetic || doc.definition_path !== defPath)) {
+    p.push(`${w}: definition_path should be ${doc.synthetic || !defPath ? 'null' : defPath}`);
+  }
+  for (const r of doc.runs) {
+    if (r.harness_commit === undefined) p.push(`${w} run ${r.id}: harness_commit is missing (null when there is none)`);
+    else if (r.harness_commit !== null && (doc.synthetic || !COMMIT.test(r.harness_commit))) {
+      p.push(`${w} run ${r.id}: harness_commit should be ${doc.synthetic ? 'null in a synthetic campaign' : 'a full commit id or null'}`);
+    }
+  }
+
   // Specs: the definition's, in order, each the base merged with its changes.
   const names = doc.specs.map((s) => s.name);
   if (!same(names, Object.keys(def.specs))) p.push(`${w}: specs differ from the definition's`);
@@ -190,7 +205,7 @@ export function checkRun(run: RunDoc, campaign: CampaignDoc): string[] {
   const entry = campaign.runs.find((r) => r.id === run.id);
   const spec = campaign.specs.find((s) => s.name === run.spec);
   if (!entry || !spec) return [...p, `${w}: not in its campaign`];
-  for (const k of ['spec', 'replica', 'stopped_early', 'started', 'duration_s', 'host', 'result'] as const) {
+  for (const k of ['spec', 'replica', 'stopped_early', 'started', 'duration_s', 'harness_commit', 'host', 'result'] as const) {
     if (!same(entry[k], run[k])) p.push(`${w}: ${k} differs from the campaign's entry`);
   }
   const briefOf = (b: RunEntry['by_density'][number]) =>

@@ -125,6 +125,9 @@ interface CampaignDoc {
   before_campaigns?: true;
   reconstructed?: true;            // the definition was rebuilt afterwards from what the run recorded
   preregistration?: { path: string; commit: string };   // the document that fixed the criteria first
+  definition_path: string | null;  // D73: the definition's file, experiments/campaigns/<campaign>.json, when GitHub's main
+                                   // branch has it and it equals the definition as launched; for a reconstructed
+                                   // definition, its pre-registration's path; else null (always null when synthetic)
   definition: CampaignDefinition;  // as launched
   specs: SpecDoc[];                // in definition order
   runs: RunEntry[];                // spec order, then replica order
@@ -171,6 +174,10 @@ interface RunEntry {
                                    // interrupted (not when a density couldn't be tested cleanly: rule 7)
   started: string;
   duration_s: number;
+  harness_commit: string | null;   // D73: the full 40-character commit of the harness code the run used, as it recorded
+                                   // it (run.json's harness.git_commit; cap-baseline-1's manifest); null when it recorded
+                                   // none, one with uncommitted changes ("-dirty"), or one on none of origin's branches (never
+                                   // pushed, so not on GitHub); always null when synthetic
   host: HostFacts;
   result: RunResult;               // from the densities it did test
   by_density: DensityBrief[];      // every density in the spec, in order
@@ -327,6 +334,19 @@ The builder applies these rules, and `contract.ts` checks them on every document
 6. **Comparing specs (D52, D60):** `per_host_vcpu` = `tested_successfully` ÷ host vCPUs. A replica's span runs from `tested_successfully` (0 if nothing passed) to `first_failed`, each ÷ host vCPUs, and its midpoint is the middle of that span; with no failure there is no midpoint, and the result reads "at least". A spec's midpoint is the mean of its replicas' midpoints, and null if any replica has none. Specs are compared by their midpoints, with every replica's span shown beside them: on Results and Compare, each replica is a bar to its span's end and the spec's midpoint a tick across its bars. Where a spec's midpoint is null but some replicas have one, the tick is the mean of those replicas, and its label says how many have none ("1 replica stopped early"); the dataset's value stays null.
 7. **Failures outside the experiment are never results (D63).** When a trial fails because of something the spec doesn't test (the support host overloaded, a harness error, an AWS problem), the harness sets it aside under the run's `ops/` directory, notes the cause in its operational log, and runs it again. The builder reads only the run's own trials, so a set-aside trial never appears and leaves no gap in the numbering. If no clean trial was possible at a density, that density and those above it are `not_tested`; the run isn't "stopped early". Smoke, case and fault trials test the harness and are never published either.
 8. **Consistency:** `by_density` lists exactly the spec's densities; a run document's entry equals the campaign's; `outcomes` equal the runs' results; a complete campaign has specs × replicas runs, none stopped early.
+9. **Links (D73):** `definition_path` is `experiments/campaigns/<campaign>.json`, or for a reconstructed definition the `preregistration` path, or null; `harness_commit` is 40 lowercase hex characters or null. Both are present (null, not absent) and always null in synthetic data, which has nothing on GitHub.
+
+## Links to the repository (D73)
+
+Campaign, run and trial pages end with a **Source** row of links to what is already public on GitHub (`github.com/evandbrown/fleetkit`); the raw evidence under `results/` stays private. The dataset carries only paths and commits, never a URL; `src/lib/repo.ts` makes the links, each opening in a new tab. The builder links only what GitHub has, judged from the clone's remote-tracking branches: a definition must be on `origin/main` as launched, and a commit on one of `origin`'s branches; a file or commit that exists only locally is left null, with a note, rather than published as a broken link. Fetch before building.
+
+| Link | Points to | On |
+|---|---|---|
+| Definition | `blob/main/<definition_path>` | every page of a campaign with a `definition_path` |
+| Data | `blob/main/site/public/data/<the page's document>`: `campaign.json`, the run's or the trial's file | every page |
+| Harness @ `<7 characters>` | `tree/<harness_commit>` | a run and its trials: the run's commit; a campaign: each distinct commit its runs used, in run order |
+
+A synthetic campaign shows no Source row.
 
 ## What the builder never ships
 

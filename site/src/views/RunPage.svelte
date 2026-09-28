@@ -1,8 +1,9 @@
 <script lang="ts">
-  // One run: the host it ran on, each density it tested (each trial a mark that opens it), what limited it, and its
-  // full spec. Its own headline only when the campaign has other runs (otherwise Results shows the same four
+  // One run: the host it ran on, each density it tested (each trial a mark that opens it), what limited it, its
+  // full spec, and its Source on GitHub (D73). Its own headline only when the campaign has other runs (otherwise Results shows the same four
   // figures). ?density=N highlights one density.
   import { loadCampaign, loadRun } from '../lib/data';
+  import { runSource } from '../lib/repo';
   import { href } from '../lib/router';
   import * as f from '../lib/format';
   import { campaignRefs, densityRows, type DensityRow, headline, latency, limitBars, runAttribution, runResult, runTitle, specSections } from '../lib/shape';
@@ -15,6 +16,7 @@
   import ShareBar from '../components/ShareBar.svelte';
   import Mark from '../components/Mark.svelte';
   import LatencyChart from '../components/LatencyChart.svelte';
+  import SourceLinks from '../components/SourceLinks.svelte';
 
   let { campaign, run, density }: { campaign: string; run: string; density: number | null } = $props();
   const data = $derived(Promise.all([loadCampaign(campaign), loadRun(campaign, run)]));
@@ -229,7 +231,10 @@
     </div>
   </details>
 
-  <p class="next"><a class="quiet" href={href({ name: 'builder', from: `run:${c.id}/${r.id}` })}>New campaign from this</a></p>
+  <div class="next">
+    <a class="quiet" href={href({ name: 'builder', from: `run:${c.id}/${r.id}` })}>New campaign from this</a>
+    <SourceLinks links={runSource(c, r)} />
+  </div>
 {:catch e}
   <Failed error={e} />
 {/await}
@@ -244,10 +249,14 @@
     font-weight: 600;
   }
   .next {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px 24px;
     margin: 40px 0 0;
     padding-top: 16px;
     border-top: 1px solid var(--rule);
-    max-width: none;
   }
   .solo {
     margin: 0;

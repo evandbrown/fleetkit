@@ -1,9 +1,11 @@
 <script lang="ts">
   // Results, with one campaign selected. The campaigns to choose from; then the campaign's answer in a line, what it
   // tested and its SLOs in one strip, and the charts: how each spec did, latency by density with every trial under
-  // it on the same columns, and one trial at the limit. The spec-by-spec table of what we tested closes the page.
+  // it on the same columns, and one trial at the limit. The spec-by-spec table of what we tested, then its links
+  // (a new campaign from this; its Source on GitHub, D73) close the page.
   // The landing page is this view on the featured campaign (D58).
   import { loadCampaign, loadIndex, loadRun } from '../lib/data';
+  import { campaignSource } from '../lib/repo';
   import { href } from '../lib/router';
   import { answerRows, answerText, campaignRefs, chartRows, latency, sharedBands, specResults } from '../lib/shape';
   import type { RunDoc } from '../lib/types';
@@ -15,6 +17,7 @@
   import AnswerChart from '../components/AnswerChart.svelte';
   import LatencyChart from '../components/LatencyChart.svelte';
   import ResultChart from '../components/ResultChart.svelte';
+  import SourceLinks from '../components/SourceLinks.svelte';
 
   let { id }: { id: string } = $props();
   const index = loadIndex();
@@ -79,7 +82,10 @@
       <SpecMatrix items={refs.map((r) => ({ key: r.spec.name, title: r.groupLabel, why: r.spec.why, spec: r.spec }))} />
     </section>
 
-    <p class="next"><a class="quiet" href={href({ name: 'builder', from: `campaign:${c.id}` })}>New campaign from this</a></p>
+    <div class="next">
+      <a class="quiet" href={href({ name: 'builder', from: `campaign:${c.id}` })}>New campaign from this</a>
+      <SourceLinks links={campaignSource(c)} />
+    </div>
   {:catch e}
     <Failed error={e} />
   {/await}
@@ -107,9 +113,13 @@
     margin-top: 32px;
   }
   .next {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px 24px;
     margin: 40px 0 0;
     padding-top: 16px;
     border-top: 1px solid var(--rule);
-    max-width: none;
   }
 </style>

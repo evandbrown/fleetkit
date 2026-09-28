@@ -12,6 +12,7 @@
     "path": "docs/capacity-experiment.md",
     "commit": "652f26d88cda86a453e31e29f9def2e771dd4971"
   },
+  "definition_path": "docs/capacity-experiment.md",
   "definition": {
     "name": "cap-baseline-1",
     "question": "How many 2 vCPU / 2 GiB Firecracker microVMs can one m8i.4xlarge worker host run at once, with every shopping task inside its latency targets?",
@@ -119,6 +120,7 @@
       "stopped_early": false,
       "started": "2026-09-27T17:09Z",
       "duration_s": 182,
+      "harness_commit": "652f26d88cda86a453e31e29f9def2e771dd4971",
       "host": {
         "instance_type": "m8i.4xlarge",
         "host_kind": "nested",

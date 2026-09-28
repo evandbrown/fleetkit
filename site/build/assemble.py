@@ -8,6 +8,7 @@ from __future__ import annotations
 import bisect
 import collections
 import datetime as dt
+import re
 
 import rules as R
 import source as S
@@ -83,6 +84,31 @@ def host_facts(src: S.RunSource, host_kind: str) -> dict:
         "hypervisor_version": str(hypervisor_info(src).get("version", "")),
         "chromium_version": str(gi["chromium_version"]).removeprefix("Chrome/"),
     }
+
+
+COMMIT = re.compile(r"^[0-9a-f]{40}$")
+
+
+def harness_commit(src: S.RunSource, run_id: str, log) -> str | None:
+    """The commit of the harness code the run used (D73), as the run recorded it: run.json's harness.git_commit, or,
+    for a run recorded before run.json had a harness section (cap-baseline-1), the commit its manifest and its old
+    run.json record. None when it recorded none, or recorded one with uncommitted changes ("-dirty"): the code at
+    that commit isn't exactly what ran, so nothing is linked rather than something close."""
+    recorded = {str(v) for v in ((src.run.get("harness") or {}).get("git_commit"),
+                                 (src.run.get("spec") or {}).get("git_commit"),
+                                 src.manifest.get("git_commit")) if v}
+    if len(recorded) > 1:
+        raise BuildError(f"{run_id}: the run records different harness commits: {sorted(recorded)}")
+    if not recorded:
+        log(f"  {run_id}: no harness commit recorded; none linked")
+        return None
+    commit = recorded.pop()
+    if commit.endswith("-dirty"):
+        log(f"  {run_id}: its harness had uncommitted changes ({commit[:7]}-dirty); none linked")
+        return None
+    if not COMMIT.match(commit):
+        raise BuildError(f"{run_id}: harness commit {commit!r} isn't a full commit id")
+    return commit
 
 
 def trial_ids(trials: list[S.TrialSource]) -> list[tuple[str, int | None]]:
@@ -457,7 +483,8 @@ def build_run(src: S.RunSource, *, campaign: str, run_id: str, spec_name: str, r
               "limit": run_limit(by_density, summaries, rds, tested, first_failed)}
 
     entry = {"id": run_id, "spec": spec_name, "replica": replica, "stopped_early": stopped_early,
-             "started": minute(t0), "duration_s": round(t_end - t0), "host": host, "result": result,
+             "started": minute(t0), "duration_s": round(t_end - t0),
+             "harness_commit": harness_commit(src, run_id, log), "host": host, "result": result,
              "by_density": [{k: b[k] for k in ("density", "result", "passed", "trials", "trial_results")}
                             for b in by_density]}
     has = {"boot_phases": any("boot" in lane for d in docs for lane in d["microvms"]),

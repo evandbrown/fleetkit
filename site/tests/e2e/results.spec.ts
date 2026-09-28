@@ -274,6 +274,40 @@ test('drills from results to a run, a trial and a microVM', async ({ page }) => 
   await expect(page).toHaveURL(/runs\/baseline-r1$/);
 });
 
+test('links what is public on GitHub from campaign, run and trial pages, and nothing for synthetic data (D73)', async ({ page }) => {
+  const GH = 'https://github.com/evandbrown/fleetkit';
+  const COMMIT = '652f26d88cda86a453e31e29f9def2e771dd4971';
+  const DATA = `${GH}/blob/main/site/public/data/campaigns/${CAP}`;
+  const source = page.getByRole('navigation', { name: 'Source' });
+  const expectLinks = async (want: [string, string][]) => {
+    await expect(source.getByRole('link')).toHaveText(want.map(([name]) => `${name}↗`));
+    for (const [name, url] of want) {
+      const a = source.getByRole('link', { name, exact: true });
+      await expect(a).toHaveAttribute('href', url);
+      await expect(a).toHaveAttribute('target', '_blank');
+      await expect(a).toHaveAttribute('rel', 'noopener');
+    }
+  };
+  const definition: [string, string] = ['Definition', `${GH}/blob/main/docs/capacity-experiment.md`];
+  const harness: [string, string] = ['Harness @ 652f26d', `${GH}/tree/${COMMIT}`];
+
+  await page.goto(at({ name: 'results', campaign: CAP }));
+  await expectLinks([definition, ['Data', `${DATA}/campaign.json`], harness]);
+  await page.goto(at({ name: 'run', campaign: CAP, run: 'baseline-r1', density: null }));
+  await expectLinks([definition, ['Data', `${DATA}/runs/baseline-r1.json`], harness]);
+  await page.goto(at({ name: 'trial', campaign: CAP, run: 'baseline-r1', trial: 'd12-t1', microvm: null }));
+  await expect(page.getByRole('heading', { name: 'Final screens' })).toBeVisible();
+  await expectLinks([definition, ['Data', `${DATA}/runs/baseline-r1/d12-t1.json`], harness]);
+  await noHorizontalScroll(page);
+
+  await page.goto(at({ name: 'results', campaign: S }));
+  await expect(page.getByRole('heading', { name: 'What we tested' })).toBeVisible();
+  await expect(source).toHaveCount(0);
+  await page.goto(at({ name: 'run', campaign: S, run: 'm8i-2xlarge-r2', density: null }));
+  await expect(page.getByRole('heading', { name: 'What limited it' })).toBeVisible();
+  await expect(source).toHaveCount(0);
+});
+
 test('highlights one density of a run', async ({ page }) => {
   await page.goto(at({ name: 'run', campaign: CAP, run: 'baseline-r1', density: 8 }));
   await expect(page.locator('table.densities tr.current')).toHaveCount(1);

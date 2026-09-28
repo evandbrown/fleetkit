@@ -7,6 +7,7 @@
   "ended": "2026-09-27T21:38Z",
   "status": "partial",
   "synthetic": true,
+  "definition_path": null,
   "definition": {
     "name": "nested-hv-synthetic",
     "question": "On a nested m8i.4xlarge, does Cloud Hypervisor reach the same density as Firecracker when both have the same devices?",
@@ -265,6 +266,7 @@
       "stopped_early": false,
       "started": "2026-09-27T20:00Z",
       "duration_s": 1124,
+      "harness_commit": null,
       "host": {
         "instance_type": "m8i.4xlarge",
         "host_kind": "nested",
@@ -406,6 +408,7 @@
       "stopped_early": false,
       "started": "2026-09-27T20:00Z",
       "duration_s": 1122,
+      "harness_commit": null,
       "host": {
         "instance_type": "m8i.4xlarge",
         "host_kind": "nested",
@@ -547,6 +550,7 @@
       "stopped_early": false,
       "started": "2026-09-27T20:40Z",
       "duration_s": 1102,
+      "harness_commit": null,
       "host": {
         "instance_type": "m8i.4xlarge",
         "host_kind": "nested",
@@ -699,6 +703,7 @@
       "stopped_early": true,
       "started": "2026-09-27T20:40Z",
       "duration_s": 989,
+      "harness_commit": null,
       "host": {
         "instance_type": "m8i.4xlarge",
         "host_kind": "nested",
@@ -818,6 +823,7 @@
       "stopped_early": false,
       "started": "2026-09-27T21:20Z",
       "duration_s": 1082,
+      "harness_commit": null,
       "host": {
         "instance_type": "m8i.4xlarge",
         "host_kind": "nested",
@@ -957,6 +963,7 @@
       "stopped_early": true,
       "started": "2026-09-27T21:20Z",
       "duration_s": 1045,
+      "harness_commit": null,
       "host": {
         "instance_type": "m8i.4xlarge",
         "host_kind": "nested",

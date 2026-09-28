@@ -7,6 +7,7 @@
   "ended": "2026-09-27T18:19Z",
   "status": "complete",
   "synthetic": true,
+  "definition_path": null,
   "definition": {
     "name": "nested-sizes-synthetic",
     "question": "Does density per host vCPU stay the same when the worker host doubles from 8 to 16 vCPUs, with 2 vCPU / 2 GiB Firecracker microVMs?",
@@ -210,6 +211,7 @@
       "stopped_early": false,
       "started": "2026-09-27T18:00Z",
       "duration_s": 1103,
+      "harness_commit": null,
       "host": {
         "instance_type": "m8i.4xlarge",
         "host_kind": "nested",
@@ -341,6 +343,7 @@
       "stopped_early": false,
       "started": "2026-09-27T18:00Z",
       "duration_s": 1103,
+      "harness_commit": null,
       "host": {
         "instance_type": "m8i.4xlarge",
         "host_kind": "nested",
@@ -472,6 +475,7 @@
       "stopped_early": false,
       "started": "2026-09-27T18:01Z",
       "duration_s": 1111,
+      "harness_commit": null,
       "host": {
         "instance_type": "m8i.2xlarge",
         "host_kind": "nested",
@@ -604,6 +608,7 @@
       "stopped_early": false,
       "started": "2026-09-27T18:01Z",
       "duration_s": 1138,
+      "harness_commit": null,
       "host": {
         "instance_type": "m8i.2xlarge",
         "host_kind": "nested",

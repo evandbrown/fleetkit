@@ -4,11 +4,15 @@ copies of that run, with one trial marked as failing outside the experiment.
 results/ is local and gitignored, so these skip where it hasn't been downloaded.
 """
 import json
+import re
 import shutil
+import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+import assemble as A
 import build_data
 import source as S
 from words import retired_word_in, without_legacy_blocks
@@ -17,6 +21,7 @@ BUILD = Path(__file__).resolve().parents[1]
 SITE = BUILD.parent
 REPO = SITE.parent
 RUN = REPO / "results/cap-baseline-1/host/capacity"
+CAP_COMMIT = "652f26d88cda86a453e31e29f9def2e771dd4971"   # the harness cap-baseline-1 ran (its manifest)
 BIG = shutil.ignore_patterns("*.jsonl", "console-logs", "guest-logs", "hostd.log", "otlp", "*.tgz")
 
 needs_results = pytest.mark.skipif(not RUN.exists(), reason="results/cap-baseline-1 isn't downloaded here")
@@ -110,11 +115,133 @@ def test_the_campaign_of_one(data):
                          "price_usd_per_hour": 0.84672, "price_estimated": False}
     assert "price" not in json.dumps(s["spec"])           # derived from the instance type, never a spec input
     assert c["preregistration"]["path"] == "docs/capacity-experiment.md"
+    # D73: no definition file of its own, so its pre-registration stands in; the harness commit its manifest records.
+    assert c["definition_path"] == "docs/capacity-experiment.md"
+    assert c["runs"][0]["harness_commit"] == CAP_COMMIT
+    assert read(data, "campaigns/cap-baseline-1/runs/baseline-r1.json")["harness_commit"] == CAP_COMMIT
     assert [r["key"] for r in c["rules"]][:2] == ["host_cpu_pressure_pct", "host_cpu_util_pct"]
     assert c["outcomes"] == [{"spec": "baseline", "midpoint_per_host_vcpu": 0.625, "replicas": [{
         "run": "baseline-r1", "host_vcpus": 16, "tested_successfully": 8, "first_failed": 12, "stopped_early": False,
         "per_host_vcpu": 0.5, "midpoint_per_host_vcpu": 0.625,
         "cost_per_1000_tasks": c["runs"][0]["result"]["cost_per_1000_tasks"]}]}]
+
+
+IS_CLONE = (REPO / ".git").exists()
+needs_clone = pytest.mark.skipif(not IS_CLONE, reason="not a git clone: what GitHub has can't be checked here")
+
+
+def assert_links_on_github(c: dict, run_commit):
+    """D73: what a campaign links is on GitHub: its definition on main, as launched, and each harness commit."""
+    want = c["preregistration"]["path"] if c.get("reconstructed") else f"experiments/campaigns/{c['id']}.json"
+    assert c["definition_path"] == want, c["id"]
+    text = build_data.on_main(REPO, want)
+    assert text is not None, f"{want} isn't on GitHub's main branch"
+    if not c.get("reconstructed"):
+        assert json.loads(text) == c["definition"], f"{want} on main isn't the definition as launched"
+    for r in c["runs"]:
+        commit = r["harness_commit"]
+        assert re.fullmatch(r"[0-9a-f]{40}", commit or ""), (c["id"], r["id"], commit)
+        assert run_commit(c["id"], r["id"]) == commit
+        assert build_data.on_github(REPO, commit), f"{c['id']}/{r['id']}: {commit} isn't on any of origin's branches"
+
+
+@needs_results
+@needs_clone
+def test_every_campaign_links_its_definition_and_every_run_its_harness_commit(data):
+    for e in read(data, "index.json")["campaigns"]:
+        assert_links_on_github(read(data, "campaigns", e["id"], "campaign.json"),
+                               lambda c, r: read(data, "campaigns", c, "runs", f"{r}.json")["harness_commit"])
+
+
+@needs_clone
+def test_the_published_dataset_links_only_what_github_has():
+    """The dataset as it will be published (site/public/data), checked without results/: a broken link never ships."""
+    pub = SITE / "public/data"
+    for e in read(pub, "index.json")["campaigns"]:
+        assert_links_on_github(read(pub, "campaigns", e["id"], "campaign.json"),
+                               lambda c, r: read(pub, "campaigns", c, "runs", f"{r}.json")["harness_commit"])
+
+
+def _git(repo: Path, *args: str) -> str:
+    return subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false",
+                           "-c", "core.hooksPath=/dev/null", *args], capture_output=True, text=True, check=True).stdout.strip()
+
+
+def _clone(tmp: Path) -> Path:
+    """A clone whose main branch "on GitHub" (refs/remotes/origin/main) is whatever push() last set it to."""
+    _git(tmp, "init", "-q")
+    return tmp
+
+
+def _commit_and_maybe_push(repo: Path, push: bool) -> str:
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "x")
+    head = _git(repo, "rev-parse", "HEAD")
+    if push:
+        _git(repo, "update-ref", "refs/remotes/origin/main", head)
+    return head
+
+
+def _src(run: dict, manifest: dict | None = None):
+    return SimpleNamespace(run=run, manifest=manifest or {})
+
+
+def test_the_harness_commit_is_the_one_the_run_recorded_or_none():
+    logs = []
+    commit = "a" * 40
+    assert A.harness_commit(_src({"harness": {"git_commit": commit}}, {"git_commit": commit}), "r1", logs.append) == commit
+    # A run recorded before run.json had a harness section: its manifest (and its old run.json, read as spec).
+    assert A.harness_commit(_src({"spec": {"git_commit": commit}}, {"git_commit": commit}), "r1", logs.append) == commit
+    assert A.harness_commit(_src({}, {"git_commit": commit}), "r1", logs.append) == commit
+    # None recorded, or uncommitted changes: nothing linked rather than a guess.
+    assert A.harness_commit(_src({"harness": {}}), "r1", logs.append) is None
+    assert A.harness_commit(_src({"harness": {"git_commit": commit + "-dirty"}}), "r1", logs.append) is None
+    assert any("uncommitted" in m for m in logs)
+    with pytest.raises(A.BuildError, match="different harness commits"):
+        A.harness_commit(_src({"harness": {"git_commit": commit}}, {"git_commit": "b" * 40}), "r1", logs.append)
+    with pytest.raises(A.BuildError, match="full commit"):
+        A.harness_commit(_src({"harness": {"git_commit": "abc1234"}}), "r1", logs.append)
+
+
+def test_the_definition_path_is_the_file_launched_as_github_has_it(tmp_path):
+    repo = _clone(tmp_path)
+    definition = {"name": "x-1", "question": "Q?", "replicas": 1, "base": {}, "specs": {"a": {}}}
+    c = {"id": "x-1"}
+    assert build_data.definition_path(c, definition, None, repo) is None       # not in the repository at all
+    f = repo / "experiments/campaigns/x-1.json"
+    f.parent.mkdir(parents=True)
+    f.write_text(json.dumps(definition, indent=2))
+    assert build_data.definition_path(c, definition, None, repo) is None       # only here: a broken link
+    _commit_and_maybe_push(repo, push=False)
+    assert build_data.definition_path(c, definition, None, repo) is None       # committed, never pushed
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    assert build_data.definition_path(c, definition, None, repo) == "experiments/campaigns/x-1.json"
+    f.write_text(json.dumps({**definition, "replicas": 2}))                    # edited here only: main still matches
+    assert build_data.definition_path(c, definition, None, repo) == "experiments/campaigns/x-1.json"
+    _commit_and_maybe_push(repo, push=True)                                     # edited on main after launch
+    assert build_data.definition_path(c, definition, None, repo) is None
+    # A reconstructed definition: its pre-registration, once main has the file.
+    old = {"id": "y-1", "before_campaigns": {"spec": "baseline"}, "preregistration": "docs/pre.md"}
+    pre = {"path": "docs/pre.md", "commit": "c" * 40}
+    assert build_data.definition_path(old, definition, None, repo) is None
+    (repo / "docs").mkdir()
+    (repo / "docs/pre.md").write_text("# pre-registration")
+    assert build_data.definition_path(old, definition, pre, repo) is None
+    _commit_and_maybe_push(repo, push=True)
+    assert build_data.definition_path(old, definition, pre, repo) == "docs/pre.md"
+
+
+def test_a_harness_commit_github_lacks_is_not_linked(tmp_path):
+    repo = _clone(tmp_path)
+    (repo / "a").write_text("a")
+    pushed = _commit_and_maybe_push(repo, push=True)
+    (repo / "a").write_text("b")
+    local = _commit_and_maybe_push(repo, push=False)
+    built = [{"entry": {"id": f"r{i}", "harness_commit": x}, "doc": {"harness_commit": x}}
+             for i, x in enumerate([pushed, local, None, "d" * 40])]
+    build_data.unpushed_commits_unlinked(built, repo)
+    assert [b["entry"]["harness_commit"] for b in built] == [pushed, None, None, None]
+    assert [b["doc"]["harness_commit"] for b in built] == [pushed, None, None, None]
 
 
 # ---- the new results layout: results/<campaign>/campaign.json and <spec>-r<k>/ --------------------------------
@@ -148,6 +275,8 @@ def _campaign_repo(tmp: Path) -> Path:
                   "replicas": 2, "shutdown_after_minutes": 45, "base": base, "specs": {"baseline": {}},
                   "why": {"baseline": "The spec cap-baseline-1 ran, to test the new layout."}}
     (cdir / "campaign.json").write_text(json.dumps(definition))
+    (repo / "experiments/campaigns").mkdir(parents=True)                  # its definition, but only in this copy
+    (repo / "experiments/campaigns/copies-test.json").write_text(json.dumps(definition, indent=2))
     for k in (1, 2):
         shutil.copytree(RUN, cdir / f"baseline-r{k}", ignore=BIG)
     set_aside(cdir / "baseline-r2", "t010-firecracker-n12-r3")
@@ -166,6 +295,8 @@ def test_a_campaign_in_the_new_layout(tmp_path):
     assert index["featured"] == "copies-test" and index["campaigns"][0]["status"] == "complete"
     c = read(out, "campaigns/copies-test/campaign.json")
     assert c["definition"]["name"] == "copies-test" and c["specs"][0]["why"].startswith("The spec cap-baseline-1")
+    assert c["definition_path"] is None           # D73: its file is only in this copy, not on GitHub's main branch
+    assert [r["harness_commit"] for r in c["runs"]] == [CAP_COMMIT, CAP_COMMIT]
     assert [r["id"] for r in c["runs"]] == ["baseline-r1", "baseline-r2"]
     o = c["outcomes"][0]
     assert [x["midpoint_per_host_vcpu"] for x in o["replicas"]] == [0.625, 0.625]

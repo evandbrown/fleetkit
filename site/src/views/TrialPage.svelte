@@ -2,6 +2,7 @@
   // One trial: its result against each criterion, every microVM's start and steps on one clock, what limited it over
   // time, the final screens, and (for the illustration) the filmstrip.
   import { loadCampaign, loadRun, loadTrial } from '../lib/data';
+  import { trialSource } from '../lib/repo';
   import { href } from '../lib/router';
   import * as f from '../lib/format';
   import { coresStack, lanes, limitPanels, runTitle, trialSlos } from '../lib/shape';
@@ -17,6 +18,7 @@
   import SloBadges from '../components/SloBadges.svelte';
   import StepChart from '../components/StepChart.svelte';
   import Mark from '../components/Mark.svelte';
+  import SourceLinks from '../components/SourceLinks.svelte';
 
   let { campaign, run, trial, microvm }: { campaign: string; run: string; trial: string; microvm: number | null } =
     $props();
@@ -37,6 +39,7 @@
     <Failed error={new Error(`Run ${r.id} has no trial ${trial}.`)} />
   {:else}
     {@const microvmHref = (i: number) => href({ name: 'trial', campaign: c.id, run: r.id, trial: s.id, microvm: i })}
+    {@const source = trialSource(c, r, s.id)}
     <p class="crumbs">
       <a href={href({ name: 'results', campaign: null })}>Results</a> ›
       <a href={href({ name: 'results', campaign: c.id })}>{c.title}</a> ›
@@ -223,12 +226,19 @@
     {:catch e}
       <Failed error={e} />
     {/await}
+
+    {#if source.length}<div class="next"><SourceLinks links={source} /></div>{/if}
   {/if}
 {:catch e}
   <Failed error={e} />
 {/await}
 
 <style>
+  .next {
+    margin: 40px 0 0;
+    padding-top: 16px;
+    border-top: 1px solid var(--rule);
+  }
   .verdict {
     display: flex;
     align-items: center;

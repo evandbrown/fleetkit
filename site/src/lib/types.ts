@@ -106,6 +106,9 @@ export interface CampaignDoc {
   before_campaigns?: true;
   reconstructed?: true;
   preregistration?: { path: string; commit: string };
+  /** D73: the definition's path in the repository, experiments/campaigns/<campaign>.json; for a reconstructed
+   *  definition, its pre-registration's; null when neither is public. */
+  definition_path: string | null;
   definition: CampaignDefinition;
   specs: SpecDoc[];
   runs: RunEntry[];
@@ -155,6 +158,8 @@ export interface RunEntry {
   stopped_early: boolean;
   started: string;
   duration_s: number;
+  /** D73: the full commit of the harness code the run used; null when it recorded none, or one with uncommitted changes. */
+  harness_commit: string | null;
   host: HostFacts;
   result: RunResult;
   by_density: DensityBrief[];

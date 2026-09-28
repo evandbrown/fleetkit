@@ -366,3 +366,64 @@ test.describe('the published hv-host-2: a metal host, judged by SLOs of its own 
     expect(Number(await limit.locator('.lanes svg').getAttribute('height'))).toBeLessThanOrEqual(480);
   });
 });
+
+test.describe('links what is public on GitHub (D73)', () => {
+  const GH = 'https://github.com/evandbrown/fleetkit';
+  const DATA = `${GH}/blob/main/site/public/data`;
+  const CASES = [
+    { id: 'nested-sizes-1', definition: 'experiments/campaigns/nested-sizes-1.json' },   // a nested campaign
+    { id: 'hv-host-2', definition: 'experiments/campaigns/hv-host-2.json' },             // the metal campaign
+    { id: 'cap-baseline-1', definition: 'docs/capacity-experiment.md' },                 // reconstructed: its pre-registration
+  ];
+
+  async function expectSource(page: Page, want: [string, string][]) {
+    const source = page.getByRole('navigation', { name: 'Source' });
+    await expect(source.getByRole('link')).toHaveCount(want.length);
+    for (const [i, [name, url]] of want.entries()) {
+      const a = source.getByRole('link').nth(i);
+      await expect(a).toHaveAccessibleName(name);
+      await expect(a).toHaveAttribute('href', url);
+      await expect(a).toHaveAttribute('target', '_blank');
+      await expect(a).toHaveAttribute('rel', 'noopener');
+    }
+  }
+
+  for (const k of CASES) {
+    test(`${k.id}: its campaign and each run link the definition, their data and the harness commit`, async ({ page }) => {
+      const c = read<CampaignDoc>('campaigns', k.id, 'campaign.json');
+      const commits = [...new Set(c.runs.map((r) => r.harness_commit))];
+      for (const x of commits) expect(x).toMatch(/^[0-9a-f]{40}$/);
+      if (k.id === 'cap-baseline-1') expect(commits).toEqual(['652f26d88cda86a453e31e29f9def2e771dd4971']);
+      const definition: [string, string] = ['Definition', `${GH}/blob/main/${k.definition}`];
+      const harness = (x: string): [string, string] => [`Harness @ ${x.slice(0, 7)}`, `${GH}/tree/${x}`];
+
+      await page.goto(`./${href({ name: 'results', campaign: k.id })}`);
+      await expect(page.getByRole('heading', { name: 'What we tested' })).toBeVisible();
+      await expectSource(page, [definition, ['Data', `${DATA}/campaigns/${k.id}/campaign.json`], ...commits.map((x) => harness(x!))]);
+
+      for (const r of c.runs) {
+        await page.goto(`./${href({ name: 'run', campaign: k.id, run: r.id, density: null })}`);
+        await expect(page.getByRole('heading', { name: 'What limited it' })).toBeVisible();
+        await expectSource(page, [definition, ['Data', `${DATA}/campaigns/${k.id}/runs/${r.id}.json`], harness(r.harness_commit!)]);
+      }
+      const r = read<RunDoc>('campaigns', k.id, 'runs', `${c.runs[0].id}.json`);
+      const t = r.trials.find((x) => x.counts)!;
+      await page.goto(`./${href({ name: 'trial', campaign: k.id, run: r.id, trial: t.id, microvm: null })}`);
+      await expect(page.getByRole('heading', { name: 'Final screens' })).toBeVisible();
+      await expectSource(page, [definition, ['Data', `${DATA}/campaigns/${k.id}/runs/${r.id}/${t.id}.json`], harness(r.harness_commit!)]);
+    });
+  }
+
+  test('a campaign whose runs used two harness commits links each once, in run order', async ({ page }) => {
+    const c = read<CampaignDoc>('campaigns', 'nested-hv-1', 'campaign.json');
+    const commits = [...new Set(c.runs.map((r) => r.harness_commit!))];
+    expect(commits).toHaveLength(2);
+    await page.goto(`./${href({ name: 'results', campaign: c.id })}`);
+    await expect(page.getByRole('heading', { name: 'What we tested' })).toBeVisible();
+    await expectSource(page, [
+      ['Definition', `${GH}/blob/main/experiments/campaigns/nested-hv-1.json`],
+      ['Data', `${DATA}/campaigns/nested-hv-1/campaign.json`],
+      ...commits.map((x): [string, string] => [`Harness @ ${x.slice(0, 7)}`, `${GH}/tree/${x}`]),
+    ]);
+  });
+});

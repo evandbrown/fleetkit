@@ -36,10 +36,14 @@ function id(x: string): string {
   return x;
 }
 
+/** Each document's path within the dataset (DATA.md, Files). */
+export const campaignPath = (c: string) => `campaigns/${id(c)}/campaign.json`;
+export const runPath = (c: string, r: string) => `campaigns/${id(c)}/runs/${id(r)}.json`;
+export const trialPath = (c: string, r: string, t: string) => `campaigns/${id(c)}/runs/${id(r)}/${id(t)}.json`;
+
 export const loadIndex = () => get<Index>('index.json');
-export const loadCampaign = (c: string) => get<CampaignDoc>(`campaigns/${id(c)}/campaign.json`);
-export const loadRun = (c: string, r: string) => get<RunDoc>(`campaigns/${id(c)}/runs/${id(r)}.json`);
-export const loadTrial = (c: string, r: string, t: string) =>
-  get<TrialDoc>(`campaigns/${id(c)}/runs/${id(r)}/${id(t)}.json`);
+export const loadCampaign = (c: string) => get<CampaignDoc>(campaignPath(c));
+export const loadRun = (c: string, r: string) => get<RunDoc>(runPath(c, r));
+export const loadTrial = (c: string, r: string, t: string) => get<TrialDoc>(trialPath(c, r, t));
 
 export const imgUrl = (sha8: string, size: 't' | 'f' = 't') => `./data/img/${sha8}.${size}.webp`;
