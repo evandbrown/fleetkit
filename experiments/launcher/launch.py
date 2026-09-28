@@ -2,6 +2,7 @@
 """Launch a campaign: one command from a campaign definition to results/<campaign>/.
 
     experiments/launch.sh CAMPAIGN.json [--dry-run] [--spent USD] [--runs RUN,RUN] [--quota N]
+                                        [--replace (with --runs)]
 
 1. Check. The campaign is expanded and checked by experiments/schema/expand.py. The launcher
    refuses it if it isn't valid; if it's under experiments/campaigns/examples/ (written, not
@@ -9,20 +10,39 @@
    the project cap (spend read from Cost Explorer, or --spent when that can't be read); if a run
    needs more vCPUs than the quota leaves free; if a worker host isn't allowed by the account's
    instance-type guardrail; if HEAD isn't pushed or the files the hosts run have uncommitted
-   changes (the hosts check out HEAD from GitHub); or if the campaign's results directory already
-   holds one of its runs.
+   changes (the hosts check out HEAD from GitHub); if the member-account profile isn't for the
+   account the campaign stack creates hosts in (the bucket it checks wouldn't be the one the hosts
+   write to); if any instance tagged with the campaign is still there, or the campaign's Terraform
+   state holds hosts still there (another launcher of it is running: they would share one state,
+   and each one's changes would destroy the other's hosts); or if an earlier attempt at one of its
+   runs left anything in results/<campaign>/<run>/ or in the results bucket under
+   runs/<campaign>/<run>/ (a new attempt would be pulled on top of it).
 2. Plan. Runs start in the order of expand.py's waves, each as soon as its worker and support
    hosts' vCPUs fit under the live quota, less what's already running in the account.
-3. Run. For each run: create its own worker host and support host (Terraform,
-   infra/experiments/campaign, one state per campaign, keyed by run name), set both up over SSM,
-   carry out the run's spec (images/host/stage.sh run), bundle it, pull it into
-   results/<campaign>/<run>/, and destroy its hosts as soon as it ends. One run failing doesn't
-   stop the others. Every host also shuts itself down shutdown_after_minutes after boot.
-4. Sweep. Destroy what's left in the campaign's state, terminate any instance still tagged with
-   the campaign, and check nothing of it is left running.
+3. Run. For each run: check again for an earlier attempt and for an instance tagged with the run
+   (with --replace, archive the attempt: see below), create its own worker host and support host
+   (Terraform, infra/experiments/campaign, one state per campaign, keyed by run name), set both up
+   over SSM, carry out the run's spec (images/host/stage.sh run), bundle it, pull what this attempt
+   wrote into results/<campaign>/<run>/ (only objects stamped since the run's launch, and only
+   into a directory holding nothing else), and destroy its hosts as soon as it ends. One run
+   failing doesn't stop the others. Every host also shuts itself down shutdown_after_minutes after
+   boot.
+4. Sweep. Destroy what's left of the runs this launcher started (and the campaign's support
+   security group once no other run's hosts are in its state), terminate any instance still
+   tagged with one of those runs, and check none is left. Another launcher's hosts are never
+   touched.
+
+--replace launches the runs named by --runs again over their earlier attempts: just before a run's
+hosts are created, the bucket's runs/<campaign>/<run>/ is copied server-side to
+superseded/<campaign>/<run>-<UTC>/, every copy checked, results/<campaign>/<run>/ moved to
+results/superseded/<campaign>/<run>-<UTC>/, and only then are the bucket's originals deleted (the
+bucket is versioned, so they stay as old versions too) and the prefix checked empty. A copy or a
+move that fails stops the run with nothing deleted. The run's pull then takes only objects the
+bucket stamped after its newest archive copy (S3's own clock, so the launcher's doesn't matter).
 
 --dry-run does 1 and 2 and a `terraform plan` of every run's hosts at once (no lock, no apply),
-and changes nothing. Operational events go to results/<campaign>/launch.log and each run's
+reports what --replace would archive, and changes nothing. Operational events go to
+results/<campaign>/launch.log and each run's
 ops/ directory, never into the results. Standard library only; needs terraform and the AWS CLI,
 logged in (`aws login`) with the management-account default profile and the member-account
 profile (FLEETKIT_AWS_PROFILE, default fleetkit).
@@ -58,6 +78,19 @@ PROJECT_START = "2026-09-01"    # the project cap's start (infra/org, project_ca
 GUARDRAIL = re.compile(r"^(m8i|c8i|m7i|c7i)\.(large|xlarge|2xlarge|4xlarge)$")
 SUPPORT_HEALTH_PORT = 8082
 FK = "/var/lib/fleetkit"
+SUPERSEDED = "superseded"  # results/superseded/<campaign>/ and the bucket's superseded/<campaign>/
+# How much earlier than the launcher's clock S3 may stamp an object this attempt wrote, when nothing
+# in the bucket was archived (then the bucket's own clock gives the cutoff). The first object is
+# written minutes after launch (hosts boot first), so this only absorbs clock error.
+CLOCK_SKEW_S = 60
+HIDDEN_BUCKET = "<results bucket>"  # the bucket's name carries the account id; logs never show it
+HIDDEN_ACCOUNT = "<account>"
+# An instance in these states is still there: it may run, or be started again. (A host that shuts
+# itself down terminates: shutting-down, then terminated.)
+LIVE_STATES = "pending,running,stopping,stopped"
+INSTANCES_QUERY = "Reservations[].Instances[].[InstanceId, State.Name, Tags[?Key=='Run'].Value | [0]]"
+STATE_HOST = re.compile(r'^aws_instance\.(?:worker|support)\["([^"]+)"\]$')  # a host in `terraform state list`
+ROLE_ACCOUNT = re.compile(r'^\s*member_role_arn\s*=\s*"arn:[a-z-]+:iam::(\d{12}):', re.M)  # any partition
 
 
 # ------------------------------------------------------------------ expand.py
@@ -74,10 +107,15 @@ EXPAND = expand_module()
 
 # ------------------------------------------------------------------ the checks (pure)
 def refusals(campaign_path: Path, plan: dict, *, spent: float | None, free_vcpus: int | None,
-             head_pushed: bool, existing_runs: list[str], uncommitted: list[str] = ()) -> list[str]:
-    """Every reason not to launch this (valid) campaign plan; empty when it may launch."""
+             head_pushed: bool, earlier: dict[str, str] | None = None, replace: bool = False,
+             uncommitted: list[str] = ()) -> list[str]:
+    """Every reason not to launch this (valid) campaign plan; empty when it may launch. ``earlier``
+    maps a run to what an earlier attempt at it left behind (earlier_attempt); --replace
+    (``replace``) archives that instead of refusing."""
     out = []
     limits = EXPAND.LIMITS
+    if plan["campaign"] == SUPERSEDED:
+        out.append(f"a campaign can't be named {SUPERSEDED}: results/{SUPERSEDED}/ holds archived attempts")
     try:
         Path(campaign_path).resolve().relative_to(EXAMPLES.resolve())
         out.append(f"{campaign_path} is under experiments/campaigns/examples/: written, not approved to run")
@@ -105,10 +143,76 @@ def refusals(campaign_path: Path, plan: dict, *, spent: float | None, free_vcpus
     if uncommitted:
         out.append(f"uncommitted changes the hosts wouldn't run (they check out HEAD): {', '.join(uncommitted[:6])}"
                    f"{' and more' if len(uncommitted) > 6 else ''}")
-    for run in existing_runs:
-        out.append(f"results/{plan['campaign']}/{run}/ already exists; launch that run again under a new "
-                   "campaign name, or move the directory")
+    for run, what in ({} if replace else earlier or {}).items():
+        out.append(f"{run}: an earlier attempt is in the way ({what}); a new attempt would be pulled on top "
+                   f"of it. Pass --replace to archive it under {SUPERSEDED}/ and launch the run again")
     return list(dict.fromkeys(out))
+
+
+def earlier_attempt(campaign: str, run: str, local_files: int, objects: list[dict]) -> str | None:
+    """What an earlier attempt at this run left behind, in words; None when it left nothing."""
+    left = []
+    if local_files:
+        left.append(f"results/{campaign}/{run}/ holds {local_files} files")
+    if objects:
+        left.append(f"runs/{campaign}/{run}/ in the results bucket holds {len(objects)} objects")
+    return " and ".join(left) or None
+
+
+def archive_preview(campaign: str, found: dict[str, tuple[int, list[dict]]]) -> list[str]:
+    """What --replace would archive, one line per place, from {run: (local files, bucket objects)}."""
+    out = []
+    for run, (files, objects) in found.items():
+        if files:
+            out.append(f"{run}: results/{campaign}/{run}/ ({files} files) -> "
+                       f"results/{SUPERSEDED}/{campaign}/{run}-<UTC>/")
+        if objects:
+            mb = sum(int(o.get("Size") or 0) for o in objects) / 1e6
+            out.append(f"{run}: runs/{campaign}/{run}/ ({len(objects)} objects, {mb:,.1f} MB) -> "
+                       f"{SUPERSEDED}/{campaign}/{run}-<UTC>/ in the results bucket")
+    return out
+
+
+def utc_stamp(now: datetime.datetime | None = None) -> str:
+    """The <UTC> in an archive's name: 20260927T184512Z."""
+    return (now or datetime.datetime.now(datetime.timezone.utc)).strftime("%Y%m%dT%H%M%SZ")
+
+
+def last_modified(obj: dict) -> datetime.datetime:
+    """An S3 listing's LastModified ("2026-09-28T01:33:53+00:00", or ...Z), timezone-aware."""
+    return datetime.datetime.fromisoformat(obj["LastModified"].replace("Z", "+00:00"))
+
+
+def split_by_time(objects: list[dict], since: datetime.datetime) -> tuple[list[dict], list[dict]]:
+    """(stamped at or after ``since``, stamped before it)."""
+    new = [o for o in objects if last_modified(o) >= since]
+    return new, [o for o in objects if last_modified(o) < since]
+
+
+def folder_marker(obj: dict) -> bool:
+    """A zero-byte key ending in / (what the S3 console makes for a "folder"). `aws s3 cp --recursive`
+    never copies one, so a copy check leaves it out; it holds nothing to archive."""
+    return obj["Key"].endswith("/") and not int(obj.get("Size") or 0)
+
+
+def instances_text(instances: list[tuple[str, str, str]], most: int = 6) -> str:
+    """(instance id, run, state) listed for a message."""
+    text = ", ".join(f"{run}: {iid} {state}" for iid, run, state in instances[:most])
+    return text + (f" and {len(instances) - most} more" if len(instances) > most else "")
+
+
+def glob_escape(key: str) -> str:
+    """A key as an `aws s3` --include pattern that matches that key alone (the CLI matches with fnmatch)."""
+    return re.sub(r"([*?\[])", r"[\1]", key)
+
+
+def local_files(path: Path) -> int:
+    """How many files are under ``path`` (a path that is itself a file counts as one)."""
+    if not path.exists():
+        return 0
+    if not path.is_dir():
+        return 1
+    return sum(1 for p in path.rglob("*") if not p.is_dir())
 
 
 def next_to_start(queue: list[dict], free_vcpus: int) -> list[dict]:
@@ -189,12 +293,23 @@ class StepFailed(Exception):
     pass
 
 
+class Refused(StepFailed):
+    """A run not launched because an earlier attempt is in its way."""
+
+
 class Log:
     def __init__(self, path: Path | None):
         self.path = path
         self.lock = threading.Lock()
+        self.hidden: dict[str, str] = {}  # text never logged -> what's logged instead
+
+    def hide(self, text: str | None, instead: str = HIDDEN_BUCKET) -> None:
+        if text:
+            self.hidden[text] = instead
 
     def __call__(self, msg: str, run: str | None = None) -> None:
+        for text, instead in self.hidden.items():
+            msg = msg.replace(text, instead)
         line = f"{time.strftime('%H:%M:%S')} {'[' + run + '] ' if run else ''}{msg}"
         with self.lock:
             print(line, flush=True)
@@ -241,6 +356,20 @@ def vcpu_quota() -> int | None:
         return None
 
 
+def campaign_instances(campaign: str, runs: list[str] | None = None) -> list[tuple[str, str, str]]:
+    """(instance id, run, state) of every instance tagged with the campaign (and, given ``runs``,
+    with one of them) that is still there: pending, running, stopping or stopped. Every host the
+    campaign stack creates carries Campaign and Run tags. Raises StepFailed when they can't be
+    listed."""
+    filters = [f"Name=tag:Campaign,Values={campaign}", f"Name=instance-state-name,Values={LIVE_STATES}"]
+    if runs is not None:
+        if not runs:
+            return []
+        filters.append(f"Name=tag:Run,Values={','.join(runs)}")
+    doc = aws("ec2", "describe-instances", "--filters", *filters, "--query", INSTANCES_QUERY)
+    return [(iid, run or "?", state) for iid, state, run in doc or []]
+
+
 def vcpus_running(tag_filters: list[str] | None = None) -> int:
     doc = aws("ec2", "describe-instances", "--filters", "Name=instance-state-name,Values=pending,running",
               *(tag_filters or []),
@@ -266,6 +395,91 @@ HOST_PATHS = ("harness", "images", "fixture", "experiments/launcher", "experimen
 def uncommitted() -> list[str]:
     p = sh(["git", "-C", str(REPO), "status", "--porcelain", "--", *HOST_PATHS], check=False)
     return [line[3:] for line in p.stdout.splitlines() if line.strip()]
+
+
+# ------------------------------------------------------------------ the results bucket
+def member_account() -> str | None:
+    """The account of the member-account profile, which every `aws` call here uses. Never printed
+    or logged. None when it can't be read."""
+    try:
+        return aws("sts", "get-caller-identity", "--query", "Account") or None
+    except StepFailed:
+        return None
+
+
+def stack_account() -> str | None:
+    """The account the campaign stack creates hosts in: the one whose role it assumes (member_role_arn
+    in infra/experiments/terraform.tfvars, which it reads). Never printed or logged. None when it
+    can't be read."""
+    try:
+        m = ROLE_ACCOUNT.search((PARENT_STACK / "terraform.tfvars").read_text())
+    except OSError:
+        return None
+    return m.group(1) if m else None
+
+
+def results_bucket(account: str) -> str:
+    """The results bucket's name, as infra/experiments names it (results.tf; the campaign stack's
+    data.tf reads the same). It's needed before the campaign's state has any outputs, and it
+    carries the account id, so it's never printed or logged."""
+    return f"fleetkit-results-{account}"
+
+
+def list_objects(bucket: str, prefix: str) -> list[dict]:
+    """Every object under ``prefix`` as {Key, LastModified, Size}. The prefix ends in / so that
+    runs/c/r1/ never takes in runs/c/r10/. Raises StepFailed when the bucket can't be listed."""
+    if not prefix.endswith("/"):
+        raise ValueError(f"a prefix to list must end in /: {prefix}")
+    return aws("s3api", "list-objects-v2", "--bucket", bucket, "--prefix", prefix,
+               "--query", "Contents[].{Key: Key, LastModified: LastModified, Size: Size}") or []
+
+
+def earlier_attempts(campaign: str, runs: list[str], bucket: str | None
+                     ) -> tuple[dict[str, tuple[int, list[dict]]], list[str]]:
+    """{run: (files under results/<campaign>/<run>/, objects under the bucket's runs/<campaign>/<run>/)}
+    and the runs whose prefix couldn't be listed. Without a bucket name nothing is listed."""
+    found, unlisted = {}, []
+    for run in runs:
+        try:
+            objects = list_objects(bucket, f"runs/{campaign}/{run}/") if bucket else []
+        except StepFailed:
+            objects = []
+            unlisted.append(run)
+        found[run] = (local_files(RESULTS / campaign / run), objects)
+    return found, unlisted
+
+
+def copy_prefix(bucket: str, src: str, dst: str, objects: list[dict]) -> datetime.datetime | None:
+    """Copy everything under ``src`` to ``dst`` in the bucket, server-side, then check that every one
+    of ``objects`` (src's listing) but a folder marker has its copy, the same size. Raises StepFailed
+    otherwise; it never deletes anything. Returns the bucket's stamp on the newest copy (None when
+    nothing was copied): S3's own clock, and earlier than anything written after the copy."""
+    p = aws("s3", "cp", "--recursive", "--only-show-errors", f"s3://{bucket}/{src}", f"s3://{bucket}/{dst}",
+            check=False, parse=False)
+    if p.returncode != 0:
+        raise StepFailed(f"copying {src} to {dst} failed (exit {p.returncode}: "
+                         f"{(p.stderr or p.stdout).strip()[-300:]}); nothing was deleted")
+    listed = list_objects(bucket, dst)
+    copied = {o["Key"][len(dst):]: o.get("Size") for o in listed}
+    missing = [o["Key"] for o in objects
+               if not folder_marker(o) and copied.get(o["Key"][len(src):], -1) != o.get("Size")]
+    if missing:
+        raise StepFailed(f"{len(missing)} of {len(objects)} objects under {src} have no copy under {dst} "
+                         f"(first: {missing[0][len(src):]}); nothing was deleted")
+    return max((last_modified(o) for o in listed), default=None)
+
+
+def delete_objects(bucket: str, keys: list[str], batch: int = 500) -> None:
+    """Delete exactly these keys (never a whole prefix: an object that arrived after the listing was
+    never copied). Raises StepFailed on the first batch with an error."""
+    for i in range(0, len(keys), batch):
+        chunk = keys[i:i + batch]
+        doc = aws("s3api", "delete-objects", "--bucket", bucket, "--delete",
+                  json.dumps({"Objects": [{"Key": k} for k in chunk], "Quiet": True})) or {}
+        errors = doc.get("Errors") or []
+        if errors:
+            raise StepFailed(f"{i + len(chunk) - len(errors)} of {len(keys)} originals were deleted; "
+                             f"{errors[0].get('Key')}: {errors[0].get('Code')}")
 
 
 # ------------------------------------------------------------------ Terraform, one state per campaign
@@ -295,12 +509,14 @@ class Stack:
                                          "shutdown_after_minutes": self.timer, "repo_ref": self.repo_ref}))
         return [f"-var-file={PARENT_STACK / 'terraform.tfvars'}", f"-var-file={vars_file}"]
 
-    def plan(self, runs: dict, *, destroy: bool = False, lock: bool = True, refresh: bool = True):
+    def plan(self, runs: dict, *, destroy: bool = False, lock: bool = True, refresh: bool = True,
+             targets: list[str] = ()):
         out = self.data_dir / "tfplan"
         args = ["plan", "-input=false", "-no-color", f"-out={out}", *self._var_args(runs)]
         args += [] if lock else ["-lock=false"]
         args += [] if refresh else ["-refresh=false"]
         args += ["-destroy"] if destroy else []
+        args += [f"-target={t}" for t in targets]
         p = self.tf(*args)
         show = json.loads(self.tf("show", "-json", str(out)).stdout)
         return out, plan_changes(show), p.stdout
@@ -331,19 +547,50 @@ class Stack:
             runs = {k: v for k, v in self.runs.items() if k != run}
             self._change(runs, f"destroy {run}", delete=set(run_addresses(run)))
 
-    def destroy_all(self) -> list[tuple[str, str]]:
+    def state_runs(self) -> set[str]:
+        """The runs whose hosts the campaign's state holds (read-only, no lock). Raises StepFailed
+        when the state can't be read; a campaign never launched has none."""
+        p = self.tf("state", "list", "-no-color", check=False, timeout=300)
+        if p.returncode != 0:
+            if "No state file was found" in (p.stderr or "") + (p.stdout or ""):
+                return set()
+            raise StepFailed(f"terraform state list: exit {p.returncode}: {(p.stderr or p.stdout).strip()[-300:]}")
+        return {m.group(1) for line in p.stdout.splitlines() if (m := STATE_HOST.match(line.strip()))}
+
+    def destroy(self, runs: set[str], *, everything: bool = False) -> list[tuple[str, str]]:
+        """Destroy the hosts of ``runs`` (a targeted plan); with ``everything``, the whole state, the
+        campaign's support security group included, which the caller has found holds no other run's
+        hosts. A plan that would delete any other run's host, or change anything but deletes, isn't
+        applied."""
+        mine = {a for r in runs for a in run_addresses(r)}
+        if not everything and not mine:
+            return []
         with self.lock:
-            planfile, changes, _ = self.plan({}, destroy=True)
-            bad = [c for c in changes if c[1] != "delete"]
+            planfile, changes, _ = self.plan({}, destroy=True, targets=[] if everything else sorted(mine))
+            bad = [c for c in changes if c[1] != "delete" or (c[0].startswith("aws_instance.") and c[0] not in mine)]
             if bad:
                 raise StepFailed(f"terraform (destroy): unexpected {bad}; not applied")
             if changes:
                 self.tf("apply", "-input=false", "-no-color", str(planfile))
-            self.runs = {}
+            self.runs = {} if everything else {k: v for k, v in self.runs.items() if k not in runs}
             return changes
 
     def bucket(self) -> str:
         return json.loads(self.tf("output", "-json", "results_bucket").stdout)
+
+
+def stale_hosts(stack: Stack, campaign: str) -> set[str]:
+    """Before a launch touches the campaign's state: the runs whose hosts it still holds when none of
+    them is still there (a launcher stopped before its sweep; the launch clears them first). Raises
+    Refused when any of them is still there: another launcher of the campaign is running, and a
+    launch sharing its state would destroy its hosts. Raises StepFailed when either can't be read."""
+    held = stack.state_runs()
+    still = campaign_instances(campaign, sorted(held)) if held else []
+    if still:
+        raise Refused(f"the campaign's Terraform state holds hosts that are still there ({instances_text(still)}): "
+                      f"another launcher of {campaign} is running, and this one's changes to that state would "
+                      "destroy them. Launch again once it has ended")
+    return held
 
 
 # ------------------------------------------------------------------ SSM
@@ -384,15 +631,73 @@ def ssm_run(iid: str, command: str, timeout_s: int, *, bucket: str, prefix: str,
 # ------------------------------------------------------------------ one run
 class Campaign:
     poll_s, start_gap_s = 5.0, 2.0  # how often the launch loop looks; the gap between two runs' starts
+    settle_s = 20.0  # how long the sweep gives the instances it terminates before it looks again
 
-    def __init__(self, camp: dict, plan: dict, log: Log, stack: Stack, head: str):
+    def __init__(self, camp: dict, plan: dict, log: Log, stack: Stack, head: str, replace: bool = False):
         self.camp, self.plan, self.log, self.stack, self.head = camp, plan, log, stack, head
         self.name = camp["name"]
         self.dir = RESULTS / self.name
         self.timer = camp["shutdown_after_minutes"]
+        self.replace = replace
         self.stop = threading.Event()
         self.bucket = ""
         self.status: dict[str, str] = {}
+        self.started: set[str] = set()  # the runs whose hosts this launcher created (or tried to)
+
+    def clear_the_way(self, name: str, say) -> datetime.datetime | None:
+        """Just before a run's hosts are created. An instance tagged with the run that is still there
+        refuses it (an earlier attempt's host, or another launcher's, could still write to its
+        prefix). What an earlier attempt left in results/<rid>/ or the bucket's runs/<rid>/ refuses
+        it too, or with --replace is archived under superseded/: the bucket's objects copied and
+        every copy checked, the local directory moved, and only then the bucket's originals deleted
+        and the prefix checked empty. Returns the bucket's stamp on the newest archive copy (S3's
+        clock; whatever this attempt writes is stamped later), None when the bucket held nothing.
+        Raises Refused or StepFailed; the run then doesn't start."""
+        rid, rdir = f"{self.name}/{name}", self.dir / name
+        prefix = f"runs/{rid}/"
+        still = campaign_instances(self.name, [name])
+        if still:
+            raise Refused(f"an instance tagged with it is still there ({instances_text(still)}); it could still "
+                          f"write to {prefix}")
+        objects = list_objects(self.bucket, prefix)
+        what = earlier_attempt(self.name, name, local_files(rdir), objects)
+        if what is None:
+            return None
+        if not self.replace:
+            raise Refused(f"an earlier attempt is in the way ({what}); launch it again with --replace to "
+                          f"archive that under {SUPERSEDED}/")
+        archived = f"{name}-{utc_stamp()}"
+        newest = None
+        if objects:
+            dst = f"{SUPERSEDED}/{self.name}/{archived}/"
+            newest = copy_prefix(self.bucket, prefix, dst, objects)
+            markers = sum(1 for o in objects if folder_marker(o))
+            say(f"archive: copied the {len(objects) - markers} objects under {prefix} to {dst} in the results "
+                f"bucket{f' ({markers} empty folder markers need no copy)' if markers else ''}")
+        if rdir.exists():
+            dest = self.dir.parent / SUPERSEDED / self.name / archived
+            if dest.exists():
+                raise StepFailed(f"can't archive results/{rid}/: {dest} already exists; nothing was deleted")
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                shutil.move(rdir, dest)
+            except OSError as exc:
+                raise StepFailed(f"moving results/{rid}/ to {dest} failed ({exc}); nothing was deleted") from exc
+            say(f"archive: moved results/{rid}/ to results/{SUPERSEDED}/{self.name}/{archived}/")
+        if objects:
+            try:
+                delete_objects(self.bucket, [o["Key"] for o in objects])
+            except StepFailed as exc:
+                raise StepFailed(f"{exc}; every original has its copy under {SUPERSEDED}/{self.name}/{archived}/, "
+                                 f"and what wasn't deleted is still under {prefix}") from exc
+            say(f"archive: deleted the {len(objects)} originals under {prefix} (their copies are under "
+                f"{SUPERSEDED}/{self.name}/{archived}/, and the bucket keeps them as old versions)")
+        again = list_objects(self.bucket, prefix)
+        if again:
+            raise Refused(f"{prefix} holds {len(again)} objects again after the archive (first: "
+                          f"{again[0]['Key'][len(prefix):]} at {again[0]['LastModified']}): something is still "
+                          "writing there. They're kept, and the run isn't launched")
+        return newest
 
     def carry_out(self, run: dict) -> None:
         name = run["run"]
@@ -400,8 +705,9 @@ class Campaign:
         rdir = self.dir / name
         ops = rdir / "ops"
         say = lambda m: self.log(m, name)  # noqa: E731
-        created = False
+        created = cleared = False
         started = time.time()
+        since = None  # the pull takes nothing the bucket stamped earlier
         deadline = started + self.timer * 60 - 180  # the hosts shut themselves down at the timer
 
         def left() -> int:
@@ -424,9 +730,17 @@ class Campaign:
         try:
             if self.stop.is_set():
                 raise StepFailed("the launcher was interrupted before this run started")
+            archived_at = self.clear_the_way(name, say)
+            cleared = True  # results/<rid>/ and runs/<rid>/ now hold only what this attempt writes
+            # The bucket's own stamp on the archive copies when it held an earlier attempt (no clock
+            # skew), else the launcher's clock less a margin for skew.
+            since = archived_at or (datetime.datetime.now(datetime.timezone.utc)
+                                    - datetime.timedelta(seconds=CLOCK_SKEW_S))
+            deadline = time.time() + self.timer * 60 - 180
             say(f"creating a {run['worker_instance_type']} worker host and a {run['support_instance_type']} "
                 "support host")
             created = True  # from here on the run's hosts are destroyed at the end, even if this apply fails midway
+            self.started.add(name)  # and the sweep destroys what's left of them
             ids = self.stack.add(name, run["worker_instance_type"], run["support_instance_type"])
             wid, sid, sip = ids["worker_id"], ids["support_id"], ids["support_ip"]
             say(f"worker {wid}, support {sid} at {sip}")
@@ -461,6 +775,9 @@ class Campaign:
                  must=False)
             step("support-sync", sid, f"FLEETKIT_RUN_ID={rid} bash /opt/fleetkit/images/support/sync.sh 2>&1", 600,
                  must=False)
+        except Refused as exc:
+            say(f"REFUSED: {exc}")
+            self.status[name] = f"refused: {exc}"
         except StepFailed as exc:
             say(f"FAILED: {exc}")
             self.status[name] = f"failed: {exc}"
@@ -474,25 +791,69 @@ class Campaign:
                     say("hosts destroyed")
                 except Exception as exc:
                     say(f"DESTROY FAILED: {exc}; the final sweep will retry")
-                self.pull(rid, rdir, say)
-                for line in (rdir / "ops.jsonl").read_text().splitlines() if (rdir / "ops.jsonl").exists() else []:
-                    e = json.loads(line)
-                    say("ops: " + " ".join(f"{k}={e[k]}" for k in ("event", "trial_id", "density", "cause", "next")
-                                          if e.get(k) is not None))
-            got = run_status(EXPAND.read_json(rdir / "run.json") if (rdir / "run.json").exists() else None)
+                self.pull(rid, rdir, say, since=since)
+                try:
+                    for line in (rdir / "ops.jsonl").read_text().splitlines() if (rdir / "ops.jsonl").exists() else []:
+                        e = json.loads(line)
+                        say("ops: " + " ".join(f"{k}={e[k]}" for k in ("event", "trial_id", "density", "cause",
+                                                                       "next") if e.get(k) is not None))
+                except Exception as exc:
+                    say(f"ops.jsonl couldn't be read: {type(exc).__name__}: {exc}")
+            # results/<rid>/ is this attempt's only once the way was cleared; before that it's an earlier one's
+            try:
+                got = run_status(EXPAND.read_json(rdir / "run.json") if cleared and (rdir / "run.json").exists()
+                                 else None)
+            except Exception as exc:
+                say(f"run.json couldn't be read: {type(exc).__name__}: {exc}")
+                got = run_status(None)
             self.status.setdefault(name, got)
             if self.status[name] != got:
                 self.status[name] += f" ({got})"
             say(f"ended: {self.status[name]} after {int((time.time() - started) / 60)} min")
 
-    def pull(self, rid: str, rdir: Path, say) -> None:
-        src = f"s3://{self.bucket}/runs/{rid}"
-        for sub, dest, extra in (("run/", rdir, []), ("support/", rdir / "support", []),
-                                 ("", rdir / "ops" / "host", ["--exclude", "run/*", "--exclude", "support/*"])):
-            p = aws("s3", "sync", "--quiet", f"{src}/{sub}", str(dest), *extra, check=False, parse=False)
-            if p.returncode != 0:
-                say(f"pull {sub or 'host files'}: exit {p.returncode} {p.stderr.strip()[-200:]}")
-        say(f"pulled into results/{rid}/")
+    def pull(self, rid: str, rdir: Path, say, since: datetime.datetime, batch: int = 500) -> None:
+        """Download what this attempt wrote under the bucket's runs/<rid>/: run/ into results/<rid>/,
+        support/ into its support/, the rest (SSM output, host files) into its ops/host/. Only objects
+        the bucket stamped at or after ``since`` are downloaded, each named by its own --include, and
+        only into a results/<rid>/ holding nothing but this attempt's ops/*.txt, so nothing an earlier
+        attempt left, there or in the bucket, can mix with this one. Never raises: a failure is
+        logged, and what wasn't pulled is still in the bucket."""
+        try:
+            self._pull(rid, rdir, say, since, batch)
+        except Exception as exc:
+            say(f"pull: failed ({type(exc).__name__}: {exc}); what wasn't pulled is still in the results bucket "
+                f"under runs/{rid}/")
+
+    def _pull(self, rid: str, rdir: Path, say, since: datetime.datetime, batch: int) -> None:
+        prefix = f"runs/{rid}/"
+        stray = sorted(str(p.relative_to(rdir)) for p in rdir.rglob("*")
+                       if p.is_file() and not (p.parent == rdir / "ops" and p.suffix == ".txt")) \
+            if rdir.exists() else []
+        if stray:
+            say(f"pull: results/{rid}/ already holds {len(stray)} files this attempt didn't write (e.g. {stray[0]}), "
+                f"so nothing was pulled into it; it's all still in the results bucket under {prefix}")
+            return
+        try:
+            objects = list_objects(self.bucket, prefix)
+        except StepFailed as exc:
+            say(f"pull: couldn't list {prefix} in the results bucket, so nothing was pulled; it's all still "
+                f"there: {exc}")
+            return
+        new, old = split_by_time(objects, since)
+        if old:
+            say(f"pull: left out {len(old)} objects under {prefix} stamped before this attempt "
+                f"({since:%H:%M:%S} UTC), e.g. {old[0]['Key'][len(prefix):]} at {old[0]['LastModified']}")
+        rels = [o["Key"][len(prefix):] for o in new]
+        for sub, dest in (("run/", rdir), ("support/", rdir / "support"), ("", rdir / "ops" / "host")):
+            keys = [k[len(sub):] for k in rels
+                    if (k.startswith(sub) if sub else not k.startswith(("run/", "support/")))]
+            for i in range(0, len(keys), batch):  # keeps the command line short
+                only = [arg for k in keys[i:i + batch] for arg in ("--include", glob_escape(k))]
+                p = aws("s3", "sync", "--only-show-errors", f"s3://{self.bucket}/{prefix}{sub}", str(dest),
+                        "--exclude", "*", *only, check=False, parse=False)
+                if p.returncode != 0:
+                    say(f"pull {sub or 'host files'}: exit {p.returncode} {(p.stderr or p.stdout).strip()[-300:]}")
+        say(f"pulled {len(new)} objects into results/{rid}/")
 
     def launch(self, free_vcpus: int) -> None:
         queue = queue_order(self.plan)
@@ -520,24 +881,37 @@ class Campaign:
                 th.join()
 
     def sweep(self) -> list[str]:
-        """Destroy what's left in the state, terminate anything still tagged with the campaign, and
-        return what is still running (should be nothing)."""
+        """Destroy what's left of the runs this launcher started, and the campaign's support security
+        group too once the state holds no other run's hosts; terminate any instance still tagged
+        with one of those runs. Another launcher's hosts are never touched. Returns what of this
+        launcher's runs is still there (should be nothing)."""
+        ours = sorted(self.started)
         try:
-            gone = self.stack.destroy_all()
-            self.log(f"sweep: terraform destroyed {len(gone)} resources")
+            others = sorted(self.stack.state_runs() - set(ours))
+        except Exception as exc:
+            others = None
+            self.log(f"sweep: the campaign's state couldn't be read ({exc}); destroying only this launcher's hosts")
+        try:
+            gone = self.stack.destroy(set(ours), everything=others == [])
+            self.log(f"sweep: terraform destroyed {len(gone)} resources"
+                     + (f"; the state still holds hosts of {', '.join(others)}, which aren't this launcher's, so "
+                        "the support security group stays" if others else ""))
         except Exception as exc:
             self.log(f"sweep: terraform destroy failed: {exc}")
-        tag = [f"Name=tag:Campaign,Values={self.name}"]
-        live = ["Name=instance-state-name,Values=pending,running,stopping,stopped"]
-        ids = aws("ec2", "describe-instances", "--filters", *tag, *live,
-                  "--query", "Reservations[].Instances[].InstanceId", check=False) or []
-        if ids:
-            self.log(f"sweep: terminating {len(ids)} instances still tagged Campaign={self.name}: {' '.join(ids)}")
-            aws("ec2", "terminate-instances", "--instance-ids", *ids, check=False, parse=False)
-            time.sleep(20)
-        left = aws("ec2", "describe-instances", "--filters", *tag, *live,
-                   "--query", "Reservations[].Instances[].[InstanceId, State.Name]", check=False) or []
-        return [f"{i} {s}" for i, s in left]
+        if not ours:
+            return []
+        try:
+            still = campaign_instances(self.name, ours)
+            if still:
+                self.log(f"sweep: terminating {len(still)} instances still tagged with this launcher's runs: "
+                         f"{instances_text(still, most=50)}")
+                aws("ec2", "terminate-instances", "--instance-ids", *[i for i, _, _ in still], check=False,
+                    parse=False)
+                time.sleep(self.settle_s)
+                still = campaign_instances(self.name, ours)
+        except StepFailed as exc:
+            return [f"unknown (the instances couldn't be listed: {exc})"]
+        return [f"{iid} {state}" for iid, _, state in still]
 
 
 # ------------------------------------------------------------------ command line
@@ -549,9 +923,14 @@ def main(argv=None) -> int:
                     help="project spend so far in USD, when Cost Explorer can't be read")
     ap.add_argument("--runs", default=None, help="launch only these runs of the campaign (comma-separated)")
     ap.add_argument("--quota", type=int, default=None, help="with --dry-run: plan waves under this vCPU quota")
+    ap.add_argument("--replace", action="store_true",
+                    help=f"with --runs: launch those runs again over their earlier attempts, archiving each one's "
+                         f"results/<campaign>/<run>/ and the bucket's runs/<campaign>/<run>/ under {SUPERSEDED}/ first")
     a = ap.parse_args(argv)
     if a.quota is not None and not a.dry_run:
         ap.error("--quota is only for --dry-run; a launch reads the live quota")
+    if a.replace and not a.runs:
+        ap.error("--replace archives the earlier attempts of the runs it launches, so name them with --runs")
     for tool in ("terraform", "aws", "git"):
         if not shutil.which(tool):
             print(f"{tool} isn't on the PATH", file=sys.stderr)
@@ -593,26 +972,78 @@ def main(argv=None) -> int:
     in_use = vcpus_running()
     free = (quota - in_use) if quota is not None else None
     spent = a.spent if a.spent is not None else spent_so_far()
-    existing = [p["run"] for p in plan["runs"] if (RESULTS / camp["name"] / p["run"]).exists()]
+    # The bucket the hosts write to is in the account the campaign stack assumes a role in; every
+    # listing, copy and delete here goes through the member-account profile, so the two must agree.
+    member, stack_acct = member_account(), stack_account()
+    bucket = results_bucket(member) if member and member == stack_acct else None
+    found, unlisted = earlier_attempts(camp["name"], [p["run"] for p in plan["runs"]], bucket)
+    earlier = {run: what for run, (files, objects) in found.items()
+               if (what := earlier_attempt(camp["name"], run, files, objects))}
     pushed = head_pushed()
-    why_not = refusals(path, plan, spent=spent, free_vcpus=free, head_pushed=pushed, existing_runs=existing,
-                       uncommitted=uncommitted())
+    why_not = refusals(path, plan, spent=spent, free_vcpus=free, head_pushed=pushed, earlier=earlier,
+                       replace=a.replace, uncommitted=uncommitted())
     if quota is None:
         why_not.append("the vCPU quota couldn't be read")
+    if member is None:
+        why_not.append(f"the member-account profile's ({MEMBER_PROFILE}) account couldn't be read, so an earlier "
+                       "attempt in the results bucket can't be ruled out")
+    elif stack_acct is None:
+        why_not.append("the account the campaign stack creates hosts in couldn't be read (member_role_arn in "
+                       "infra/experiments/terraform.tfvars), so the results bucket they write to isn't known")
+    elif member != stack_acct:
+        why_not.append(f"the member-account profile ({MEMBER_PROFILE}, FLEETKIT_AWS_PROFILE) is for another account "
+                       "than the one the campaign stack creates hosts in (member_role_arn in "
+                       "infra/experiments/terraform.tfvars): the results bucket checked here for earlier attempts "
+                       "wouldn't be the one the hosts write to")
+    for run in unlisted:
+        why_not.append(f"{run}: runs/{camp['name']}/{run}/ in the results bucket couldn't be listed, so an earlier "
+                       "attempt there can't be ruled out")
+    try:
+        still = campaign_instances(camp["name"])
+    except StepFailed:
+        still = None
+        why_not.append(f"the account's instances couldn't be listed, so another launcher of {camp['name']} still "
+                       "running can't be ruled out")
+    if still:
+        why_not.append(f"instances of {camp['name']} are still there ({instances_text(still)}): another launcher of "
+                       "it may be running, and this one would share its Terraform state, whose changes would destroy "
+                       "them. Launch once they have ended (every host terminates itself after "
+                       "shutdown_after_minutes)")
     cap = EXPAND.LIMITS["project_cap_usd"]
     print(f"Account: vCPU quota {live_quota if live_quota is not None else 'unknown'}"
           f"{f' (planning under {quota})' if a.quota is not None else ''}, {in_use} vCPUs running now, "
           f"{free if free is not None else '?'} free. Spent ${spent if spent is not None else '?'} of the "
           f"${cap:,.0f} cap{' (--spent)' if a.spent is not None else ' (Cost Explorer; lags up to a day)'}; "
           f"this campaign's worst case is ${plan['worst_case_usd']:,.2f}.")
+    preview = archive_preview(camp["name"], {run: found[run] for run in earlier})
+    if preview:
+        print(f"\n{'--replace archives' if a.replace else 'With --replace, a launch would archive'} each earlier "
+              "attempt just before that run's hosts are created (<UTC> is when):")
+        for line in preview:
+            print(f"  {line}")
     head = head_commit()
     log = Log(None if a.dry_run else RESULTS / camp["name"] / "launch.log")
+    log.hide(bucket)
+    for account in (member, stack_acct):  # an AWS error message can quote an ARN
+        if account and account.isdigit():
+            log.hide(account, HIDDEN_ACCOUNT)
     stack = Stack(camp["name"], camp["shutdown_after_minutes"], head, log)
 
     if a.dry_run:
         print(f"\nterraform plan of every run's hosts at once (commit {head[:12]}; no lock, nothing applied):")
         try:
             stack.init()
+            try:
+                stale = stale_hosts(stack, camp["name"])
+                if stale:
+                    print(f"  the campaign's state still holds hosts of {', '.join(sorted(stale))}, none of them still "
+                          "there; a launch clears them from it first")
+            except Refused as exc:
+                if not still:  # else the instances still there are named above
+                    why_not.append(str(exc))
+            except StepFailed:
+                why_not.append("the campaign's Terraform state, or the instances of the hosts it holds, couldn't be "
+                               f"read, so another launcher of {camp['name']} still running can't be ruled out")
             runs = {p["run"]: {"worker_instance_type": p["worker_instance_type"],
                                "support_instance_type": p["support_instance_type"]} for p in plan["runs"]}
             _, changes, text = stack.plan(runs, lock=False)
@@ -646,19 +1077,29 @@ def main(argv=None) -> int:
     (cdir / "campaign.json").write_bytes(as_launched)
     log(f"launching {camp['name']}: {len(plan['runs'])} runs, commit {head[:12]}, worst case "
         f"${plan['worst_case_usd']:,.2f}, {free} vCPUs free")
-    c = Campaign(camp, plan, log, stack, head)
+    c = Campaign(camp, plan, log, stack, head, replace=a.replace)
     try:
         stack.init()
+        stale = stale_hosts(stack, camp["name"])  # another launcher may have started since the check
+        if stale:
+            log(f"the campaign's state still holds hosts of {', '.join(sorted(stale))}, none of them still there "
+                "(a launcher stopped before its sweep): clearing them from it")
+            stack.destroy(stale, everything=True)
         stack.setup()
         c.bucket = stack.bucket()
+        log.hide(c.bucket)
+        if c.bucket != bucket:  # the runs' prefixes were checked in the bucket the launcher named
+            raise StepFailed("the campaign stack's results bucket isn't the one the launcher checked; not launching")
         c.launch(free)
     except KeyboardInterrupt:
         c.stop.set()
+    except Refused as exc:
+        log(f"REFUSED: {exc}")
     except Exception as exc:
         log(f"launcher error: {type(exc).__name__}: {exc}")
     finally:
         left = c.sweep()
-        log("sweep: nothing of the campaign is left running" if not left else
+        log("sweep: nothing this launcher started is left running" if not left else
             f"SWEEP: STILL RUNNING: {', '.join(left)}")
     log("runs: " + "; ".join(f"{n}: {s}" for n, s in sorted(c.status.items())))
     return 0 if all(s == "complete" for s in c.status.values()) and len(c.status) == len(plan["runs"]) and not left \
