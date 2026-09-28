@@ -1,9 +1,16 @@
 """The trial protocol (design sections 4, 5, 6 and 11).
 
 One trial at density N: optional settle wait, fixture check, create N microVMs, wait until all are
-ready or failed, release a barrier so N tasks start together (or spaced by launch_interval_ms),
-collect rows as they return, destroy every microVM, verify-clean, write trial.json with the trial's
+ready or failed, optionally wait ``release_after_ready_s`` more with every microVM ready and idle (a
+warm start), release a barrier so N tasks start together (or spaced by launch_interval_ms), collect
+rows as they return, destroy every microVM, verify-clean, write trial.json with the trial's
 ``trial_kind`` and its ``evaluation`` against the criteria (driver/criteria.py).
+
+The wait after ready sits between ``all_ready`` and ``barrier_release``: task times start at the
+release, so no task's time includes it; the execution window (release to last task return) leaves it
+out and the observed window (create to verify-clean) takes it in. trial.json records the wait asked
+for (``release_after_ready_s``) and the wait carried out (``timestamps.release_wait_start`` and
+``release_wait_end``, null when the trial did not wait).
 
 A counting trial is numbered from 1 within its density, ``d<N>-t<number>`` ("trial 2 at density 8"
 is ``d8-t2``); warm-up, illustration and fault trials are labelled instead. ``sequence`` records the
@@ -73,8 +80,8 @@ class TrialRunner:
         self.trial_dir = rundir.trial_dir(self.trial_id)
         self.microvms: list[MicrovmRec] = []
         self.timestamps: dict[str, float | None] = {
-            "create_start": None, "all_ready": None, "barrier_release": None,
-            "last_task_return": None, "verify_clean_pass": None,
+            "create_start": None, "all_ready": None, "release_wait_start": None, "release_wait_end": None,
+            "barrier_release": None, "last_task_return": None, "verify_clean_pass": None,
         }
         self.phase = "starting"
         self.error: str | None = None
@@ -133,7 +140,7 @@ class TrialRunner:
             ready = [s for s in self.microvms if s.ready]
             if ready and cfg.release_after_ready_s > 0:
                 self.phase = "release_wait"
-                time.sleep(cfg.release_after_ready_s)
+                self._release_wait(len(ready))
             if ready:
                 self.phase = "fixture_recheck"
                 try:
@@ -213,6 +220,20 @@ class TrialRunner:
                               "cpu_util_max": max(values) if values else None, "samples": len(values)}
             sp.set(**{"fleetkit.cpu_util_mean": self.pre_trial["cpu_util_mean"]})
         self._log("INFO", "settled", **{k: v for k, v in self.pre_trial.items() if v is not None})
+
+    def _release_wait(self, n_ready: int) -> None:
+        """Hold every ready microVM ready and idle for release_after_ready_s before the barrier (a warm
+        start), recording when the wait began and ended. hostd's idle reaper allows for it (spec.timeouts)."""
+        wait_s = float(self.cfg.release_after_ready_s)
+        with self.tr.start_span("release_wait", self.span, {"fleetkit.release_after_ready_s": wait_s,
+                                                            "fleetkit.ready": n_ready}):
+            self.timestamps["release_wait_start"] = time.time()
+            t0 = time.monotonic()
+            self._write_trial_json()  # an interrupted trial shows it was waiting
+            time.sleep(max(0.0, wait_s - (time.monotonic() - t0)))
+            self.timestamps["release_wait_end"] = time.time()
+        self._log("INFO", "waited after ready", release_after_ready_s=wait_s,
+                  waited_s=round(self.timestamps["release_wait_end"] - self.timestamps["release_wait_start"], 3))
 
     def _fixture_check_and_products(self) -> None:
         with self.tr.start_span("fixture_check", self.span) as sp:
@@ -573,6 +594,7 @@ class TrialRunner:
             "timeouts": cfg.timeouts.as_dict(),
             "fixture": {"check_url": cfg.fixture_check_url, "guest_base_url": cfg.guest_fixture_base_url(),
                         "products_source": self.products_source, "products": len(self.products)},
+            "release_after_ready_s": float(cfg.release_after_ready_s),
             "timestamps": dict(self.timestamps),
             "pre_trial": self.pre_trial,
             "sample_interval_ms": cfg.sample_interval_ms, "screenshot_each_step": bool(cfg.screenshot_each_step),

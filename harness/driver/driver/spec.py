@@ -26,9 +26,9 @@ HARNESS = {
     "stop_at_first_miss": True,    # the run goes no higher than the first density that doesn't pass
     "metrics_hz": 5.0,             # worker host samples per second (hostd runs with --metrics-period 0.2)
     "sample_interval_ms": 200,     # each microVM samples its own processes during its task
-    "release_after_ready_s": 0.0,  # the tasks start together the moment every microVM is ready
-    "reaper_margin_s": 120.0,      # hostd's reapers, a backstop only: idle after ready_timeout_s plus this,
-                                   # lifetime after ready_timeout_s + task timeout + 2.5x this
+    "reaper_margin_s": 120.0,      # hostd's reapers, a backstop only: idle after ready_timeout_s plus the wait
+                                   # after ready plus this, lifetime after ready_timeout_s + the wait after
+                                   # ready + task timeout + 2.5x this (RunSpec.timeouts)
     "reruns": 1,                   # a trial that fails outside the experiment runs again once (driver/clean.py)
 }
 
@@ -38,7 +38,7 @@ SPEC_OWNED_OPTIONS = (
     "--stop-at-first-miss", "--metrics-hz", "--sample-interval-ms", "--step-p50-target-ms",
     "--step-p95-target-ms", "--task-p95-target-ms", "--ready-timeout-s", "--step-timeout-ms",
     "--task-timeout-ms", "--vcpus", "--mem-mib", "--fault", "--max-lifetime-s", "--idle-timeout-s",
-    "--launch-interval-ms", "--backend", "--no-host-metrics", "--no-fixture-probe",
+    "--launch-interval-ms", "--backend", "--no-host-metrics", "--no-fixture-probe", "--release-after-ready-s",
 )
 
 
@@ -71,13 +71,21 @@ class RunSpec:
     def densities(self) -> list[int]:
         return [int(d) for d in self.spec["densities"]]
 
+    @property
+    def release_after_ready_s(self) -> float:
+        """Seconds each trial waits once every microVM is ready before it releases the tasks. Optional in
+        the spec (specs recorded before it existed leave it out): absent is 0, the tasks start at once."""
+        return float(self.spec["procedure"].get("release_after_ready_s", 0))
+
     def timeouts(self) -> dict:
-        """The trial's timeouts: the spec's three, and hostd's reapers set well clear of them."""
-        c, m = self.spec["criteria"], HARNESS["reaper_margin_s"]
+        """The trial's timeouts: the spec's three, and hostd's reapers set well clear of them. A microVM
+        sits ready and idle from its own ready until the release, at most ready_timeout_s plus the wait after
+        ready, so both reapers allow for the wait; with no wait they are what they always were."""
+        c, m, w = self.spec["criteria"], HARNESS["reaper_margin_s"], self.release_after_ready_s
         return {"ready_timeout_s": float(c["ready_timeout_s"]), "step_timeout_ms": int(c["step_timeout_ms"]),
                 "task_timeout_ms": int(c["task_timeout_ms"]),
-                "idle_timeout_s": float(c["ready_timeout_s"]) + m,
-                "max_lifetime_s": float(c["ready_timeout_s"]) + c["task_timeout_ms"] / 1000.0 + 2.5 * m,
+                "idle_timeout_s": float(c["ready_timeout_s"]) + w + m,
+                "max_lifetime_s": float(c["ready_timeout_s"]) + w + c["task_timeout_ms"] / 1000.0 + 2.5 * m,
                 "launch_interval_ms": 0}
 
     def record(self) -> dict:

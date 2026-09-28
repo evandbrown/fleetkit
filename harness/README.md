@@ -107,16 +107,22 @@ For each density in `--densities`, and for each trial at it (`--trials-per-densi
 3. `wait_ready`: `GET /microvms/{id}` every 250 ms until every microVM is `ready` or terminal;
    hostd enforces `ready_timeout_s`, the driver waits at most 30 s longer for a terminal state.
    `all_ready` is taken when the loop ends.
-4. `fixture_recheck`, then `tasks`: one thread per ready microVM waits at a barrier;
+4. `release_wait`, only with a wait after ready (the spec's `procedure.release_after_ready_s`, or
+   `--release-after-ready-s`; 0 by default): every ready microVM sits ready and idle that many
+   seconds more, so the tasks meet a warm pool rather than browsers still finishing startup.
+   `release_wait_start` and `release_wait_end` are taken around it (null without a wait), and
+   hostd's idle and lifetime reapers are given the wait on top of their usual margin.
+5. `fixture_recheck`, then `tasks`: one thread per ready microVM waits at a barrier;
    `barrier_release` is taken as it opens. With `launch_interval_ms > 0` thread *i* starts
    *i* x interval later. Each posts `/microvms/{id}/task` with the driver client timeout
    (`task_timeout_ms + 5000 + 5000`), appends its `tasks.csv` and `steps.csv` rows, saves
    `screenshots/<task_id>.jpg` and `guest-logs/<microvm_id>.jsonl`, then reads the microVM's state
    once more (the fault table's "microVM stays ready").
-5. `cleanup`: `DELETE /microvms/{id}` for every microVM in parallel, poll until destroyed,
+6. `cleanup`: `DELETE /microvms/{id}` for every microVM in parallel, poll until destroyed,
    append `microvms.csv` rows with hostd's `startup_ms`, `cleanup_ms`, `outcome`.
-6. `verify_clean`: `GET /host/verify-clean`; `verify_clean_pass` is taken only when it is clean.
-7. `trial.json` written (it is also rewritten at every phase change, with `complete: false`).
+7. `verify_clean`: `GET /host/verify-clean`; `verify_clean_pass` is taken only when it is clean.
+8. `trial.json` written (it is also rewritten at every phase change, with `complete: false`),
+   with the wait asked for as `release_after_ready_s`.
 
 Products are assigned `list[slot mod len]`. MicroVMs that never became ready get no task; the
 trial dispatches fewer tasks than its density (`counts.tasks_dispatched`) and is marked
@@ -233,7 +239,9 @@ bundles that omit them.
   passing too. Never maximum capacity.
 - **Cost**: execution-only $/task = price/h x (last task return - barrier release) / tasks ok;
   observed $/task = price/h x (verify-clean pass - first create) / tasks ok; host provisioning time
-  on its own line, in neither; fixture-serving cost estimated from `request_count` at published S3
+  on its own line, in neither. A wait after ready falls before the barrier release, so it is in the
+  observed window and not the execution one, and task times, which start at the release, never
+  include it; fixture-serving cost estimated from `request_count` at published S3
   request pricing (`--s3-get-price-per-1000`, default $0.0004; in-region transfer to EC2 is free),
   labeled an estimate because nginx served the fixture. Prices are **assumed**, timings and counts
   **measured**, cost per task **modeled**.
@@ -255,6 +263,13 @@ bundles that omit them.
 | `max_lifetime_s` | 600 |
 | `idle_timeout_s` | 120 |
 | `launch_interval_ms` | 0 (all at once) |
+
+With `--spec` the step, task and ready timeouts are the spec's, and the reapers follow from them
+(`harness/driver/driver/spec.py`, `RunSpec.timeouts`): `idle_timeout_s` = `ready_timeout_s` + the
+wait after ready + 120, `max_lifetime_s` = `ready_timeout_s` + the wait after ready +
+`task_timeout_ms` / 1000 + 300. Without `--spec`, a wait (`--release-after-ready-s`) is refused unless
+`--ready-timeout-s` plus it is below `--idle-timeout-s` and, with `--task-timeout-ms`, below
+`--max-lifetime-s`: a microVM ready at once sits idle until the last is ready and then through the wait.
 
 **Failure categories** (closed set): `ok`, `step_timeout`, `task_timeout`, `assertion_failed`,
 `navigation_error`, `browser_crashed`, `guest_unreachable`, `microvm_not_ready`. `failed_step`
@@ -345,8 +360,9 @@ group (`browser, renderer, gpu, network, utility, zygote, chromium_other, guestd
 **`trial.json`**: ids (`run_id`, `trial_id`, `trace_id`, `host_id`), `density`, `trial_number` (null
 for labelled trials), `sequence`, `trial_kind`, `backend`, `fault`, `vcpus`, `mem_mib`, `timeouts`
 used (including the derived proxy deadline and client timeout), `fixture` (check URL, guest base
-URL, products source), `timestamps` (`create_start`, `all_ready`, `barrier_release`,
-`last_task_return`, `verify_clean_pass`), `counts` (`microvms_requested`, `microvms_created`,
+URL, products source), `release_after_ready_s` (the wait after ready asked for, 0 for none),
+`timestamps` (`create_start`, `all_ready`, `release_wait_start` and `release_wait_end` (null
+without a wait), `barrier_release`, `last_task_return`, `verify_clean_pass`), `counts` (`microvms_requested`, `microvms_created`,
 `microvms_ready`, `microvms_failed_startup`, `microvms_by_outcome`, `tasks_dispatched`, `tasks_ok`,
 `tasks_by_failure_category`), `status` (`ok | degraded | failed`), `complete`, `phase`, `passed`
 (the trial's verdict, equal to `evaluation.passed`), `criteria`, `evaluation`, `error`, `verify_clean`,

@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from driver.clean import outside_cause
+from driver.evidence import iter_spans
 from driver.spec import SpecError, load as load_spec, refusals
 
 from tests.conftest import run_cli
@@ -243,6 +244,146 @@ def test_a_trial_without_a_spec_is_never_mixed_in(tmp_path, fc_hostd, fixture_si
                    fixture_site.url, "--out", out, "--quiet", "--no-lgtm", "--densities", "1") == 0
     assert run_cli(*spec_args(fc_hostd, fixture_site, out, write_spec(tmp_path / "spec.json"))) == 2
     assert "without this spec" in capsys.readouterr().err
+
+
+# ---- the wait after ready (a warm start) ------------------------------------------------------
+
+def _trial(out: Path, tid: str) -> dict:
+    return json.loads((out / "trials" / tid / "trial.json").read_text())
+
+
+def test_timeouts_allow_for_the_wait_after_ready_and_no_wait_leaves_them_as_they_were(tmp_path):
+    cold = load_spec(write_spec(tmp_path / "cold.json"))
+    assert "release_after_ready_s" not in cold.spec["procedure"] and cold.release_after_ready_s == 0.0
+    # exactly the formula from before the wait existed: idle after ready_timeout_s + 120, lifetime + task + 300
+    assert cold.timeouts() == {"ready_timeout_s": 10.0, "step_timeout_ms": 5000, "task_timeout_ms": 10000,
+                               "idle_timeout_s": 130.0, "max_lifetime_s": 320.0, "launch_interval_ms": 0}
+    zero = load_spec(write_spec(tmp_path / "zero.json", procedure={**SPEC["procedure"], "release_after_ready_s": 0}))
+    assert zero.timeouts() == cold.timeouts()
+    warm = load_spec(write_spec(tmp_path / "warm.json", procedure={**SPEC["procedure"], "release_after_ready_s": 60}))
+    t = warm.timeouts()
+    assert t["idle_timeout_s"] == 190.0 and t["max_lifetime_s"] == 380.0
+    with pytest.raises(SpecError) as e:
+        load_spec(write_spec(tmp_path / "long.json", procedure={**SPEC["procedure"], "release_after_ready_s": 61}))
+    assert e.value.problems == ["procedure.release_after_ready_s: must be at most 60"]
+
+
+def test_the_reapers_outlast_the_longest_wait_on_the_largest_metal_trial(tmp_path):
+    # A metal worker host at its full 192 microVMs, the metal ready timeout (900 s) and the longest wait (60 s):
+    # a microVM ready at once sits idle until the driver sees the last one ready or failed (at most
+    # ready_timeout_s + READY_GRACE_S), then through the wait and the fixture recheck (5 s timeout), before its
+    # task starts; and it lives that long plus the task (at most the client timeout) and its cleanup.
+    from driver.config import DESTROY_GRACE_S, READY_GRACE_S, Timeouts
+    from driver.products import fixture_check
+    import inspect
+    recheck_s = inspect.signature(fixture_check).parameters["timeout_s"].default
+    for task_timeout_ms in (45000, 600000):
+        rs = load_spec(write_spec(
+            tmp_path / "metal.json", worker_host={"instance_type": "m8i.metal-48xl"}, densities=[1, 96, 192],
+            criteria={**SPEC["criteria"], "ready_timeout_s": 900, "task_timeout_ms": task_timeout_ms},
+            procedure={**SPEC["procedure"], "release_after_ready_s": 60}))
+        t = rs.timeouts()
+        assert (t["idle_timeout_s"], t["max_lifetime_s"]) == (1080.0, 1260.0 + task_timeout_ms / 1000)
+        longest_idle = 900 + READY_GRACE_S + 60 + recheck_s
+        client_s = Timeouts(task_timeout_ms=task_timeout_ms).client_timeout_ms / 1000
+        longest_life = longest_idle + client_s + DESTROY_GRACE_S
+        assert t["idle_timeout_s"] - longest_idle >= 60 and t["max_lifetime_s"] - longest_life >= 120
+
+
+def test_a_warm_start_waits_after_ready_records_the_wait_and_keeps_it_out_of_task_times(tmp_path, fc_hostd,
+                                                                                        fixture_site):
+    wait = 0.5
+    out = tmp_path / "run"
+    spec = write_spec(tmp_path / "spec.json", densities=[1, 2],
+                      procedure={**SPEC["procedure"], "release_after_ready_s": wait})
+    assert run_cli(*spec_args(fc_hostd, fixture_site, out, spec)) == 0
+    run = json.loads((out / "run.json").read_text())
+    assert run["spec"]["procedure"]["release_after_ready_s"] == wait
+    assert run["harness"]["release_after_ready_s"] == wait  # a spec field now; harness records the wait carried out
+    assert (run["harness"]["idle_timeout_s"], run["harness"]["max_lifetime_s"]) == (130.5, 320.5)
+    reqs = [m.request for m in fc_hostd.host.microvms.values()]
+    assert reqs and all((r["idle_timeout_s"], r["max_lifetime_s"]) == (130.5, 320.5) for r in reqs)
+
+    tasks, vms = rows(out, "tasks"), rows(out, "microvms")
+    # every trial waits, the labelled ones too
+    assert trial_ids(out) == ["d1-t1", "d2-t1", "illustration", "warmup"]
+    for tid in trial_ids(out):
+        t = _trial(out, tid)
+        assert t["release_after_ready_s"] == wait and t["passed"] in (True, None)
+        ts = t["timestamps"]
+        assert ts["create_start"] < ts["all_ready"] <= ts["release_wait_start"] < ts["release_wait_end"] \
+            <= ts["barrier_release"] < ts["last_task_return"] < ts["verify_clean_pass"]
+        assert ts["release_wait_end"] - ts["release_wait_start"] >= wait
+        assert ts["release_wait_end"] - ts["release_wait_start"] < wait + 0.25
+        # every microVM was ready before the wait began, and no task went out before the release
+        ready = [float(v["ready_ts"]) for v in vms if v["trial_id"] == tid]
+        assert len(ready) == t["density"] and max(ready) <= ts["release_wait_start"]
+        assert ts["barrier_release"] - max(ready) >= wait
+        sent = [float(r["dispatch_ts"]) for r in tasks if r["trial_id"] == tid]
+        assert len(sent) == t["density"] and min(sent) >= ts["barrier_release"]
+        # a task's time starts at the release: the stub's tasks take about 25 ms, never the wait
+        assert all(float(r["task_ms"]) < 250 for r in tasks if r["trial_id"] == tid)
+    spans = [s for s in iter_spans(out / "spans.jsonl") if s["name"] == "release_wait"]
+    assert len(spans) == 4 and all(float(s["attributes"]["fleetkit.release_after_ready_s"]) == wait for s in spans)
+
+    # the report: the execution window runs from the release, the observed one takes the wait in
+    assert run_cli("report", "--run", out, "--price-per-hour", "1", "--quiet") == 0
+    rep = json.loads((out / "report.json").read_text())
+    assert rep["inputs"]["release_after_ready_s"] == wait
+    for tr in rep["trials"]:
+        t, w = _trial(out, tr["trial_id"]), tr["windows_s"]
+        ts = t["timestamps"]
+        assert w["execution_s"] == pytest.approx(ts["last_task_return"] - ts["barrier_release"])
+        assert w["observed_s"] == pytest.approx(ts["verify_clean_pass"] - ts["create_start"])
+        assert w["release_wait_s"] == pytest.approx(ts["release_wait_end"] - ts["release_wait_start"])
+        assert w["observed_s"] > w["execution_s"] + w["release_wait_s"]
+    md = (out / "report.md").read_text()
+    assert "Warm start: every trial released its tasks 0.5 s after its last microVM was ready" in md
+    assert "| wait after ready s | exec window s |" in md
+    assert "the barrier opens after the wait after ready, so the wait is outside this window" in md
+
+
+def test_no_wait_after_ready_is_the_cold_start_it_always_was(tmp_path, fc_hostd, fixture_site):
+    out = tmp_path / "run"
+    assert run_cli(*spec_args(fc_hostd, fixture_site, out, write_spec(tmp_path / "spec.json", densities=[1]))) == 0
+    for tid in trial_ids(out):
+        t = _trial(out, tid)
+        assert t["release_after_ready_s"] == 0.0
+        assert t["timestamps"]["release_wait_start"] is None and t["timestamps"]["release_wait_end"] is None
+    assert not [s for s in iter_spans(out / "spans.jsonl") if s["name"] == "release_wait"]
+    assert run_cli("report", "--run", out, "--quiet") == 0
+    rep = json.loads((out / "report.json").read_text())
+    assert rep["inputs"]["release_after_ready_s"] == 0.0
+    assert all(tr["windows_s"]["release_wait_s"] is None for tr in rep["trials"])
+    md = (out / "report.md").read_text()
+    assert "Warm start" not in md and "wait after ready" not in md
+    # run.json still says what the wait was, as it did when HARNESS held it: 0, with the spec leaving it out
+    run = json.loads((out / "run.json").read_text())
+    assert "release_after_ready_s" not in run["spec"]["procedure"] and run["harness"]["release_after_ready_s"] == 0.0
+
+
+def test_the_wait_after_ready_comes_from_the_spec_or_the_option(tmp_path, fc_hostd, fixture_site, capsys):
+    spec = write_spec(tmp_path / "spec.json")
+    assert run_cli(*spec_args(fc_hostd, fixture_site, tmp_path / "a", spec, "--release-after-ready-s", "1")) == 2
+    assert "--release-after-ready-s: comes from the spec" in capsys.readouterr().err
+    base = ["trial", "--backend", "firecracker", "--host-url", fc_hostd.url, "--fixture-check-url", fixture_site.url,
+            "--quiet", "--no-lgtm", "--densities", "1"]
+    assert run_cli(*base, "--out", tmp_path / "b", "--release-after-ready-s", "-1") == 2
+    assert run_cli(*base, "--out", tmp_path / "c", "--release-after-ready-s", "120") == 2
+    assert "--ready-timeout-s plus the wait must be below --idle-timeout-s" in capsys.readouterr().err
+    # below --idle-timeout-s (120) on its own, but a microVM ready at once idles up to --ready-timeout-s (60) first
+    assert run_cli(*base, "--out", tmp_path / "e", "--release-after-ready-s", "60") == 2
+    assert run_cli(*base, "--out", tmp_path / "f", "--release-after-ready-s", "100") == 2
+    # the lifetime reaper too: 60 + 30 + 45 s of task timeout is past a 120 s lifetime
+    assert run_cli(*base, "--out", tmp_path / "g", "--idle-timeout-s", "600", "--max-lifetime-s", "120",
+                   "--release-after-ready-s", "30") == 2
+    assert "--ready-timeout-s plus the wait must be below --idle-timeout-s" in capsys.readouterr().err
+    assert not any((tmp_path / d).exists() for d in "cefg")
+    assert run_cli(*base, "--out", tmp_path / "d", "--release-after-ready-s", "0.3") == 0
+    t = _trial(tmp_path / "d", "d1-t1")
+    assert t["release_after_ready_s"] == 0.3
+    assert t["timestamps"]["release_wait_end"] - t["timestamps"]["release_wait_start"] >= 0.3
+    assert json.loads((tmp_path / "d" / "run.json").read_text())["spec"]["release_after_ready_s"] == 0.3
 
 
 # ---- failures outside the experiment --------------------------------------------------------

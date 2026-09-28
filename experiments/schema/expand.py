@@ -274,12 +274,14 @@ def host_kind(instance_type: str) -> str:
 
 
 def run_minutes(spec: dict) -> int:
-    """Expected length of a run that tests every density: setup, the trials, then upload and teardown."""
+    """Expected length of a run that tests every density: setup, the trials, then upload and teardown.
+    Every trial, labelled ones too, waits settle_s before it and release_after_ready_s (absent: 0) inside it."""
     t = LIMITS["run_time_estimate"]
     p, d = spec["procedure"], spec["densities"]
+    wait_s = p.get("release_after_ready_s", 0)
 
     def trial_s(n):
-        return p["settle_s"] + t["trial_base_s"] + t["trial_s_per_microvm"] * n
+        return p["settle_s"] + wait_s + t["trial_base_s"] + t["trial_s_per_microvm"] * n
 
     trials_s = (t["labelled_trials"] * trial_s(1) + p["trials_per_density"] * sum(trial_s(n) for n in d)
                 + p["boundary_trials"] * sum(trial_s(n) for n in d[-2:]))

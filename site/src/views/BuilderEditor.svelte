@@ -23,6 +23,7 @@
     setPath,
     suggestName,
     usd,
+    valueIn,
     type Field as FieldInfo,
     type Json,
     type Obj,
@@ -105,7 +106,7 @@
     showAll ||
     f.tier === 'basic' ||
     comparing === f.path ||
-    !same(getPath(base, f.path), f.schema.default) ||
+    !same(valueIn(base, f), f.schema.default) ||
     at(msgs, `base.${f.path}`).length > 0;
   const baseFields = $derived(SPEC_FIELDS.filter(shown));
   const hiddenCount = $derived(SPEC_FIELDS.length - baseFields.length);
@@ -422,7 +423,7 @@
             <Field
               id={fieldId(f.path)}
               field={f}
-              value={getPath(base, f.path)}
+              value={valueIn(base, f)}
               onchange={(v) => setBase(f.path, v)}
               msgs={at(msgs, `base.${f.path}`)}
               facts={baseFacts(f.path)}

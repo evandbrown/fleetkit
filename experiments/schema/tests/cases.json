@@ -356,6 +356,78 @@
       "patch": { "shutdown_after_minutes": 21 },
       "valid": false,
       "errors": ["shutdown_after_minutes: a run of m8i-4xlarge is expected to take about 22 minutes, longer than the 21-minute timer"]
+    },
+    {
+      "name": "no wait after ready is the same as a wait of 0",
+      "quota": 32,
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "base": { "procedure": { "release_after_ready_s": 0 } } },
+      "valid": true,
+      "warnings": [],
+      "differs": ["worker_host.instance_type", "densities"],
+      "expected_usd": 1.22,
+      "worst_case_usd": 2.54
+    },
+    {
+      "name": "a warm start: every trial waits 30 s after ready, so runs take longer",
+      "quota": 32,
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "base": { "procedure": { "release_after_ready_s": 30 } } },
+      "valid": true,
+      "warnings": [],
+      "runs": ["m8i-4xlarge-r1", "m8i-4xlarge-r2", "m8i-2xlarge-r1", "m8i-2xlarge-r2"],
+      "differs": ["worker_host.instance_type", "densities"],
+      "expected_usd": 1.65,
+      "worst_case_usd": 2.54,
+      "waves": [["m8i-4xlarge-r1", "m8i-2xlarge-r1"], ["m8i-4xlarge-r2", "m8i-2xlarge-r2"]],
+      "too_big_for_quota": []
+    },
+    {
+      "name": "a wait after ready of a fraction of a second",
+      "quota": 32,
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "base": { "procedure": { "release_after_ready_s": 2.5 } } },
+      "valid": true,
+      "warnings": [],
+      "expected_usd": 1.28
+    },
+    {
+      "name": "the longest wait after ready outlasts a 30-minute timer",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "shutdown_after_minutes": 30, "base": { "procedure": { "release_after_ready_s": 60 } } },
+      "valid": false,
+      "errors": [
+        "shutdown_after_minutes: a run of m8i-4xlarge is expected to take about 37 minutes, longer than the 30-minute timer",
+        "shutdown_after_minutes: a run of m8i-2xlarge is expected to take about 35 minutes, longer than the 30-minute timer"
+      ]
+    },
+    {
+      "name": "a wait after ready over 60 s",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "base": { "procedure": { "release_after_ready_s": 61 } } },
+      "valid": false,
+      "errors": ["base.procedure.release_after_ready_s: must be at most 60"]
+    },
+    {
+      "name": "a negative wait after ready",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "base": { "procedure": { "release_after_ready_s": -1 } } },
+      "valid": false,
+      "errors": ["base.procedure.release_after_ready_s: must be at least 0"]
+    },
+    {
+      "name": "a wait after ready written as text",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "base": { "procedure": { "release_after_ready_s": "30" } } },
+      "valid": false,
+      "errors": ["base.procedure.release_after_ready_s: must be a number"]
+    },
+    {
+      "name": "a named spec changes the wait after ready",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "specs": { "warm": { "procedure": { "release_after_ready_s": 30 } } } },
+      "valid": false,
+      "errors": ["specs.warm.procedure: shared by every spec in a campaign"]
     }
   ]
 }

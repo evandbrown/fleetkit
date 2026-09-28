@@ -204,3 +204,29 @@ def test_cli_quota_changes_the_waves():
     p = run_cli("campaigns/examples/hv-host-1.json", "--json", "--quota", "1024")
     plan = json.loads(p.stdout)["plan"]
     assert len(plan["waves"]) == 1 and plan["too_big_for_quota"] == []
+
+
+def test_the_wait_after_ready_is_optional_and_absent_is_0():
+    # Added after the first campaigns ran: their definitions and the specs their runs recorded stay valid and
+    # unchanged (--run adds nothing), and a spec that leaves it out is estimated exactly as one that sets 0.
+    spec = json.loads(run_cli("campaigns/nested-sizes-1.json", "--run", "m8i-4xlarge-r1").stdout)["spec"]
+    assert "release_after_ready_s" not in spec["procedure"]
+    assert expand.validate(spec, expand.SCHEMAS["spec.schema.json"]) == []
+    zero = copy.deepcopy(spec)
+    zero["procedure"]["release_after_ready_s"] = 0
+    assert expand.run_minutes(zero) == expand.run_minutes(spec)
+    required = expand.SCHEMAS["spec.schema.json"]["properties"]["procedure"]["required"]
+    assert "release_after_ready_s" not in required
+
+
+def test_every_trial_waits_after_ready_in_the_run_estimate():
+    # nested-sizes-1's base: 9 densities, 2 labelled trials, 2 boundary trials at each of the top two densities,
+    # so 15 trials; each waits the full time once its microVMs are ready.
+    spec = json.loads(run_cli("campaigns/nested-sizes-1.json", "--run", "m8i-4xlarge-r1").stdout)["spec"]
+    t = expand.LIMITS["run_time_estimate"]
+    trial_minutes = {}
+    for wait in (0, 20, 60):
+        s = copy.deepcopy(spec)
+        s["procedure"]["release_after_ready_s"] = wait
+        trial_minutes[wait] = expand.run_minutes(s) - t["setup_minutes"]["nested"] - t["finish_minutes"]
+    assert trial_minutes == {0: 5, 20: 10, 60: 20}  # 283.8 s of trials, then 300 s and 900 s more, rounded up

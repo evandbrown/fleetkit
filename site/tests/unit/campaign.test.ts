@@ -14,6 +14,7 @@ import {
   serialize,
   suggestName,
   validate,
+  valueIn,
   SCHEMAS,
   type Json,
   type Obj,
@@ -109,6 +110,17 @@ describe('the schema', () => {
     expect(Object.keys(spec)).toEqual(Object.keys(SCHEMAS['spec.schema.json'].properties));
     expect(validate(spec, SCHEMAS['spec.schema.json'])).toEqual([]);
     expect(checkSpec(spec)).toEqual([[], []]);
+  });
+
+  it('has one optional field, the wait after ready, which a spec that leaves it out holds at its default of 0', () => {
+    expect(SPEC_FIELDS.filter((f) => f.optional).map((f) => f.path)).toEqual(['procedure.release_after_ready_s']);
+    const wait = SPEC_FIELDS.find((f) => f.optional)!;
+    const base = (read('campaigns/nested-sizes-1.json') as Obj).base as Obj;
+    expect((base.procedure as Obj).release_after_ready_s).toBeUndefined();
+    expect(valueIn(base, wait)).toBe(0);
+    expect(valueIn({ procedure: { release_after_ready_s: 30 } }, wait)).toBe(30);
+    const settle = SPEC_FIELDS.find((f) => f.path === 'procedure.settle_s')!;
+    expect(valueIn({ procedure: {} }, settle)).toBeUndefined(); // a required field left out stays missing
   });
 });
 

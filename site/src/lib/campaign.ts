@@ -293,12 +293,14 @@ export function checkSpec(spec: any): [string[], string[]] {
 
 export const hostKind = (instanceType: string): 'metal' | 'nested' => (TYPES[instanceType].metal ? 'metal' : 'nested');
 
-/** Expected length of a run that tests every density: setup, the trials, then upload and teardown. */
+/** Expected length of a run that tests every density: setup, the trials, then upload and teardown. Every trial,
+ * labelled ones too, waits settle_s before it and release_after_ready_s (absent: 0) inside it (expand.py run_minutes). */
 export function runMinutes(spec: any): number {
   const t = LIMITS.run_time_estimate;
   const p = spec.procedure;
   const d: number[] = spec.densities;
-  const trialS = (n: number) => p.settle_s + t.trial_base_s + t.trial_s_per_microvm * n;
+  const wait: number = p.release_after_ready_s ?? 0;
+  const trialS = (n: number) => p.settle_s + wait + t.trial_base_s + t.trial_s_per_microvm * n;
   const sum = (xs: number[]) => xs.reduce((a, x) => a + trialS(x), 0);
   const trialsS = t.labelled_trials * trialS(1) + p.trials_per_density * sum(d) + p.boundary_trials * sum(d.slice(-2));
   const kind = hostKind(spec.worker_host.instance_type);
@@ -505,6 +507,9 @@ export interface Field {
   help: string;
   /** A named spec may change it: the worker host, the hypervisor, the microVM and the densities. */
   variable: boolean;
+  /** A spec may leave it out, and then it is the schema's default: procedure.release_after_ready_s, added after the
+   * first campaigns ran. Every other field is required. */
+  optional: boolean;
 }
 
 const CHANGES = campaignSchema.$defs.spec_changes.properties as Record<string, Schema>;
@@ -552,6 +557,8 @@ export const HELP: Record<string, string> = {
   'procedure.boundary_trials':
     'Once the run stops, extra trials at the highest density that passed and at the lowest that failed, to check the result holds.',
   'procedure.settle_s': "Seconds the worker host sits idle before each trial, so the last trial's cleanup can't slow the next.",
+  'procedure.release_after_ready_s':
+    'Seconds each trial waits, once every microVM is ready, before starting their tasks together. 0 starts them at once, while browsers may still be settling; a wait tests a warm pool, and no task’s time includes it.',
   'support_host.instance_type':
     'The EC2 instance that serves the test shopping site and collects telemetry, one per run. It grows with the worker host so it is never what runs out.',
   name: 'The campaign’s short name; its results are saved under results/<name>. 2–40 lowercase letters, digits or hyphens, starting with a letter.',
@@ -565,6 +572,7 @@ export const HELP: Record<string, string> = {
 /** Every field of a spec, in schema order, from its x-builder annotations. */
 export const SPEC_FIELDS: Field[] = Object.keys(specSchema.properties).flatMap((section) => {
   const node = (specSchema.$defs as Record<string, Schema>)[section];
+  const required: string[] = ((specSchema.properties as Record<string, Schema>)[section].required as string[]) ?? [];
   const make = (path: string, f: Schema): Field => ({
     path,
     section,
@@ -575,6 +583,7 @@ export const SPEC_FIELDS: Field[] = Object.keys(specSchema.properties).flatMap((
     description: f.description,
     help: HELP[path] ?? f.description,
     variable: VARIABLE_SECTIONS.includes(section),
+    optional: path.includes('.') ? !required.includes(path.slice(section.length + 1)) : !specSchema.required.includes(section),
   });
   return node.type === 'object'
     ? Object.entries(node.properties as Record<string, Schema>).map(([k, f]) => make(`${section}.${k}`, f))
@@ -598,12 +607,19 @@ export const CAMPAIGN_FIELDS: Record<string, Field> = Object.fromEntries(
         description: f.description,
         help: HELP[k] ?? f.description,
         variable: false,
+        optional: false,
       },
     ];
   }),
 );
 
 export const fieldAt = (path: string): Field | undefined => SPEC_FIELDS.find((f) => f.path === path);
+
+/** A field's value in a spec: what it holds, or for an optional field it leaves out, the default that stands for it. */
+export function valueIn(spec: unknown, f: Field): Json | undefined {
+  const v = getPath(spec, f.path);
+  return v === undefined && f.optional ? (f.schema.default as Json) : v;
+}
 
 /** A spec, or one section of it, with every field at the schema's default. */
 export function defaults(section?: string): Obj {

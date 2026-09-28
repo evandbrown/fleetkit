@@ -88,7 +88,7 @@ The campaign definition names everything its runs will do: every spec, with its 
 
 1. The worker host sits idle for a fixed period, and its CPU during that time is recorded.
 2. N microVMs are started together, where N is the trial's density. The trial waits until every one reports its browser ready.
-3. All N shopping tasks are released at the same moment. Each task has five steps: open the home page, search, open a product, add it to the cart, and verify the cart.
+3. All N shopping tasks are released at the same moment. Each task has five steps: open the home page, search, open a product, add it to the cart, and verify the cart. By default the release comes as soon as the last microVM is ready, while browsers may still be finishing startup (a cold start). A spec's wait after ready (`procedure.release_after_ready_s`, up to 60 s) holds the ready microVMs idle that long first, to measure a warm pool; task times start at the release, so none includes the wait.
 4. When every task has returned, all N microVMs are destroyed, and the host is checked for anything left behind.
 
 ### 4. Judge

@@ -42,7 +42,8 @@ export interface Spec {
     step_timeout_ms: number;
     task_timeout_ms: number;
   };
-  procedure: { trials_per_density: number; boundary_trials: number; settle_s: number };
+  /** release_after_ready_s is optional: specs recorded before it existed leave it out, and absent is 0. */
+  procedure: { trials_per_density: number; boundary_trials: number; settle_s: number; release_after_ready_s?: number };
   support_host: { instance_type: string };
 }
 

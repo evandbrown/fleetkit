@@ -94,6 +94,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="K trials at density 1 before the ladder (trial kind warmup, labelled, not evaluated)")
     t.add_argument("--settle-s", type=float, default=0.0,
                    help="wait S seconds before each trial, recording host cpu_util as trial.json pre_trial")
+    t.add_argument("--release-after-ready-s", type=float, default=0.0,
+                   help="once every microVM of a trial is ready, wait S seconds before releasing the tasks together "
+                        "(a warm start; 0, the default, releases them at once); --ready-timeout-s plus S must be "
+                        "below --idle-timeout-s")
     t.add_argument("--illustration", action="store_true",
                    help="finish with one density-1 trial with untimed per-step screenshots (trial kind illustration)")
     t.add_argument("--metrics-hz", type=float, default=1.0,
@@ -231,7 +235,8 @@ def _run_spec(a, criteria: dict, densities: list[int]) -> dict:
         "options": {k: v for k, v in vars(a).items() if not k.startswith("_")},
         "criteria": criteria, "densities": densities, "trials_per_density": a.trials_per_density,
         "boundary_trials": a.boundary_trials, "stop_at_first_miss": a.stop_at_first_miss, "warmup": a.warmup,
-        "settle_s": a.settle_s, "illustration": a.illustration, "metrics_hz": a.metrics_hz,
+        "settle_s": a.settle_s, "release_after_ready_s": a.release_after_ready_s,
+        "illustration": a.illustration, "metrics_hz": a.metrics_hz,
         "sample_interval_ms": a.sample_interval_ms,
         "fixture_probe": not a.no_fixture_probe and not a.no_host_metrics,
         "fixture_check_url": a.fixture_check_url,
@@ -268,6 +273,7 @@ def _spec_mode(a, argv: list[str]) -> RunSpec:
     a.backend = "docker" if a.backend == "docker" else rs.backend
     a.densities = ",".join(str(d) for d in rs.densities)
     a.trials_per_density, a.boundary_trials, a.settle_s = p["trials_per_density"], p["boundary_trials"], float(p["settle_s"])
+    a.release_after_ready_s = rs.release_after_ready_s  # timeouts() already allows the reapers for it
     a.warmup, a.illustration = HARNESS["warmup_trials"], HARNESS["illustration"]
     a.stop_at_first_miss, a.fault = HARNESS["stop_at_first_miss"], None
     a.metrics_hz, a.sample_interval_ms = HARNESS["metrics_hz"], HARNESS["sample_interval_ms"]
@@ -341,9 +347,20 @@ def cmd_trial(a) -> int:
     if ladder_mode and any(hi <= lo for lo, hi in zip(densities, densities[1:])):
         print("--stop-at-first-miss and --boundary-trials need --densities in strictly ascending order", file=sys.stderr)
         return 2
-    if a.metrics_hz <= 0 or a.boundary_trials < 0 or a.warmup < 0 or a.settle_s < 0 or a.sample_interval_ms < 0:
-        print("--metrics-hz must be positive; --boundary-trials, --warmup, --settle-s and --sample-interval-ms "
-              "must not be negative", file=sys.stderr)
+    if (a.metrics_hz <= 0 or a.boundary_trials < 0 or a.warmup < 0 or a.settle_s < 0 or a.sample_interval_ms < 0
+            or a.release_after_ready_s < 0):
+        print("--metrics-hz must be positive; --boundary-trials, --warmup, --settle-s, --sample-interval-ms and "
+              "--release-after-ready-s must not be negative", file=sys.stderr)
+        return 2
+    # A microVM ready at once sits idle until the last is ready (up to --ready-timeout-s) and then through the wait,
+    # so the reapers must allow for both, as RunSpec.timeouts does with --spec. Checked only with a wait, so a run
+    # without one is refused nothing it wasn't before.
+    wait = a.release_after_ready_s
+    if wait > 0 and (a.ready_timeout_s + wait >= a.idle_timeout_s
+                     or a.ready_timeout_s + wait + a.task_timeout_ms / 1000.0 >= a.max_lifetime_s):
+        print("--release-after-ready-s: --ready-timeout-s plus the wait must be below --idle-timeout-s, and with "
+              "--task-timeout-ms below --max-lifetime-s, or hostd's reapers destroy microVMs during the wait",
+              file=sys.stderr)
         return 2
     if rs is not None:
         why = _refuse_reuse(Path(a.out), rs)
@@ -400,7 +417,7 @@ def cmd_trial(a) -> int:
                               trial_kind="fault" if a.fault else trial_kind, criteria=criteria, settle_s=a.settle_s,
                               sample_interval_ms=a.sample_interval_ms, screenshot_each_step=shots,
                               hypervisor=rs.hypervisor if rs is not None and a.backend != "docker" else None,
-                              release_after_ready_s=HARNESS["release_after_ready_s"] if rs is not None else 0.0)
+                              release_after_ready_s=a.release_after_ready_s)
             runner = TrialRunner(cfg, inv.client, inv.rundir, inv.writers, inv.tracer, metrics=inv.sampler)
             doc, harness_error = None, None
             try:
@@ -511,7 +528,10 @@ def cmd_trial(a) -> int:
 def _run_harness(a, rs: RunSpec) -> dict:
     """run.json ``harness``, beside the spec: how this run was carried out (HARNESS is added by the spec)."""
     from .bundle import _git_commit
-    return {**rs.timeouts(), "backend": a.backend, "fixture_check_url": a.fixture_check_url,
+    # the wait after ready as carried out: the spec's, or 0 when the spec leaves it out (HARNESS held it before
+    # it was a field, so every run.json still says what the wait was)
+    return {**rs.timeouts(), "release_after_ready_s": a.release_after_ready_s,
+            "backend": a.backend, "fixture_check_url": a.fixture_check_url,
             "fixture_base_url": a.fixture_base_url or DEFAULT_FIXTURE_BASE_URL.get(a.backend),
             "support_health_url": a.support_health_url, "otlp_endpoint": None if a.no_lgtm else a.otlp_endpoint,
             "argv": list(getattr(a, "_argv", None) or []),

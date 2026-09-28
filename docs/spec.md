@@ -28,7 +28,7 @@ A campaign definition says what to run. A spec says what one run does. This page
 
 ## The spec
 
-Every field is required, so a spec never depends on a default; the defaults are what the builder starts a new campaign with. **Basic** fields are on the builder's first screen, **advanced** ones behind a disclosure, and **rare** ones in the full spec view.
+Every field is required but one, so a spec never depends on a default; the defaults are what the builder starts a new campaign with. The exception is `procedure.release_after_ready_s`, added after the first campaigns ran: absent means 0, so the specs those campaigns recorded stay valid and unchanged. **Basic** fields are on the builder's first screen, **advanced** ones behind a disclosure, and **rare** ones in the full spec view.
 
 | Field | What it controls | Default | Tier |
 |---|---|---|---|
@@ -44,6 +44,7 @@ Every field is required, so a spec never depends on a default; the defaults are 
 | `hypervisor.virtio_rng` | Whether each microVM has a random-number device. Cloud Hypervisor always has one. | `false` | advanced |
 | `procedure.trials_per_density` | Trials at each density on the way up. | 1 | advanced |
 | `procedure.boundary_trials` | Extra trials at the highest passing density and the lowest failing one, once the run stops going up. | 2 | advanced |
+| `procedure.release_after_ready_s` | Seconds every trial waits, 0 to 60, once all its microVMs are ready, before it releases their tasks together. 0 is a cold start; a wait measures a warm pool. Task times start at the release, so no task's time includes it. Optional: absent is 0. | 0 | advanced |
 | `support_host.instance_type` | The instance that serves the test shopping site and collects telemetry: `m8i.xlarge`, `m8i.2xlarge` or `m8i.4xlarge`. | `m8i.xlarge` | advanced |
 | `criteria.ready_timeout_s` | Every microVM must report its browser ready within this many seconds. | 180 | rare |
 | `criteria.step_timeout_ms` | A step that takes longer fails its task. | 10000 | rare |

@@ -126,6 +126,7 @@ def build_report(rundir: RunDir, price_per_hour: float | None, instance: str | N
             "criteria": criteria, "criteria_source": criteria_source,
             "s3_get_price_per_1000_usd": s3_get_price_per_1000, "fixture_manifest": fixture_manifest,
             "bytes_tolerance": bytes_tolerance, "expected_per_task": expected,
+            "release_after_ready_s": release_after_ready(trials),
         },
         "observed": {"host_info": host_info or None},
         "read_from_older_schema": rundir.legacy,
@@ -232,7 +233,21 @@ def _windows(t: dict) -> dict:
         exec_w = ts["last_task_return"] - ts["barrier_release"]
     if ts.get("verify_clean_pass") is not None and ts.get("create_start") is not None:
         obs_w = ts["verify_clean_pass"] - ts["create_start"]
-    return {"execution_s": exec_w, "observed_s": obs_w}
+    # The wait after ready (a warm start), between all ready and the barrier: in the observed window, not
+    # the execution one. None when the trial didn't wait (or ran before the wait existed).
+    wait_w = None
+    if ts.get("release_wait_end") is not None and ts.get("release_wait_start") is not None:
+        wait_w = ts["release_wait_end"] - ts["release_wait_start"]
+    return {"execution_s": exec_w, "observed_s": obs_w, "release_wait_s": wait_w}
+
+
+def release_after_ready(trials: list[dict]) -> float | None:
+    """The wait after ready the run's trials asked for (0: none, as in every trial before it existed);
+    None when its trials differ."""
+    vals = {float(t.get("release_after_ready_s") or 0) for t in trials}
+    if len(vals) > 1:
+        return None
+    return vals.pop() if vals else 0.0
 
 
 def _bytes_flag(mean_bytes, mean_reqs, expected: dict, tol: float) -> dict:
@@ -452,6 +467,13 @@ def render_markdown(rep: dict) -> str:
         L.append("")
         L.append("This run directory was written before the glossary; its names were translated on read "
                  "(driver/legacy.py) and its trials renumbered within their density.")
+    wait = inp.get("release_after_ready_s", 0.0)
+    if wait is None or wait > 0:
+        L.append("")
+        L.append((f"Warm start: every trial released its tasks {wait:g} s after its last microVM was ready"
+                  if wait is not None else "Warm start: this run's trials waited different times after ready")
+                 + " (procedure.release_after_ready_s). Task times start at the release, so no task's time "
+                   "includes the wait; the execution-only cost window leaves it out and the observed one takes it in.")
     L.append("")
     L.append("## Headline")
     L.append("")
@@ -580,16 +602,20 @@ def render_markdown(rep: dict) -> str:
         L.append("")
     L.append("## Trials")
     L.append("")
+    # the measured wait after ready gets a column only in a run that waited, so other reports stay as they were
+    waited = any(t["windows_s"].get("release_wait_s") is not None for t in rep["trials"])
     L.append("| trial id | trial kind | backend | density | trial | fault | status | passed | microVMs ready | tasks ok | "
-             "clean | exec window s | observed window s | $/task exec | $/task observed |")
-    L.append("|---|---|---|---:|---:|---|---|---|---|---|---|---:|---:|---:|---:|")
+             "clean | " + ("wait after ready s | " if waited else "")
+             + "exec window s | observed window s | $/task exec | $/task observed |")
+    L.append("|---|---|---|---:|---:|---|---|---|---|---|---|" + ("---:|" if waited else "") + "---:|---:|---:|---:|")
     for t in rep["trials"]:
         w, c = t["windows_s"], t["cost_usd_per_task"]
         passed = "yes" if t["evaluation"]["passed"] else "no"
         number = "" if t.get("trial_number") is None else t["trial_number"]
+        wait_cell = f"{_s(w.get('release_wait_s'))} | " if waited else ""
         L.append(f"| {t['trial_id']} | {t['trial_kind']} | {t['backend']} | {t['density']} | {number} | {t['fault'] or ''} | "
                  f"{t['status']} | {passed} | {t['microvms_ready']}/{t['microvms_requested']} | {t['tasks_ok']}/{t['tasks_dispatched']} | "
-                 f"{t['verify_clean']} | {_s(w['execution_s'])} | {_s(w['observed_s'])} | {_usd(c['execution_only'])} | {_usd(c['observed'])} |")
+                 f"{t['verify_clean']} | {wait_cell}{_s(w['execution_s'])} | {_s(w['observed_s'])} | {_usd(c['execution_only'])} | {_usd(c['observed'])} |")
     L.append("")
     if rep.get("excluded_trials"):
         L.append("Warm-up, illustration and fault trials are listed above and excluded from densities and the headline: "
@@ -602,8 +628,11 @@ def render_markdown(rep: dict) -> str:
     L.append("")
     L.append("- a trial starts N fresh microVMs at the same moment, runs one task in each and destroys them; N is its "
              "density; trials are numbered from 1 within their density (d8-t2 is trial 2 at density 8)")
-    L.append("- execution-only $/task = price/h x (last task return - barrier release) / tasks ok")
-    L.append("- observed $/task = price/h x (verify-clean pass - first create) / tasks ok")
+    # where the wait after ready falls, said only in a run that waited, so other reports stay as they were
+    L.append("- execution-only $/task = price/h x (last task return - barrier release) / tasks ok"
+             + ("; the barrier opens after the wait after ready, so the wait is outside this window" if waited else ""))
+    L.append("- observed $/task = price/h x (verify-clean pass - first create) / tasks ok"
+             + ("; it includes startup, the wait after ready, and cleanup" if waited else ""))
     L.append("- host provisioning time is on its own line and in neither window")
     L.append("- task_ms, wall_ms and harness overhead percentiles are over ok tasks only; a failed task's "
              "task_ms is its elapsed-to-failure and is reported separately; counts and failure rates cover every task")
