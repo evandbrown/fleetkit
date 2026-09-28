@@ -49,7 +49,8 @@
       "procedure": {
         "trials_per_density": 1,
         "boundary_trials": 2,
-        "settle_s": 10
+        "settle_s": 10,
+        "release_after_ready_s": 0
       },
       "support_host": {
         "instance_type": "m8i.xlarge"
@@ -96,7 +97,8 @@
         "procedure": {
           "trials_per_density": 1,
           "boundary_trials": 2,
-          "settle_s": 10
+          "settle_s": 10,
+          "release_after_ready_s": 0
         },
         "support_host": {
           "instance_type": "m8i.xlarge"

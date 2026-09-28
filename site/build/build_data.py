@@ -111,7 +111,20 @@ def unpushed_commits_unlinked(built: list[dict], repo: Path) -> None:
 def reconstructed_definition(c: dict, recorded: dict) -> dict:
     """A campaign of one, from before campaigns existed: its definition rebuilt from what its run recorded.
     It has no shutdown timer: that run had none recorded."""
-    missing = [p for p in (f["path"] for f in SP.FIELDS) if p not in SP.expand.flatten(recorded)]
+    have = SP.expand.flatten(recorded)
+    missing = []
+    for f in SP.FIELDS:
+        if f["path"] in have:
+            continue
+        if not f["required"] and "default" in f:
+            # An optional field the run predates took its default then (e.g. no wait after ready).
+            node = recorded
+            *parents, leaf = f["path"].split(".")
+            for k in parents:
+                node = node.setdefault(k, {})
+            node[leaf] = f["default"]
+        else:
+            missing.append(f["path"])
     if missing:
         raise A.BuildError(f"{c['id']}: the run didn't record {', '.join(missing)}, so its spec can't be rebuilt")
     return {"name": c["id"], "question": c["question"], "replicas": 1, "base": recorded,

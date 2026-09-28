@@ -23,25 +23,31 @@ class SpecError(Exception):
 
 
 def fields() -> list[dict]:
-    """Every leaf of spec.schema.json in schema order: path, label, unit, tier."""
+    """Every leaf of spec.schema.json in schema order: path, label, unit, tier, whether it is required, and its
+    default when the schema gives one."""
     schema = expand.SCHEMAS["spec.schema.json"]
     out = []
 
-    def walk(node: dict, prefix: str):
+    def walk(node: dict, prefix: str, required: bool):
         node = expand.resolve(node["$ref"], "spec.schema.json")[0] if "$ref" in node else node
         props = node.get("properties")
         if node.get("type") == "object" and props:
+            req = set(node.get("required", []))
             for k, v in props.items():
-                walk(v, f"{prefix}{k}.")
+                walk(v, f"{prefix}{k}.", required and k in req)
             return
         xb = node.get("x-builder") or {}
-        f = {"path": prefix.rstrip("."), "label": xb.get("label", prefix.rstrip(".")), "tier": xb.get("tier", "rare")}
+        f = {"path": prefix.rstrip("."), "label": xb.get("label", prefix.rstrip(".")), "tier": xb.get("tier", "rare"),
+             "required": required}
         if xb.get("unit"):
             f["unit"] = xb["unit"]
+        if "default" in node:
+            f["default"] = node["default"]
         out.append(f)
 
+    top = set(schema.get("required", []))
     for k, v in schema["properties"].items():
-        walk(v, f"{k}.")
+        walk(v, f"{k}.", k in top)
     return out
 
 
