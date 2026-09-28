@@ -40,6 +40,8 @@ export const TITLES: Record<string, string> = {
   'hv-host-1': 'Hypervisor and host kind',
   'hv-host-2': 'Metal host',
   'c8i-sizes-1': 'Smaller c8i hosts',
+  'shape-cold-1': 'MicroVM shape, cold start',
+  'shape-warm-1': 'MicroVM shape, warm start',
   'hv-host-3': 'Metal, nested SLO',
 };
 

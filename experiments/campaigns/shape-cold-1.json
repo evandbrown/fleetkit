@@ -1,0 +1,38 @@
+{
+  "name": "shape-cold-1",
+  "question": "Does a 1-vCPU microVM cost less per task than a 2-vCPU one?",
+  "replicas": 2,
+  "shutdown_after_minutes": 45,
+  "base": {
+    "worker_host": { "instance_type": "c8i.xlarge" },
+    "hypervisor": { "name": "firecracker", "virtio_transport": "pci", "virtio_rng": true },
+    "microvm": { "vcpus": 2, "memory_mib": 2048 },
+    "densities": [1, 2, 3, 4],
+    "criteria": {
+      "step_p50_target_ms": 1000,
+      "step_p95_target_ms": 2000,
+      "task_p95_target_ms": 5000,
+      "ready_timeout_s": 180,
+      "step_timeout_ms": 10000,
+      "task_timeout_ms": 45000
+    },
+    "procedure": { "trials_per_density": 1, "boundary_trials": 2, "settle_s": 10 },
+    "support_host": { "instance_type": "m8i.xlarge" }
+  },
+  "specs": {
+    "c8i-xlarge": {},
+    "c8i-xlarge-1vcpu": {
+      "microvm": { "vcpus": 1 },
+      "densities": [1, 2, 3, 4, 5, 6]
+    },
+    "m8i-4xlarge": {
+      "worker_host": { "instance_type": "m8i.4xlarge" },
+      "densities": [1, 4, 8, 9, 10, 11, 12, 14, 16]
+    }
+  },
+  "why": {
+    "c8i-xlarge": "Round 1’s cheapest spec, unchanged.",
+    "c8i-xlarge-1vcpu": "One vCPU per microVM.",
+    "m8i-4xlarge": "The standing control."
+  }
+}
