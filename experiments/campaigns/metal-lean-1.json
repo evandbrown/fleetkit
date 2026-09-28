@@ -1,0 +1,34 @@
+{
+  "name": "metal-lean-1",
+  "question": "Does lean headless Chromium fit more microVMs on a metal host?",
+  "replicas": 1,
+  "shutdown_after_minutes": 60,
+  "base": {
+    "worker_host": { "instance_type": "m8i.4xlarge" },
+    "hypervisor": { "name": "firecracker", "virtio_transport": "pci", "virtio_rng": true },
+    "microvm": { "vcpus": 2, "memory_mib": 2048 },
+    "densities": [1, 4, 8, 9, 10, 11, 12, 14, 16],
+    "criteria": {
+      "step_p50_target_ms": 1000,
+      "step_p95_target_ms": 2000,
+      "task_p95_target_ms": 5000,
+      "ready_timeout_s": 900,
+      "step_timeout_ms": 10000,
+      "task_timeout_ms": 45000
+    },
+    "procedure": { "trials_per_density": 1, "boundary_trials": 2, "settle_s": 10 },
+    "support_host": { "instance_type": "m8i.4xlarge" }
+  },
+  "specs": {
+    "firecracker-metal-nopre": {
+      "worker_host": { "instance_type": "m8i.metal-48xl" },
+      "densities": [1, 96, 140, 152, 164, 176, 188, 200],
+      "workload": {
+        "chromium_extra_flags": ["--disable-features=PreloadTopChromeWebUI,WebUIOmniboxPopup,WebUIOmniboxAimPopup,WebUIOmniboxFullPopup"]
+      }
+    }
+  },
+  "why": {
+    "firecracker-metal-nopre": "Metal as hv-host-3 ran it, minus the hidden omnibox pages."
+  }
+}

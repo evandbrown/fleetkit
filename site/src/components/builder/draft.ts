@@ -43,6 +43,7 @@ export const TITLES: Record<string, string> = {
   'shape-cold-1': 'MicroVM shape, cold start',
   'shape-warm-1': 'MicroVM shape, warm start',
   'slo-frontier-1': 'SLO frontier',
+  'metal-lean-1': 'Metal, lean Chromium',
   'hv-host-3': 'Metal, nested SLO',
   'browser-lean-1': 'Leaner headless Chromium',
 };
