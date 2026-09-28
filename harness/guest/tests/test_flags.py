@@ -137,3 +137,38 @@ def test_a_bad_flag_word_stops_guestd_before_chromium(monkeypatch):
     monkeypatch.setenv(EXTRA_FLAGS_ENV, "!!!")
     monkeypatch.delenv("FLEETKIT_FAULT", raising=False)
     assert guestd_main.main(["--bind", "127.0.0.1", "--port", "0", "--chromium", os.devnull]) == 2
+
+
+# ---- the guest console the host passes (the docker backend) ------------------------------------
+
+def test_health_reports_the_console_the_host_passed():
+    async def go(console):
+        daemon = server.Daemon(LogRing(stream=io.StringIO()), _StubChromium(), None, proc_root="/nonexistent-proc",
+                               console=console)
+        port = await daemon.start("127.0.0.1", 0)
+        try:
+            _, body = await minihttp.request_json("127.0.0.1", port, "GET", "/health")
+        finally:
+            await daemon.stop()
+        return body["console"]
+
+    assert asyncio.run(go("quiet")) == "quiet"
+    assert asyncio.run(go(None)) is None
+
+
+def test_the_console_env_is_one_of_the_specs_modes():
+    assert guestd_main.parse_console(None) is None and guestd_main.parse_console("") is None
+    for mode in ("verbose", "quiet", "quiet-i8042"):
+        assert guestd_main.parse_console(mode) == mode
+    with pytest.raises(ValueError, match="FLEETKIT_CONSOLE"):
+        guestd_main.parse_console("silent")
+    # the spec's modes, as the schema lists them
+    schema = json.loads((FLAGS_JSON.parent / "spec.schema.json").read_text())
+    assert list(guestd_main.CONSOLES) == schema["$defs"]["microvm"]["properties"]["console"]["enum"]
+
+
+def test_an_unknown_console_stops_guestd_before_chromium(monkeypatch):
+    monkeypatch.setenv(guestd_main.CONSOLE_ENV, "silent")
+    monkeypatch.delenv(EXTRA_FLAGS_ENV, raising=False)
+    monkeypatch.delenv("FLEETKIT_FAULT", raising=False)
+    assert guestd_main.main(["--bind", "127.0.0.1", "--port", "0", "--chromium", os.devnull]) == 2

@@ -5,6 +5,9 @@ Sections 2-4 of the design, per slot s:
   kernel `ip=10.200.0.<10+s>::10.200.0.1:255.255.255.0:vm<s>:eth0:off:10.42.0.2`;
   `fleetkit.fault=<name>` on the command line when a fault is requested, and
   `fleetkit.chromium_extra_flags=<word>` when the spec adds Chromium flags (model.encode_chromium_flags);
+  the spec's guest console as words after the backend's own (model.CONSOLE_BOOT_ARGS: none for verbose,
+  `quiet loglevel=3` for quiet, plus `i8042.noaux i8042.nomux i8042.dumbkbd` for quiet-i8042), and its
+  memory pages as the hypervisor's own setting (4k: no hint, as before; thp: transparent huge pages);
   the same guest kernel and read-only rootfs, the same vCPUs and memory, whichever hypervisor runs it;
   `systemd-run --scope` with MemoryMax and CPUQuota around the hypervisor process, which gives a
   cgroup v2 leaf for memory.current, memory.peak, cpu.stat and the pressure files;
@@ -33,7 +36,7 @@ import shutil
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-from ..model import MicroVM, encode_chromium_flags
+from ..model import CONSOLE_BOOT_ARGS, CONSOLES, MEMORY_PAGES, MicroVM, encode_chromium_flags
 from ..procfs import (PROC_ROOT, cgroup_pids, parse_flat_keyed, parse_pressure, read_int, read_text,
                       status_rss_bytes, thread_cpu_split)
 from ..runner import CommandError, Runner
@@ -74,6 +77,8 @@ class HypervisorBackend(Backend):
     log_name = ""                   # the hypervisor's own log, next to console.log
     # {option: [values it can carry out]}; the first value is used when a microVM names none.
     hypervisor_options: Dict[str, List[Any]] = {}
+    # The spec's guest console and memory pages: every value, on both hypervisors (model.microvm_options).
+    microvm_options: Dict[str, List[str]] = {"console": list(CONSOLES), "memory_pages": list(MEMORY_PAGES)}
 
     def __init__(self, runner: Runner, log_dir: str, binary: Optional[str] = None,
                  kernel: str = DEFAULT_KERNEL, rootfs: str = DEFAULT_ROOTFS, bridge: str = BRIDGE,
@@ -146,7 +151,7 @@ class HypervisorBackend(Backend):
         return "ip=%s::%s:%s:vm%d:eth0:off:%s" % (self.guest_ip(slot), self.gateway, NETMASK, slot, self.resolver)
 
     def boot_args(self, microvm: MicroVM) -> str:
-        args = self.base_boot_args(microvm) + [self.ip_arg(microvm.slot)]
+        args = self.base_boot_args(microvm) + CONSOLE_BOOT_ARGS[microvm.console] + [self.ip_arg(microvm.slot)]
         if microvm.fault:
             args.append("fleetkit.fault=%s" % microvm.fault)
         if microvm.chromium_extra_flags:
@@ -175,7 +180,8 @@ class HypervisorBackend(Backend):
                 "guest_mac": self.guest_mac(microvm.slot), "tap": self.tap(microvm.slot),
                 "unit": self.unit(microvm.slot) + ".scope", "console_log": self.console_log_path(microvm),
                 "hypervisor_log": self.hypervisor_log_path(microvm), "fault": microvm.fault,
-                "chromium_extra_flags": list(microvm.chromium_extra_flags)}
+                "chromium_extra_flags": list(microvm.chromium_extra_flags), "console": microvm.console,
+                "memory_pages": microvm.memory_pages}
 
     def hypervisor_argv(self, microvm: MicroVM) -> List[str]:
         """The hypervisor's own command line (subclass)."""
@@ -278,8 +284,9 @@ class HypervisorBackend(Backend):
         return None
 
     def sample(self, microvm: MicroVM) -> Dict[str, Optional[int]]:
-        """The scope's cgroup figures, VmRSS summed over its processes, and its CPU split into the
-        vCPU threads and the hypervisor's own (cgroup usage minus vCPU; cumulative, microseconds)."""
+        """The scope's cgroup figures (its transparent huge pages among them), VmRSS summed over its processes,
+        and its CPU split into the vCPU threads and the hypervisor's own (cgroup usage minus vCPU; cumulative,
+        microseconds)."""
         out = empty_sample()
         if self.runner.dry_run:
             return out
@@ -288,6 +295,9 @@ class HypervisorBackend(Backend):
             return out
         out["cgroup_memory_current"] = read_int(os.path.join(cg, "memory.current"))
         out["cgroup_memory_peak"] = read_int(os.path.join(cg, "memory.peak"))
+        # Guest memory the host backs with transparent huge pages (memory.stat anon_thp, bytes): what shows
+        # whether a microVM's memory_pages took effect (thp) or stayed off (4k).
+        out["anon_thp_bytes"] = parse_flat_keyed(read_text(os.path.join(cg, "memory.stat"))).get("anon_thp")
         cpu_stat = parse_flat_keyed(read_text(os.path.join(cg, "cpu.stat")))
         out["cpu_usage_usec"] = cpu_stat.get("usage_usec")
         out["cpu_throttled_usec"] = cpu_stat.get("throttled_usec")

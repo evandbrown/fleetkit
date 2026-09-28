@@ -112,6 +112,51 @@ def encode_chromium_flags(flags: List[str]) -> str:
     return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
 
 
+# The spec's guest console and memory pages (microvm.console, microvm.memory_pages) reach a backend on every
+# microVM as ``MicroVM.console`` and ``MicroVM.memory_pages``. The defaults are what every microVM did before
+# the fields existed: the whole kernel log on the serial console, and guest memory mapped with no page-size hint.
+CONSOLES = ("verbose", "quiet", "quiet-i8042")
+MEMORY_PAGES = ("4k", "thp")
+DEFAULT_CONSOLE = "verbose"
+DEFAULT_MEMORY_PAGES = "4k"
+# The words each console mode adds to the guest kernel's command line, after the backend's own. `quiet loglevel=3`
+# (in that order: quiet sets the console log level to 4, loglevel=3 then lowers it to 3) prints only messages
+# more severe than errors, levels 0-2 (a panic or oops switches the console to verbose and prints in full); the
+# i8042 words are Firecracker's own defaults, which skip the PS/2 keyboard probe (driver/config.py holds a copy
+# for its check, and a test holds the two equal).
+CONSOLE_BOOT_ARGS: Dict[str, List[str]] = {
+    "verbose": [],
+    "quiet": ["quiet", "loglevel=3"],
+    "quiet-i8042": ["quiet", "loglevel=3", "i8042.noaux", "i8042.nomux", "i8042.dumbkbd"],
+}
+# A backend says which values it can carry out with a class attribute ``microvm_options``; a backend without
+# one offers only the defaults, so a daemon never runs something other than a request asked for.
+DEFAULT_MICROVM_OPTIONS: Dict[str, List[str]] = {"console": [DEFAULT_CONSOLE], "memory_pages": [DEFAULT_MEMORY_PAGES]}
+
+
+def microvm_options(backend: Any) -> Dict[str, List[str]]:
+    """The console and memory-page values `backend` can carry out (GET /host/info shows them)."""
+    opts = getattr(backend, "microvm_options", None)
+    return {k: list(v) for k, v in (opts if isinstance(opts, dict) else DEFAULT_MICROVM_OPTIONS).items()}
+
+
+def microvm_option_problems(backend: Any, request: Dict[str, Any]) -> List[str]:
+    """Why `backend` can't carry out a create request's console or memory_pages; empty when it can. Absent or
+    null is the default."""
+    offered = microvm_options(backend)
+    problems = []
+    for key, known in (("console", CONSOLES), ("memory_pages", MEMORY_PAGES)):
+        value = request.get(key)
+        if value is None:
+            continue
+        if not isinstance(value, str) or value not in known:
+            problems.append("%s must be one of %s" % (key, ", ".join(known)))
+        elif value not in offered.get(key, []):
+            problems.append("the %s backend can't carry out %s = %s (it offers %s)" % (
+                getattr(backend, "name", ""), key, value, ", ".join(offered.get(key, []))))
+    return problems
+
+
 # The spec's hypervisor section reaches a backend on every microVM as ``MicroVM.hypervisor``:
 # {"name": <backend name>, "virtio_transport": "mmio" | "pci", "virtio_rng": bool}, the keys
 # after "name" present only when the create request carried them. A backend says which values
@@ -197,6 +242,9 @@ class MicroVM:
     hypervisor: Dict[str, Any] = field(default_factory=dict)
     # The spec's extra Chromium flags, added after the guest's base flags (see validate_chromium_flags).
     chromium_extra_flags: List[str] = field(default_factory=list)
+    # The spec's guest console and memory pages (see CONSOLES and MEMORY_PAGES).
+    console: str = DEFAULT_CONSOLE
+    memory_pages: str = DEFAULT_MEMORY_PAGES
     state: str = State.CREATING
     created_ts: Optional[float] = None
     process_started_ts: Optional[float] = None
@@ -275,6 +323,8 @@ class MicroVM:
             "trial_id": self.trial_id,
             "hypervisor": dict(self.hypervisor),
             "chromium_extra_flags": list(self.chromium_extra_flags),
+            "console": self.console,
+            "memory_pages": self.memory_pages,
             "console_log": self.console_log,
             "trace_id": self.trace.trace_id if self.trace else None,
             "kernel_start_ts": self.kernel_start_ts,

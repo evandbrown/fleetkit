@@ -9,6 +9,9 @@ The spec's hypervisor options:
   virtio_transport  mmio (the default, as cap-baseline-1 ran: `pci=off` on the kernel command
                     line) or pci (`--enable-pci`: every virtio device on the PCI transport);
   virtio_rng        false (the default: no entropy device) or true (`"entropy": {}` in vm.json).
+The spec's memory pages: 4k (the default, as every run before it: no `huge_pages` in machine-config,
+so Firecracker maps guest memory with no hint) or thp (`"huge_pages": "Transparent"`: Firecracker asks
+the host for transparent huge pages on guest memory, which it grants in its always and madvise modes).
 
 vCPU threads are named `fc_vcpu <n>`; the main event loop (with the device emulation) and
 the API thread are the hypervisor's own. The serial console (console=ttyS0) is Firecracker's
@@ -70,7 +73,8 @@ class FirecrackerBackend(HypervisorBackend):
             "boot-source": {"kernel_image_path": self.kernel, "boot_args": self.boot_args(microvm)},
             "drives": [{"drive_id": "rootfs", "path_on_host": self.rootfs,
                         "is_root_device": True, "is_read_only": True}],
-            "machine-config": {"vcpu_count": microvm.vcpus, "mem_size_mib": microvm.mem_mib, "smt": SMT},
+            "machine-config": {"vcpu_count": microvm.vcpus, "mem_size_mib": microvm.mem_mib, "smt": SMT,
+                               **({"huge_pages": "Transparent"} if microvm.memory_pages == "thp" else {})},
             "network-interfaces": [{"iface_id": "eth0", "guest_mac": self.guest_mac(microvm.slot),
                                     "host_dev_name": self.tap(microvm.slot)}],
             "logger": {"log_path": self.hypervisor_log_path(microvm), "level": "Warning",

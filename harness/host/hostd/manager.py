@@ -14,8 +14,9 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .backends.base import Backend, BackendError
 from .guest import GuestClient, GuestError, boot_phases, guest_info
-from .model import (Defaults, FailureCategory, MicroVM, Outcome, State, TraceContext, hypervisor_problems,
-                    validate_chromium_flags, validate_fault)
+from .model import (DEFAULT_CONSOLE, DEFAULT_MEMORY_PAGES, Defaults, FailureCategory, MicroVM, Outcome, State,
+                    TraceContext, hypervisor_problems, microvm_option_problems, validate_chromium_flags,
+                    validate_fault)
 from .telemetry import Telemetry
 
 
@@ -134,6 +135,17 @@ class Manager:
         if problems:
             raise ApiError(400, "; ".join(problems))
         hypervisor = {"name": self.backend.name, **(request.get("hypervisor") or {})}
+        # The spec's guest console and memory pages: refused unless this backend can carry them out. Absent,
+        # the microVM boots as every microVM did before they existed.
+        problems = microvm_option_problems(self.backend, request)
+        if problems:
+            raise ApiError(400, "; ".join(problems))
+        console = request.get("console") or DEFAULT_CONSOLE
+        memory_pages = request.get("memory_pages") or DEFAULT_MEMORY_PAGES
+        for key, value in (("console", console), ("memory_pages", memory_pages)):
+            note = (getattr(self.backend, "option_notes", None) or {}).get((key, value))
+            if note:
+                self.tel.log("%s %s: %s" % (key, value, note), severity="WARN")
         run_id = request.get("run_id") or ctx.run_id
         trial_id = request.get("trial_id") or ctx.trial_id
 
@@ -162,7 +174,8 @@ class Manager:
                             ready_timeout_s=ready_timeout_s, max_lifetime_s=max_lifetime_s,
                             idle_timeout_s=idle_timeout_s, fixture_base_url=self.backend.fixture_base_url,
                             run_id=run_id, trial_id=trial_id, hypervisor=dict(hypervisor),
-                            chromium_extra_flags=list(chromium_extra_flags))
+                            chromium_extra_flags=list(chromium_extra_flags), console=console,
+                            memory_pages=memory_pages)
                 self.microvms[s.id] = s
                 created.append(s)
 

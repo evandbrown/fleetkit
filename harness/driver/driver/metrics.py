@@ -27,7 +27,8 @@ from .outputs import CsvAppender
 HOST_SCALARS = ("mem_total", "mem_available", "cpu_util", "steal", "cpu_count", "hostd_cpu_usec", "hostd_rss_bytes")
 MICROVM_SCALARS = ("rss_bytes", "cgroup_memory_current", "cgroup_memory_peak", "cpu_usage_usec",
                    "cpu_vcpu_usec", "cpu_hypervisor_usec", "cpu_throttled_usec", "cpu_nr_throttled",
-                   "cpu_pressure_some_total_us", "cpu_pressure_full_total_us", "memory_pressure_some_total_us")
+                   "cpu_pressure_some_total_us", "cpu_pressure_full_total_us", "memory_pressure_some_total_us",
+                   "anon_thp_bytes")
 
 
 def flatten(sample: dict) -> list[tuple[str, str, float]]:

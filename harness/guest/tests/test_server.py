@@ -158,7 +158,7 @@ def test_health_metrics_logs_and_errors(monkeypatch):
 HEALTH_KEYS = (
     "ready", "chromium_version", "uptime_s", "guestd_version", "guestd_uptime_s", "kernel_uptime_s",
     "chromium_launch_s", "chromium_ready_s", "chromium_flags", "chromium_extra_flags", "chromium_running_flags",
-    "kernel_cmdline", "vcpus", "mem_total",
+    "kernel_cmdline", "vcpus", "mem_total", "console",
 )
 
 
@@ -181,6 +181,7 @@ def test_health_boot_facts_from_a_fake_proc(tmp_path):
             # the stub has no port or profile dir: the production defaults
             assert body["chromium_flags"] == chromium_flags() and "--remote-debugging-port=9222" in body["chromium_flags"]
             assert body["chromium_extra_flags"] == [] and body["chromium_running_flags"] is None  # no browser runs
+            assert body["console"] is None      # a microVM's console shows on its kernel command line
             chromium.launch_mono = daemon.started + 0.25
             chromium.ready_mono = daemon.started + 1.5
             chromium.ready = True

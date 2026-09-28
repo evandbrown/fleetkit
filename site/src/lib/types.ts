@@ -32,7 +32,8 @@ export type MicroVMOutcome =
 export interface Spec {
   worker_host: { instance_type: string };
   hypervisor: { name: Hypervisor; virtio_transport: 'mmio' | 'pci'; virtio_rng: boolean };
-  microvm: { vcpus: number; memory_mib: number };
+  /** console and memory_pages are optional: specs recorded before them leave them out, and absent is verbose and 4k. */
+  microvm: { vcpus: number; memory_mib: number; console?: 'verbose' | 'quiet' | 'quiet-i8042'; memory_pages?: '4k' | 'thp' };
   densities: number[];
   criteria: {
     step_p50_target_ms: number;

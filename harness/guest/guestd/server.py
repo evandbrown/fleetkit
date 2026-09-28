@@ -19,7 +19,9 @@ while it is being relaunched); ``chromium_flags`` (the flags guestd launches Chr
 the base flags, then the spec's extra flags); ``chromium_extra_flags`` (those extra flags alone);
 ``chromium_running_flags`` (the flags the running browser process has, read back from
 ``/proc/<pid>/cmdline``: the proof of what ran; null while no browser runs); ``kernel_cmdline``;
-``vcpus`` (``os.cpu_count()``); ``mem_total`` (bytes). Each /proc-derived one is null without /proc.
+``vcpus`` (``os.cpu_count()``); ``mem_total`` (bytes); ``console`` (the guest console mode the host
+passed in ``FLEETKIT_CONSOLE``, which only the Docker backend does; null otherwise: a microVM's
+kernel command line shows its own). Each /proc-derived one is null without /proc.
 """
 
 from __future__ import annotations
@@ -55,11 +57,13 @@ ALLOWED = {
 
 
 class Daemon:
-    def __init__(self, log: LogRing, chromium, fault: Optional[Fault] = None, proc_root: str = "/proc") -> None:
+    def __init__(self, log: LogRing, chromium, fault: Optional[Fault] = None, proc_root: str = "/proc",
+                 console: Optional[str] = None) -> None:
         self.log = log
         self.chromium = chromium
         self.fault = fault
         self.proc_root = proc_root
+        self.console = console
         self.started = time.monotonic()
         self.sampler = ProcSampler(proc_root, chromium_binary=getattr(chromium, "binary", chromium_mod.CHROMIUM_BIN), self_pid=os.getpid())
         self._static: Optional[Dict[str, Any]] = None
@@ -145,6 +149,7 @@ class Daemon:
             "chromium_flags": list(flags),
             "chromium_extra_flags": list(getattr(c, "extra_flags", None) or []),
             "chromium_running_flags": list(running) if running is not None else None,
+            "console": self.console,
         }
         body.update(self._static)
         if not self.ready:

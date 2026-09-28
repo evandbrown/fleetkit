@@ -12,6 +12,10 @@ from typing import Any, Dict, Optional, Tuple
 # chromium_running_flags is what the browser process runs with, read back from /proc in the guest.
 GUEST_INFO_KEYS = ("guestd_version", "chromium_version", "chromium_flags", "chromium_extra_flags",
                    "chromium_running_flags", "kernel_cmdline", "vcpus", "mem_total")
+# Kept only when the guest sends a value, so a microVM that doesn't use them records what it always did.
+# console: the guest console mode the host passed in the environment (the docker backend; a VM's kernel
+# command line, kernel_cmdline, shows its own).
+GUEST_INFO_OPTIONAL_KEYS = ("console",)
 
 
 class GuestError(Exception):
@@ -106,6 +110,9 @@ def boot_phases(resp: GuestResponse) -> Dict[str, Optional[float]]:
 
 
 def guest_info(body: Any) -> Dict[str, Any]:
-    """GUEST_INFO_KEYS from a /health answer; None for each one the guest did not send."""
+    """GUEST_INFO_KEYS from a /health answer, None for each one the guest did not send; then each of
+    GUEST_INFO_OPTIONAL_KEYS the guest sent a value for."""
     body = body if isinstance(body, dict) else {}
-    return {k: body.get(k) for k in GUEST_INFO_KEYS}
+    out = {k: body.get(k) for k in GUEST_INFO_KEYS}
+    out.update({k: body[k] for k in GUEST_INFO_OPTIONAL_KEYS if body.get(k) is not None})
+    return out

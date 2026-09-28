@@ -56,6 +56,22 @@ def test_extra_chromium_flags_label_a_spec_and_left_out_are_none():
         SP.resolve({**d, "specs": {"aa": {}, "bb": {"workload": {"chromium_extra_flags": []}}}})
 
 
+def test_the_guest_console_and_memory_pages_label_a_spec_and_left_out_are_verbose_and_4k():
+    d = load("nested-sizes-1")
+    d = {**d, "specs": {"default": {}, "quiet": {"microvm": {"console": "quiet"}},
+                        "quiet-i8042-thp": {"microvm": {"console": "quiet-i8042", "memory_pages": "thp"}}}}
+    resolved = SP.resolve(d)
+    assert SP.labels(resolved) == {"default": "verbose console, 4 KiB pages", "quiet": "quiet console, 4 KiB pages",
+                                   "quiet-i8042-thp": "quiet console, no keyboard probe, transparent huge pages"}
+    assert SP.changes(d["base"], dict(resolved)["quiet-i8042-thp"]) == [
+        {"path": "microvm.console", "base": "verbose", "value": "quiet-i8042"},
+        {"path": "microvm.memory_pages", "base": "4k", "value": "thp"}]
+    for key in ("microvm.console", "microvm.memory_pages"):
+        assert SP.LABEL[key]["required"] is False and SP.LABEL[key]["tier"] == "advanced"
+    with pytest.raises(SP.SpecError, match="same spec"):
+        SP.resolve({**d, "specs": {"aa": {}, "bb": {"microvm": {"console": "verbose", "memory_pages": "4k"}}}})
+
+
 def test_host_facts_follow_from_the_instance_type():
     assert SP.host_of("m8i.2xlarge") == {"instance_type": "m8i.2xlarge", "host_kind": "nested", "vcpus": 8,
                                          "memory_gib": 32, "price_usd_per_hour": 0.42336, "price_estimated": True}

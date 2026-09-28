@@ -29,7 +29,7 @@ A campaign definition says what to run. A spec says what one run does. This page
 
 ## The spec
 
-Every field is required but two, so a spec never depends on a default; the defaults are what the builder starts a new campaign with. The exceptions were added after the first campaigns ran, so the specs those campaigns recorded stay valid and unchanged: `procedure.release_after_ready_s`, absent 0, and `workload.chromium_extra_flags`, absent none (the whole `workload` section may be left out). A spec that leaves one out runs exactly what one that sets its default runs. **Basic** fields are on the builder's first screen, **advanced** ones behind a disclosure, and **rare** ones in the full spec view.
+Every field is required but four, so a spec never depends on a default; the defaults are what the builder starts a new campaign with. The exceptions were added after the first campaigns ran, so the specs those campaigns recorded stay valid and unchanged: `procedure.release_after_ready_s`, absent 0; `workload.chromium_extra_flags`, absent none (the whole `workload` section may be left out); `microvm.console`, absent `verbose`; and `microvm.memory_pages`, absent `4k`. A spec that leaves one out runs exactly what one that sets its default runs. **Basic** fields are on the builder's first screen, **advanced** ones behind a disclosure, and **rare** ones in the full spec view.
 
 | Field | What it controls | Default | Tier |
 |---|---|---|---|
@@ -43,6 +43,8 @@ Every field is required but two, so a spec never depends on a default; the defau
 | `criteria.task_p95_target_ms` | The 95th percentile of whole-task time must be at most this. | 5000 | basic |
 | `hypervisor.virtio_transport` | How each microVM's devices reach its guest kernel: `mmio` or `pci`. Cloud Hypervisor only uses `pci`. | `mmio` | advanced |
 | `hypervisor.virtio_rng` | Whether each microVM has a random-number device. Cloud Hypervisor always has one. | `false` | advanced |
+| `microvm.console` | What each guest kernel prints on its serial console while it boots: `verbose` (the whole log), `quiet` (critical messages only) or `quiet-i8042` (critical messages only, and no keyboard probe) ([below](#guest-console-and-memory-pages)). Optional: absent is `verbose`. | `verbose` | advanced |
+| `microvm.memory_pages` | How the hypervisor asks the worker host to back guest memory: `4k` (no hint) or `thp` (transparent huge pages) ([below](#guest-console-and-memory-pages)). Optional: absent is `4k`. | `4k` | advanced |
 | `procedure.trials_per_density` | Trials at each density on the way up. | 1 | advanced |
 | `procedure.boundary_trials` | Extra trials at the highest passing density and the lowest failing one, once the run stops going up. | 2 | advanced |
 | `procedure.release_after_ready_s` | Seconds every trial waits, 0 to 60, once all its microVMs are ready, before it releases their tasks together. 0 is a cold start; a wait measures a warm pool. Task times start at the release, so no task's time includes it. Optional: absent is 0. | 0 | advanced |
@@ -62,7 +64,7 @@ Checked beyond the schema, each error shown next to its field:
 - With Cloud Hypervisor, `virtio_transport` is `pci` and `virtio_rng` is `true`.
 - Every extra Chromium flag is on the allowed list and takes the value it lists, none is a base flag, and they add up to at most 512 characters ([below](#extra-chromium-flags)).
 
-The same in every run, so not fields: the guest and the browser it boots with its base flags, the five-step shopping task, the test site's catalog, the warm-up and illustration trials, the stop at the first failing density, sampling five times a second on the worker host and in each microVM, each microVM's CPU cap and memory headroom, and the thresholds that name what limited a trial ([method](method.md)). One becomes a field when a campaign needs to vary it.
+The same in every run, so not fields: the guest and the browser it boots with its base flags, the rest of the guest kernel's command line, the five-step shopping task, the test site's catalog, the warm-up and illustration trials, the stop at the first failing density, sampling five times a second on the worker host and in each microVM, each microVM's CPU cap and memory headroom, and the thresholds that name what limited a trial ([method](method.md)). One becomes a field when a campaign needs to vary it.
 
 ## Extra Chromium flags
 
@@ -95,6 +97,24 @@ Refused, with the reason the checker gives: any base flag again (`--disable-back
 
 Each flag once, at most 8, at most 512 characters together, and a number written without leading zeros (`=2`, never `=02`), so one configuration can't pass as two specs. A run proves its flags: once every microVM is ready, the driver compares what each browser process runs with, as its guest reads it back from `/proc/<pid>/cmdline`, against the base flags plus the spec's plus the start page (`run.json` `harness.chromium_flags`), and records each microVM's in `trial.json` (`microvms[].chromium_flags`). A trial where they differ, or where a guest can't say while the spec adds flags, is a failure outside the experiment: it runs again once, then the density is not tested.
 
+## Guest console and memory pages
+
+Two settings of the microVM itself, each with a default that boots exactly as every run before them did.
+
+**`microvm.console`** decides what the guest kernel prints on the serial console (`console=ttyS0`) while it boots. The hypervisor emulates that port one character at a time, and the worker host pays for each character in the hypervisor's CPU: earlier runs' console logs show about 21 KB of kernel log per boot, at about 27 µs a character on nested hosts and 6.5 µs on metal.
+
+| Value | Added to the kernel command line, after the hypervisor's own words | What prints |
+|---|---|---|
+| `verbose` | nothing | the whole kernel log, then the guest init's markers and the guest daemon's lines |
+| `quiet` | `quiet loglevel=3` | only the kernel's critical messages (levels 0 to 2: a panic or oops still prints in full, but errors, warnings such as the OOM killer's, and the rest don't), then the guest init's markers and the guest daemon's lines |
+| `quiet-i8042` | `quiet loglevel=3 i8042.noaux i8042.nomux i8042.dumbkbd` | as `quiet`; the kernel also skips probing the emulated PS/2 keyboard, 0.4 to 0.5 s of waiting in a Firecracker boot. These are Firecracker's own default words, which the harness's command line replaces. Cloud Hypervisor's guests find no PS/2 controller, so there it boots as `quiet` does |
+
+The kernel still keeps its whole log in guest memory, and the guest init's markers still reach the console, so a boot that dies can still be read from its console log; what a quiet console log no longer has is the kernel's timestamped boot lines, which analyses of earlier runs read (the keyboard-probe wait among them). A run proves its console: once every microVM is ready, the driver checks that each guest's kernel command line, as the guest reads it from `/proc/cmdline`, carries the value's words. A trial where one doesn't is a failure outside the experiment: it runs again once, then the density is not tested.
+
+**`microvm.memory_pages`** decides how the hypervisor asks the worker host to back each microVM's guest memory. `4k` asks for nothing: Firecracker maps guest memory as it always has, and Cloud Hypervisor runs with `thp=off`, so guest memory is in 4 KiB pages unless the host's transparent huge page mode is `always`. `thp` asks for transparent huge pages: Firecracker's machine configuration gets `"huge_pages": "Transparent"` and Cloud Hypervisor `--memory ... thp=on`, and the host grants 2 MiB pages where its mode is `always` or `madvise`. The driver refuses `thp` on a worker host whose mode is `never` or whose host daemon doesn't report one. `run.json` records the host's mode and its defrag setting (`observed.host_info.transparent_hugepage`), and `host_metrics.csv` records how much of each microVM's memory the host backs with huge pages, five times a second (`anon_thp_bytes`, from the microVM's cgroup), so a run shows whether its setting took effect.
+
+The local Docker backend (a local check of a spec, never a result) has no guest kernel and no guest memory of its own. There a console other than `verbose` reaches the guest as `FLEETKIT_CONSOLE`, the guest reports it back in `/health`, and the driver checks that report instead; `thp` is accepted and ignored. The run's `ops.jsonl` notes both.
+
 ## The campaign definition
 
 ```json
@@ -125,7 +145,7 @@ Each flag once, at most 8, at most 512 characters together, and a number written
 | `base` | A complete spec. It isn't run by itself; a named spec `{}` runs it as it is. | | |
 | `specs` | The named specs, 1 to 12, each written as its changes from the base. | | |
 
-A named spec may change `worker_host`, `hypervisor`, `microvm`, `densities` and `workload` (its one field, the extra Chromium flags). The criteria, the procedure and the support host are set once in the base, so every run in a campaign is tested and judged the same way.
+A named spec may change `worker_host`, `hypervisor`, `microvm` (its size, guest console and memory pages), `densities` and `workload` (its one field, the extra Chromium flags). The criteria, the procedure and the support host are set once in the base, so every run in a campaign is tested and judged the same way.
 
 ## How a campaign expands into runs
 
@@ -143,7 +163,7 @@ python3 experiments/schema/expand.py experiments/campaigns/examples/hv-host-1.js
 
 Exit status 0 means valid, 1 not valid, 2 a usage error. Errors and warnings each start with the field they're about. Warnings don't block a campaign: one replica per spec, microVM memory that adds up to the host's memory, a run too big for today's quota.
 
-The harness must refuse a spec value it can't carry out yet, so a recorded spec is always what ran. The driver refuses extra Chromium flags on a host daemon that doesn't pass them to its guests (its `GET /host/info` has no `chromium_extra_flags`). Today it can't carry out Cloud Hypervisor, Firecracker on `pci` or with a random-number device, or metal worker hosts.
+The harness must refuse a spec value it can't carry out yet, so a recorded spec is always what ran. The driver refuses extra Chromium flags on a host daemon that doesn't pass them to its guests (its `GET /host/info` has no `chromium_extra_flags`), a guest console or memory pages its host daemon doesn't offer (`GET /host/info` `microvm_options`; a daemon older than them offers only `verbose` and `4k`), and `thp` on a worker host whose transparent huge pages are off or not reported. Today it can't carry out Cloud Hypervisor, Firecracker on `pci` or with a random-number device, or metal worker hosts.
 
 ## Where results go
 
@@ -159,7 +179,7 @@ results/<campaign>/
     host_metrics.csv             worker host and per-microVM samples, five times a second
     guest_metrics.csv            each microVM's samples of its own processes during its task
     screenshots/                 one per task, plus the illustration trial's filmstrip
-    console-logs/<microvm>/      each microVM's serial console
+    console-logs/<microvm>/      each microVM's serial console (without the kernel's boot log under a quiet console)
     guest-logs/<microvm>.jsonl   each guest's log
     driver.log                   the run's operational log, including any trial re-run and why
     logs.jsonl  spans.jsonl      the driver's structured logs and traces

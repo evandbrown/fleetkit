@@ -13,10 +13,12 @@ from ..model import MicroVM
 from ..runner import Runner
 
 # Per-microVM figures in GET /host/metrics, in export order. The first four are section 4's;
-# the rest are the Firecracker CPU split, cgroup throttling and cgroup pressure (null elsewhere).
+# the rest are the hypervisors' CPU split, cgroup throttling, cgroup pressure and the guest memory backed
+# by transparent huge pages (null elsewhere).
 MICROVM_FIGURES = ("rss_bytes", "cgroup_memory_current", "cgroup_memory_peak", "cpu_usage_usec",
                    "cpu_vcpu_usec", "cpu_hypervisor_usec", "cpu_throttled_usec", "cpu_nr_throttled",
-                   "cpu_pressure_some_total_us", "cpu_pressure_full_total_us", "memory_pressure_some_total_us")
+                   "cpu_pressure_some_total_us", "cpu_pressure_full_total_us", "memory_pressure_some_total_us",
+                   "anon_thp_bytes")
 
 
 def empty_sample() -> Dict[str, Optional[int]]:

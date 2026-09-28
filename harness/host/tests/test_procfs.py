@@ -95,11 +95,14 @@ def _microvm(backend, slot=0):
                    idle_timeout_s=120, fixture_base_url=backend.fixture_base_url)
 
 
-def _scope(cgroup_root, slot, pids, cpu_pressure=True, memory_pressure=True):
+def _scope(cgroup_root, slot, pids, cpu_pressure=True, memory_pressure=True, memory_stat=True):
     cg = os.path.join(cgroup_root, "system.slice", "fc-vm%d.scope" % slot)
     write(os.path.join(cg, "cgroup.procs"), "".join("%s\n" % p for p in pids))
     write(os.path.join(cg, "memory.current"), "2254857830\n")
     write(os.path.join(cg, "memory.peak"), "2300000000\n")
+    if memory_stat:
+        write(os.path.join(cg, "memory.stat"), "anon 2210000000\nfile 4096\nkernel 30000000\n"
+                                               "anon_thp 1971322880\nfile_thp 0\nshmem_thp 0\n")
     write(os.path.join(cg, "cpu.stat"), "usage_usec 9020000\nuser_usec 8000000\nsystem_usec 1020000\n"
                                         "nr_periods 120\nnr_throttled 9\nthrottled_usec 450000\n"
                                         "nr_bursts 0\nburst_usec 0\n")
@@ -132,18 +135,20 @@ def test_firecracker_sample_reads_the_scope_and_threads(tmp_path, monkeypatch):
         "cpu_pressure_some_total_us": 812345,
         "cpu_pressure_full_total_us": 601234,
         "memory_pressure_some_total_us": 4321,
+        "anon_thp_bytes": 1971322880,
     }
     assert all(isinstance(v, int) for v in out.values())
 
 
 def test_firecracker_sample_without_pressure_files_or_threads(tmp_path):
     proc, cgroot = str(tmp_path / "proc"), str(tmp_path / "cgroup")
-    _scope(cgroot, 1, ["5555"], cpu_pressure=False, memory_pressure=False)     # pid 5555 has no /proc entry
+    _scope(cgroot, 1, ["5555"], cpu_pressure=False, memory_pressure=False,     # pid 5555 has no /proc entry
+           memory_stat=False)
     b = FirecrackerBackend(Runner(dry_run=False), str(tmp_path / "logs"), cgroup_root=cgroot, proc_root=proc)
     out = b.sample(_microvm(b, 1))
     assert out["cgroup_memory_current"] == 2254857830 and out["cpu_throttled_usec"] == 450000
     for k in ("rss_bytes", "cpu_vcpu_usec", "cpu_hypervisor_usec", "cpu_pressure_some_total_us",
-              "cpu_pressure_full_total_us", "memory_pressure_some_total_us"):
+              "cpu_pressure_full_total_us", "memory_pressure_some_total_us", "anon_thp_bytes"):
         assert out[k] is None, k
 
 

@@ -18,7 +18,7 @@ def test_metric_points_carry_correlation_keys(manager, guest, tel, ctx):
     assert set(sample["microvms"][0]) == {"id", "rss_bytes", "cgroup_memory_current", "cgroup_memory_peak", "cpu_usage_usec",
                                           "cpu_vcpu_usec", "cpu_hypervisor_usec", "cpu_throttled_usec", "cpu_nr_throttled",
                                           "cpu_pressure_some_total_us", "cpu_pressure_full_total_us",
-                                          "memory_pressure_some_total_us"}
+                                          "memory_pressure_some_total_us", "anon_thp_bytes"}
     tel.close()
     recs = [json.loads(l) for l in open(tel.log_dir + "/host_metrics.jsonl")]
     points = [p for r in recs for p in r["points"]]

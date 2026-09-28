@@ -186,7 +186,7 @@ def test_collect_host_info_docker(tmp_path):
     assert set(info) == {"host_id", "backend", "hostd_version", "kernel_release", "cpu_model", "cpu_count",
                          "threads_per_core", "cores_per_socket", "sockets", "mem_total", "virtualized", "kvm",
                          "ec2", "metrics_period_s", "hypervisor", "firecracker", "max_slots",
-                         "hypervisor_options", "chromium_extra_flags"}
+                         "hypervisor_options", "chromium_extra_flags", "transparent_hugepage", "microvm_options"}
     assert info["host_id"] == "local" and info["backend"] == "docker" and info["hostd_version"]
     assert info["cpu_model"] == "Intel(R) Xeon(R) 6975P-C" and info["virtualized"] is True
     assert (info["threads_per_core"], info["cores_per_socket"], info["sockets"]) == (2, 8, 1)

@@ -29,6 +29,8 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from driver.config import CONSOLE_KERNEL_ARGS
+
 STEP_NAMES = ("home", "search", "open_product", "add_to_cart", "verify_cart")
 # a 1x1 JPEG
 TINY_JPEG = base64.b64decode(
@@ -59,6 +61,13 @@ class StubOptions:
         # guest_info.chromium_running_flags: None (an older guest reports none), "echo" (the base flags from
         # chromium-flags.json, the create request's extra flags, the start page), or a list to report as is
         self.running_flags = kw.get("running_flags")
+        self.microvm_options = kw.get("microvm_options")  # /host/info microvm_options (None: absent, an older daemon)
+        self.transparent_hugepage = kw.get("transparent_hugepage")  # /host/info transparent_hugepage (None: absent)
+        # How a guest boots with the create request's console: "echo" (as the real daemon and guest do: the mode's
+        # words on its kernel command line, and on docker the mode in guest_info.console), None (an older
+        # daemon that ignores the field: the default command line, no console reported), or a console mode (a
+        # daemon that boots that mode's words whatever the request asked for)
+        self.guest_console = kw.get("guest_console", "echo")
 
 
 class MicroVM:
@@ -177,13 +186,23 @@ class StubHost:
                                      "chromium_flags": ["--headless=new", "--remote-debugging-port=9222"],
                                      "chromium_extra_flags": list(s.request.get("chromium_extra_flags") or []),
                                      "chromium_running_flags": self._running_flags(s),
-                                     "kernel_cmdline": "console=ttyS0 reboot=k panic=1 fleetkit.stub=1",
+                                     "kernel_cmdline": self._kernel_cmdline(s),
                                      "vcpus": int(s.request.get("vcpus", 2)),
                                      "mem_total": int(s.request.get("mem_mib", 2048)) * 1024 * 1024}}
+            if self.o.guest_console == "echo" and s.request.get("console") and self.o.backend == "docker":
+                s.boot["guest_info"]["console"] = s.request["console"]
             self._transition(s, "ready", traceparent=traceparent, run_id=run_id)
         if self.tel:
             self.tel.span("hostd", "microvm.create", traceparent, span_start, time.time_ns(),
                           {"fleetkit.microvm_id": s.id, "fleetkit.run_id": run_id or ""})
+
+    def _kernel_cmdline(self, s: MicroVM) -> str:
+        words = ["console=ttyS0", "reboot=k", "panic=1"]
+        if self.o.guest_console == "echo" and s.request.get("console"):
+            words += CONSOLE_KERNEL_ARGS[s.request["console"]]
+        elif self.o.guest_console in CONSOLE_KERNEL_ARGS:
+            words += CONSOLE_KERNEL_ARGS[self.o.guest_console]
+        return " ".join(words + ["fleetkit.stub=1"])
 
     def _running_flags(self, s: MicroVM):
         if self.o.running_flags != "echo":
@@ -357,6 +376,10 @@ class StubHost:
             info["hypervisor_options"] = self.o.hypervisor_options
         if self.o.chromium_extra_flags:
             info["chromium_extra_flags"] = True
+        if self.o.microvm_options is not None:
+            info["microvm_options"] = self.o.microvm_options
+        if self.o.transparent_hugepage is not None:
+            info["transparent_hugepage"] = self.o.transparent_hugepage
         return info
 
     def verify_clean(self) -> dict:

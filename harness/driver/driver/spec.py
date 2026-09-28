@@ -78,6 +78,18 @@ class RunSpec:
         return list((self.spec.get("workload") or {}).get("chromium_extra_flags", []))
 
     @property
+    def console(self) -> str:
+        """What each guest kernel prints on its console as it boots. Optional in the spec (specs recorded
+        before it existed leave it out): absent is verbose, the whole kernel log, as every run before."""
+        return str(self.spec["microvm"].get("console", "verbose"))
+
+    @property
+    def memory_pages(self) -> str:
+        """How the hypervisor asks the host to back guest memory. Optional in the spec (specs recorded before it
+        existed leave it out): absent is 4k, no hint, as every run before."""
+        return str(self.spec["microvm"].get("memory_pages", "4k"))
+
+    @property
     def release_after_ready_s(self) -> float:
         """Seconds each trial waits once every microVM is ready before it releases the tasks. Optional in
         the spec (specs recorded before it existed leave it out): absent is 0, the tasks start at once."""
@@ -169,6 +181,13 @@ def refusals(rs: RunSpec, health: dict | None, host_info: dict | None, local_doc
     # A daemon older than the flags ignores them: its guests would run the base flags only.
     if rs.chromium_extra_flags and not info.get("chromium_extra_flags"):
         out.append("workload.chromium_extra_flags: this host daemon doesn't pass extra flags to Chromium")
+    # The guest console and memory pages: a daemon older than them offers only the defaults (it would ignore
+    # them), and docker accepts every value, giving effect to what it can (docs/spec.md).
+    offered_vm = info.get("microvm_options") or {"console": ["verbose"], "memory_pages": ["4k"]}
+    for key, value in (("console", rs.console), ("memory_pages", rs.memory_pages)):
+        if value not in (offered_vm.get(key) or []):
+            have = ", ".join(offered_vm.get(key) or []) or "nothing"
+            out.append(f"microvm.{key}: this host daemon can't carry out {value} (it offers {have})")
     if local_docker:
         if backend and backend != "docker":
             out.append(f"--backend docker: this host's daemon runs {backend}, not docker")
@@ -192,10 +211,28 @@ def refusals(rs: RunSpec, health: dict | None, host_info: dict | None, local_doc
     if isinstance(slots, int) and max(rs.densities) > slots:
         out.append(f"densities: {max(rs.densities)} microVMs at once is more than this host daemon's "
                    f"{slots} slots")
+    # thp only asks for huge pages; a worker host whose mode is never (or that doesn't say) grants none.
+    thp = info.get("transparent_hugepage") if isinstance(info.get("transparent_hugepage"), dict) else {}
+    if rs.memory_pages == "thp" and thp.get("enabled") not in ("always", "madvise"):
+        out.append(f"microvm.memory_pages: thp needs the worker host's transparent huge pages in always or madvise "
+                   f"mode, and this host's is {thp.get('enabled') or 'unknown'}")
     ec2 = info.get("ec2") if isinstance(info.get("ec2"), dict) else None
     want = rs.spec["worker_host"]["instance_type"]
     if ec2 and ec2.get("instance_type") and ec2["instance_type"] != want:
         out.append(f"worker_host.instance_type: this worker host is {ec2['instance_type']}, not {want}")
+    return out
+
+
+def docker_notes(rs: RunSpec) -> list[dict]:
+    """The spec values a local docker run passes on but can't give effect to, one ops.jsonl event each: a
+    container has no guest kernel whose console log to quiet, and no guest memory to back with huge pages."""
+    out = []
+    if rs.console != "verbose":
+        out.append({"field": "microvm.console", "value": rs.console,
+                    "note": "passed to the guest, which reports it; a container has no guest kernel log to quiet"})
+    if rs.memory_pages != "4k":
+        out.append({"field": "microvm.memory_pages", "value": rs.memory_pages,
+                    "note": "ignored: a container has no guest memory for a hypervisor to back with huge pages"})
     return out
 
 

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "spec.schema.json",
   "title": "Run spec",
-  "description": "Everything fixed about one run: one worker host carrying out this spec from start to finish. Every field is required but two, added after the first campaigns ran, so the specs they recorded stay valid and unchanged: procedure.release_after_ready_s is 0 when absent, and workload.chromium_extra_flags (the whole workload section may be left out) is no extra flags. Values that follow from other fields (the host kind, the host's vCPUs and price) are never fields. docs/spec.md explains each field and the rules expand.py checks beyond this schema.",
+  "description": "Everything fixed about one run: one worker host carrying out this spec from start to finish. Every field is required but four, added after the first campaigns ran, so the specs they recorded stay valid and unchanged: procedure.release_after_ready_s is 0 when absent, workload.chromium_extra_flags (the whole workload section may be left out) is no extra flags, microvm.console is verbose and microvm.memory_pages is 4k. Values that follow from other fields (the host kind, the host's vCPUs and price) are never fields. docs/spec.md explains each field and the rules expand.py checks beyond this schema.",
   "type": "object",
   "additionalProperties": false,
   "required": ["worker_host", "hypervisor", "microvm", "densities", "criteria", "procedure", "support_host"],
@@ -95,7 +95,7 @@
     "microvm": {
       "type": "object",
       "additionalProperties": false,
-      "description": "The size of each microVM. The guest it boots and the task it runs are the same in every run.",
+      "description": "The size of each microVM, what its guest kernel prints to the console as it boots, and how its memory is backed. The guest it boots and the task it runs are the same in every run.",
       "x-builder": { "label": "MicroVM" },
       "properties": {
         "vcpus": {
@@ -114,6 +114,20 @@
           "default": 2048,
           "description": "Guest memory of each microVM.",
           "x-builder": { "tier": "basic", "label": "MicroVM memory", "unit": "MiB" }
+        },
+        "console": {
+          "type": "string",
+          "enum": ["verbose", "quiet", "quiet-i8042"],
+          "default": "verbose",
+          "description": "What each guest kernel prints on its serial console while it boots. verbose prints the whole kernel log, about 21 KB, as every run before this field did. quiet adds `quiet loglevel=3` to the kernel command line, so only critical kernel messages print (a panic or oops still prints in full); errors, warnings and the rest stay in the kernel's own log. quiet-i8042 adds Firecracker's own `i8042.noaux i8042.nomux i8042.dumbkbd` too, so the kernel skips probing the emulated PS/2 keyboard (Cloud Hypervisor's guests find no PS/2 controller, so there it boots as quiet does). Every character the guest prints costs host CPU in the hypervisor's emulated serial port. Optional: absent is verbose.",
+          "x-builder": { "tier": "advanced", "label": "Guest console" }
+        },
+        "memory_pages": {
+          "type": "string",
+          "enum": ["4k", "thp"],
+          "default": "4k",
+          "description": "How the hypervisor asks the worker host to back each microVM's guest memory. 4k asks for nothing, as every run before this field did: 4 KiB pages unless the host's transparent huge page mode is always. thp asks for transparent huge pages (Firecracker's huge_pages Transparent, Cloud Hypervisor's thp=on), which the host grants when its mode is always or madvise. run.json records the host's mode. Optional: absent is 4k.",
+          "x-builder": { "tier": "advanced", "label": "Guest memory pages" }
         }
       }
     },

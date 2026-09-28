@@ -67,6 +67,10 @@ def show(path: str, value) -> str:
         return f"{value} vCPU" + ("" if value == 1 else "s")
     if path == "workload.chromium_extra_flags":
         return " ".join(value) if value else "no extra Chromium flags"
+    if path == "microvm.console":
+        return {"quiet-i8042": "quiet console, no keyboard probe"}.get(value, f"{value} console")
+    if path == "microvm.memory_pages":
+        return "transparent huge pages" if value == "thp" else "4 KiB pages"
     if isinstance(value, list):
         return ", ".join(str(x) for x in value)
     return expand.fmt(value)

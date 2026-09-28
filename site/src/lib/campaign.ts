@@ -166,7 +166,8 @@ export function flatten(obj: Obj, prefix = ''): Record<string, Json> {
 }
 
 /** {path: default} for the spec fields a spec may leave out, which then stand at their default:
- * procedure.release_after_ready_s and workload.chromium_extra_flags (expand.py optional_defaults). */
+ * procedure.release_after_ready_s, workload.chromium_extra_flags, microvm.console and microvm.memory_pages
+ * (expand.py optional_defaults). */
 export const OPTIONAL: Record<string, Json> = (() => {
   const s = specSchema as Schema;
   const out: Record<string, Json> = {};
@@ -633,8 +634,9 @@ export interface Field {
   /** A named spec may change it: the worker host, the hypervisor, the microVM, the densities and the workload's
    * extra Chromium flags. */
   variable: boolean;
-  /** A spec may leave it out, and then it is the schema's default: procedure.release_after_ready_s and
-   * workload.chromium_extra_flags, added after the first campaigns ran. Every other field is required. */
+  /** A spec may leave it out, and then it is the schema's default: procedure.release_after_ready_s,
+   * workload.chromium_extra_flags, microvm.console and microvm.memory_pages, added after the first campaigns ran.
+   * Every other field is required. */
   optional: boolean;
 }
 
@@ -665,6 +667,10 @@ export const HELP: Record<string, string> = {
   'microvm.vcpus': 'Virtual CPUs given to each microVM. Each microVM runs one headless Chrome and one browser task per trial.',
   'microvm.memory_mib':
     "Memory given to each microVM, in MiB (1,024 MiB is 1 GiB). If the microVMs' memory adds up to more than the host's, memory runs out before CPU.",
+  'microvm.console':
+    'What each guest kernel prints on its serial console at boot, which costs host CPU per character. Verbose prints the whole boot log; quiet only critical messages, such as a panic; quiet-i8042 also skips probing a keyboard the microVM never uses.',
+  'microvm.memory_pages':
+    'How the host backs each microVM’s memory: 4k asks for nothing special, thp asks for transparent huge pages, which can cut the work of mapping guest memory. The host grants them only if its huge-page setting allows.',
   densities:
     'How many microVMs each trial starts at once; the run tests them in order and stops at the first that fails. Space them closely where you expect the limit: the result is only as precise as the gap between the last pass and the first failure.',
   'criteria.step_p50_target_ms':

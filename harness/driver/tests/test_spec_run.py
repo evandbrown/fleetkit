@@ -563,3 +563,147 @@ def test_a_spec_with_a_flag_off_the_allowed_list_is_refused(tmp_path):
 def test_outside_cause_names_a_flag_mismatch():
     assert outside_cause({"error": "chromium flags: microVM x's browser runs [], not [1]"}) == \
         "chromium flags: microVM x's browser runs [], not [1]"
+
+
+# ---- the guest console and memory pages -------------------------------------------------------
+
+ALL_VM_OPTIONS = {"console": ["verbose", "quiet", "quiet-i8042"], "memory_pages": ["4k", "thp"]}
+MADVISE = {"enabled": "madvise", "defrag": "madvise"}
+
+
+def test_console_words_match_the_host_daemons():
+    # The driver checks a guest's kernel command line for the words hostd puts there: one table, held equal.
+    import importlib.util
+    import sys
+    from driver.config import CONSOLE_KERNEL_ARGS
+    path = Path(__file__).resolve().parents[2] / "host" / "hostd" / "model.py"
+    mod_spec = importlib.util.spec_from_file_location("hostd_model_for_test", path)
+    model = importlib.util.module_from_spec(mod_spec)
+    sys.modules[mod_spec.name] = model      # dataclasses look their module up while the class is made
+    try:
+        mod_spec.loader.exec_module(model)
+    finally:
+        sys.modules.pop(mod_spec.name, None)
+    assert CONSOLE_KERNEL_ARGS == model.CONSOLE_BOOT_ARGS
+    assert list(CONSOLE_KERNEL_ARGS) == list(model.CONSOLES)
+
+
+def test_a_quiet_console_and_huge_pages_reach_every_microvm_and_the_guest_shows_the_console(tmp_path, fixture_site):
+    out = tmp_path / "run"
+    spec = write_spec(tmp_path / "spec.json", densities=[1, 2],
+                      microvm={"vcpus": 2, "memory_mib": 2048, "console": "quiet-i8042", "memory_pages": "thp"})
+    with StubServer(telemetry_dir=str(tmp_path / "hostd"), proxy_margin_ms=300, startup_ms=40, step_ms=5,
+                    backend="firecracker", max_slots=200, microvm_options=ALL_VM_OPTIONS,
+                    transparent_hugepage=MADVISE) as hostd:
+        assert run_cli(*spec_args(hostd, fixture_site, out, spec)) == 0
+        reqs = [s.request for s in hostd.host.microvms.values()]
+    assert reqs and all(r["console"] == "quiet-i8042" and r["memory_pages"] == "thp" for r in reqs)
+    run = json.loads((out / "run.json").read_text())
+    assert run["spec"]["microvm"]["console"] == "quiet-i8042" and run["spec"]["microvm"]["memory_pages"] == "thp"
+    assert run["observed"]["host_info"]["transparent_hugepage"] == MADVISE
+    cmdline = run["observed"]["guest_info"]["kernel_cmdline"].split()
+    assert cmdline[3:8] == ["quiet", "loglevel=3", "i8042.noaux", "i8042.nomux", "i8042.dumbkbd"]
+    for tid in trial_ids(out):
+        t = json.loads((out / "trials" / tid / "trial.json").read_text())
+        assert t["error"] is None and t["passed"] in (True, None), tid
+    assert not (out / "ops.jsonl").exists()
+
+
+def test_the_default_console_and_pages_send_nothing_new(tmp_path, fc_hostd, fixture_site):
+    # A spec that leaves both out, or sets their defaults: the create request is what it always was, and a guest
+    # that boots verbose is never checked (every run before the fields booted so).
+    for i, microvm in enumerate(({"vcpus": 2, "memory_mib": 2048},
+                                 {"vcpus": 2, "memory_mib": 2048, "console": "verbose", "memory_pages": "4k"})):
+        out = tmp_path / f"run{i}"
+        fc_hostd.host.microvms.clear()
+        spec = write_spec(tmp_path / f"spec{i}.json", densities=[1], microvm=microvm)
+        assert run_cli(*spec_args(fc_hostd, fixture_site, out, spec)) == 0
+        reqs = [s.request for s in fc_hostd.host.microvms.values()]
+        assert reqs and all("console" not in r and "memory_pages" not in r for r in reqs)
+        assert json.loads((out / "trials" / "d1-t1" / "trial.json").read_text())["error"] is None
+
+
+def test_a_guest_that_booted_without_the_specs_console_is_not_a_result(tmp_path, fixture_site):
+    # A daemon that said it could and then booted the default command line: each trial is set aside, run again,
+    # and the density is not tested.
+    out = tmp_path / "run"
+    spec = write_spec(tmp_path / "spec.json", densities=[1, 2],
+                      microvm={"vcpus": 2, "memory_mib": 2048, "console": "quiet"})
+    with StubServer(telemetry_dir=str(tmp_path / "hostd"), proxy_margin_ms=300, startup_ms=40, step_ms=5,
+                    backend="firecracker", max_slots=200, microvm_options=ALL_VM_OPTIONS, guest_console=None) as hostd:
+        run_cli(*spec_args(hostd, fixture_site, out, spec))
+    causes = [o.get("cause", "") for o in ops(out) if o.get("event") == "trial_set_aside"]
+    assert causes and all(c.startswith("guest console: microVM ") and "lacks quiet loglevel=3" in c
+                          for c in causes), causes
+    plan = json.loads((out / "run.json").read_text())["plan"]
+    assert plan["stop_reason"] == "not_clean" and plan["densities_run"] == [] and trial_ids(out) == []
+
+
+def test_a_guest_that_booted_another_consoles_words_is_not_a_result(tmp_path, fixture_site):
+    # quiet asked, quiet-i8042 booted: the words quiet needs are all there, but the keyboard probe was skipped too, so
+    # the trial doesn't measure what the spec says.
+    out = tmp_path / "run"
+    spec = write_spec(tmp_path / "spec.json", densities=[1], microvm={"vcpus": 2, "memory_mib": 2048, "console": "quiet"})
+    with StubServer(telemetry_dir=str(tmp_path / "hostd"), proxy_margin_ms=300, startup_ms=40, step_ms=5,
+                    backend="firecracker", max_slots=200, microvm_options=ALL_VM_OPTIONS,
+                    guest_console="quiet-i8042") as hostd:
+        run_cli(*spec_args(hostd, fixture_site, out, spec))
+    causes = [o.get("cause", "") for o in ops(out) if o.get("event") == "trial_set_aside"]
+    assert causes and all(c.startswith("guest console: microVM ") and
+                          "carries i8042.dumbkbd i8042.noaux i8042.nomux, which console quiet doesn't add" in c
+                          for c in causes), causes
+    assert json.loads((out / "run.json").read_text())["plan"]["densities_run"] == []
+
+
+def test_a_local_docker_run_shows_the_guest_got_its_console_and_notes_what_docker_ignores(tmp_path, fixture_site):
+    out = tmp_path / "run"
+    spec = write_spec(tmp_path / "spec.json", densities=[1, 2],
+                      microvm={"vcpus": 2, "memory_mib": 2048, "console": "quiet", "memory_pages": "thp"})
+    with StubServer(telemetry_dir=str(tmp_path / "hostd"), proxy_margin_ms=300, startup_ms=40, step_ms=5,
+                    backend="docker", microvm_options=ALL_VM_OPTIONS) as hostd:
+        assert run_cli(*spec_args(hostd, fixture_site, out, spec, "--backend", "docker")) == 0
+        reqs = [s.request for s in hostd.host.microvms.values()]
+    assert reqs and all(r["console"] == "quiet" and r["memory_pages"] == "thp" for r in reqs)
+    run = json.loads((out / "run.json").read_text())
+    assert run["observed"]["guest_info"]["console"] == "quiet"
+    notes = [o for o in ops(out) if o.get("event") == "docker_backend_note"]
+    assert [(n["field"], n["value"]) for n in notes] == [("microvm.console", "quiet"), ("microvm.memory_pages", "thp")]
+    assert all(json.loads((out / "trials" / t / "trial.json").read_text())["error"] is None for t in trial_ids(out))
+
+
+def test_a_docker_guest_that_reports_no_console_is_not_a_result(tmp_path, fixture_site):
+    out = tmp_path / "run"
+    spec = write_spec(tmp_path / "spec.json", densities=[1], microvm={"vcpus": 2, "memory_mib": 2048, "console": "quiet"})
+    with StubServer(telemetry_dir=str(tmp_path / "hostd"), proxy_margin_ms=300, startup_ms=40, step_ms=5,
+                    backend="docker", microvm_options=ALL_VM_OPTIONS, guest_console=None) as hostd:
+        run_cli(*spec_args(hostd, fixture_site, out, spec, "--backend", "docker"))
+    causes = [o.get("cause", "") for o in ops(out) if o.get("event") == "trial_set_aside"]
+    assert causes and all(c.startswith("guest console: microVM ") and c.endswith("guest reports console null, not "
+                                                                                  "\"quiet\"") for c in causes), causes
+
+
+def test_a_daemon_that_cannot_carry_out_the_console_or_pages_is_refused(tmp_path):
+    rs = load_spec(write_spec(tmp_path / "spec.json",
+                              microvm={"vcpus": 2, "memory_mib": 2048, "console": "quiet", "memory_pages": "thp"}))
+    assert (rs.console, rs.memory_pages) == ("quiet", "thp")
+    old = ["microvm.console: this host daemon can't carry out quiet (it offers verbose)",
+           "microvm.memory_pages: this host daemon can't carry out thp (it offers 4k)"]
+    # a daemon older than the fields offers only the defaults, on a worker host and locally
+    assert refusals(rs, {"backend": "firecracker"}, {"transparent_hugepage": MADVISE}) == old
+    assert refusals(rs, {"backend": "docker"}, {}, local_docker=True) == old
+    ok = {"microvm_options": ALL_VM_OPTIONS}
+    assert refusals(rs, {"backend": "docker"}, ok, local_docker=True) == []
+    # thp needs the worker host's huge pages on: always or madvise
+    assert refusals(rs, {"backend": "firecracker"}, {**ok, "transparent_hugepage": MADVISE}) == []
+    assert refusals(rs, {"backend": "firecracker"}, {**ok, "transparent_hugepage": {"enabled": "always"}}) == []
+    never = "microvm.memory_pages: thp needs the worker host's transparent huge pages in always or madvise mode"
+    assert refusals(rs, {"backend": "firecracker"}, {**ok, "transparent_hugepage": {"enabled": "never"}}) == \
+        [never + ", and this host's is never"]
+    assert refusals(rs, {"backend": "firecracker"}, ok) == [never + ", and this host's is unknown"]
+    plain = load_spec(write_spec(tmp_path / "spec.json"))
+    assert (plain.console, plain.memory_pages) == ("verbose", "4k") and refusals(plain, {"backend": "firecracker"}, {}) == []
+
+
+def test_outside_cause_names_a_console_mismatch():
+    err = "guest console: microVM x's kernel command line lacks quiet for console quiet: console=ttyS0"
+    assert outside_cause({"error": err}) == err

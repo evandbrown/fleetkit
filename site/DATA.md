@@ -59,7 +59,9 @@ type MicroVMOutcome = 'completed' | 'startup_timeout' | 'startup_error' | 'lifet
 interface Spec {
   worker_host: { instance_type: string };
   hypervisor: { name: Hypervisor; virtio_transport: 'mmio' | 'pci'; virtio_rng: boolean };
-  microvm: { vcpus: number; memory_mib: number };
+  microvm: { vcpus: number; memory_mib: number;
+             console?: 'verbose' | 'quiet' | 'quiet-i8042';  // optional: absent is verbose
+             memory_pages?: '4k' | 'thp' };                  // optional: absent is 4k
   densities: number[];
   criteria: { step_p50_target_ms: number; step_p95_target_ms: number; task_p95_target_ms: number;
               ready_timeout_s: number; step_timeout_ms: number; task_timeout_ms: number };

@@ -75,7 +75,10 @@ place. Booting it needs a Linux host with KVM; that is the AWS leg (design secti
 - Kernel: `vmlinux-6.18.48` from `images/lock.env`; root device `/dev/vda` (or `vda`
   read-only), `root=/dev/vda ro`, `console=ttyS0` on x86_64 / `console=ttyAMA0` on aarch64,
   `init=/sbin/init`, `ip=<guest>::<gateway>:<mask>:<hostname>:eth0:off:<dns>` from design
-  section 3, and optionally `fleetkit.fault=<name>`.
+  section 3, and optionally `fleetkit.fault=<name>`, `fleetkit.chromium_extra_flags=<word>` and the
+  spec's guest console words (`quiet loglevel=3`, plus `i8042.noaux i8042.nomux i8042.dumbkbd`
+  for `quiet-i8042`). The console words only change what the kernel prints; init's markers below
+  still reach the console.
 - The root filesystem is read-only and shared; every VM writes only to tmpfs (`/run`,
   `/tmp`, `/dev/shm`). Chromium's profile is `/tmp/profile`.
 - Console markers: `fleetkit-init: devtmpfs ok`, `proc ok`, `sysfs ok`, `devpts ok`,

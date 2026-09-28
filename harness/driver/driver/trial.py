@@ -30,7 +30,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import schemas
-from .config import DESTROY_GRACE_S, READY_GRACE_S, READY_POLL_INTERVAL_S, TrialConfig
+from .config import CONSOLE_KERNEL_ARGS, DESTROY_GRACE_S, READY_GRACE_S, READY_POLL_INTERVAL_S, TrialConfig
 from .criteria import evaluate_trial
 from .hostclient import HostClient, HostError
 from .outputs import RunDir, Writers, write_json_atomic
@@ -145,7 +145,7 @@ class TrialRunner:
             self._write_trial_json()
 
             ready = [s for s in self.microvms if s.ready]
-            wrong = self._chromium_flags_problem(ready)
+            wrong = self._chromium_flags_problem(ready) or self._guest_console_problem(ready)
             if wrong:
                 self.error = wrong
                 self._log("ERROR", self.error)
@@ -252,6 +252,39 @@ class TrialRunner:
                         f"not {json.dumps(want)}")
         return None
 
+    def _guest_console_problem(self, ready: list[MicrovmRec]) -> str | None:
+        """Why a ready microVM's guest didn't boot with the spec's console, or None. Checked only when the spec
+        asks for a console other than verbose (every microVM before the field booted verbose): on a hypervisor
+        the guest's own kernel command line (guest_info.kernel_cmdline, read from /proc/cmdline) must carry the
+        mode's words and no other mode's (quiet is not quiet-i8042); on docker, which has no guest kernel, the
+        guest must report the mode the host passed it (guest_info.console)."""
+        want = self.cfg.console
+        if not want:
+            return None
+        words = CONSOLE_KERNEL_ARGS[want]
+        others = sorted({w for ws in CONSOLE_KERNEL_ARGS.values() for w in ws} - set(words))
+        for s in ready:
+            gi = s.info.get("guest_info") if isinstance(s.info.get("guest_info"), dict) else {}
+            if self.cfg.backend == "docker":
+                if gi.get("console") != want:
+                    return (f"guest console: microVM {s.microvm_id}'s guest reports console "
+                            f"{json.dumps(gi.get('console'))}, not {json.dumps(want)}")
+                continue
+            cmdline = gi.get("kernel_cmdline")
+            if not isinstance(cmdline, str):
+                return (f"guest console: microVM {s.microvm_id} didn't report its kernel command line, so console "
+                        f"{want} can't be shown to have run")
+            have = cmdline.split()
+            missing = [w for w in words if w not in have]
+            if missing:
+                return (f"guest console: microVM {s.microvm_id}'s kernel command line lacks {' '.join(missing)} "
+                        f"for console {want}: {cmdline}")
+            extra = [w for w in others if w in have]
+            if extra:
+                return (f"guest console: microVM {s.microvm_id}'s kernel command line carries {' '.join(extra)}, "
+                        f"which console {want} doesn't add: {cmdline}")
+        return None
+
     def _release_wait(self, n_ready: int) -> None:
         """Hold every ready microVM ready and idle for release_after_ready_s before the barrier (a warm
         start), recording when the wait began and ended. hostd's idle reaper allows for it (spec.timeouts)."""
@@ -286,6 +319,10 @@ class TrialRunner:
             create_request["hypervisor"] = dict(cfg.hypervisor)
         if cfg.chromium_extra_flags:
             create_request["chromium_extra_flags"] = list(cfg.chromium_extra_flags)
+        if cfg.console:
+            create_request["console"] = cfg.console
+        if cfg.memory_pages:
+            create_request["memory_pages"] = cfg.memory_pages
         with self.tr.start_span("microvms.create", self.span, {"fleetkit.count": cfg.density}) as sp:
             self.timestamps["create_start"] = time.time()
             created = self.client.create_microvms(create_request, self._headers(sp))

@@ -92,6 +92,20 @@ describe('what we tested', () => {
     expect(specCard(hv.specs[1], true).hypervisor).toEqual({ value: 'Cloud Hypervisor', sub: 'PCI + RNG devices' });
   });
 
+  it('names a guest console or memory pages that are not the defaults on the microVM row', () => {
+    const vm = (microvm: object) => ({ ...cap.specs[0], spec: { ...cap.specs[0].spec, microvm: { vcpus: 2, memory_mib: 2048, ...microvm } } });
+    expect(specCard(vm({ console: 'verbose', memory_pages: '4k' })).microvm).toBe('2 vCPU · 2 GiB');
+    expect(specCard(vm({ console: 'quiet' })).microvm).toBe('2 vCPU · 2 GiB · quiet console');
+    expect(specCard(vm({ console: 'quiet-i8042', memory_pages: 'thp' })).microvm).toBe(
+      '2 vCPU · 2 GiB · quiet console, no keyboard probe · transparent huge pages',
+    );
+    // Left out is the default: a spec that writes the default doesn't differ from one that leaves it out.
+    const explicit = vm({ console: 'verbose', memory_pages: '4k' });
+    expect([...differingRows([cap.specs[0], explicit])]).toEqual([]);
+    expect(differing([cap.specs[0].spec, vm({ console: 'quiet' }).spec])).toEqual(['microvm.console']);
+    expect([...differingRows([cap.specs[0], vm({ memory_pages: 'thp' })])]).toEqual(['microvm']);
+  });
+
   it('names each spec by what sets it apart, never by its slug', () => {
     expect(specLabels(hv.specs)).toEqual(['Firecracker PCI + RNG', 'Cloud Hypervisor', 'Firecracker MMIO']);
     expect(specLabels(syn.specs)).toEqual(['m8i.4xlarge', 'm8i.2xlarge']);

@@ -13,7 +13,8 @@ Settings pinned so the two hypervisors differ only where they must:
   --cpus     one thread per core (Firecracker smt=false), no nested virtualization in the guest,
              no core scheduling cookies (Cloud Hypervisor's defaults are on and vm);
   --memory   anonymous 4 KiB pages without a MADV_HUGEPAGE hint (thp=off), as Firecracker maps
-             guest memory; no hugepages, no prefault, no KSM;
+             guest memory; no hugepages, no prefault, no KSM. The spec's memory pages thp turns the
+             hint on (thp=on), as Firecracker's huge_pages Transparent does;
   --disk     read-only raw image, one queue of 256, synchronous I/O through the host page cache
              (Firecracker's Sync engine), not io_uring or AIO; no discard (sparse=off);
   --net      one queue pair of 256, checksum and segmentation offloads on;
@@ -82,7 +83,8 @@ class CloudHypervisorBackend(HypervisorBackend):
             "--kernel", self.kernel,
             "--cmdline", self.boot_args(microvm),
             "--cpus", "boot=%d,max=%d,topology=1:%d:1:1,nested=off,core_scheduling=off,kvm_hyperv=off" % (n, n, n),
-            "--memory", "size=%dM,thp=off,hugepages=off,shared=off,prefault=off,mergeable=off" % microvm.mem_mib,
+            "--memory", "size=%dM,thp=%s,hugepages=off,shared=off,prefault=off,mergeable=off" % (
+                microvm.mem_mib, "on" if microvm.memory_pages == "thp" else "off"),
             "--disk", "path=%s,readonly=on,direct=off,image_type=raw,sparse=off,num_queues=1,queue_size=%d,"
                       "id=rootfs,_disable_io_uring=on,_disable_aio=on" % (self.rootfs, QUEUE_SIZE),
             "--net", "tap=%s,mac=%s,num_queues=2,queue_size=%d,offload_tso=on,offload_ufo=on,offload_csum=on,"

@@ -572,6 +572,84 @@
       "patch": { "specs": { "m8i-2xlarge": { "workload": { "chromium_flags": ["--no-zygote"] } } } },
       "valid": false,
       "errors": ["specs.m8i-2xlarge.workload.chromium_flags: not a field"]
+    },
+    {
+      "name": "a named spec that quiets the guest console",
+      "quota": 32,
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "specs": { "m8i-2xlarge": null, "quiet": { "microvm": { "console": "quiet" } } }, "why": null },
+      "valid": true,
+      "warnings": [],
+      "runs": ["m8i-4xlarge-r1", "m8i-4xlarge-r2", "quiet-r1", "quiet-r2"],
+      "differs": ["microvm.console"],
+      "expected_usd": 1.55,
+      "worst_case_usd": 3.18,
+      "waves": [["m8i-4xlarge-r1"], ["m8i-4xlarge-r2"], ["quiet-r1"], ["quiet-r2"]]
+    },
+    {
+      "name": "the guest console and memory pages vary alone and together",
+      "quota": 32,
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "specs": { "m8i-2xlarge": null, "quiet": { "microvm": { "console": "quiet" } }, "quiet-i8042": { "microvm": { "console": "quiet-i8042" } }, "thp": { "microvm": { "memory_pages": "thp" } }, "quiet-thp": { "microvm": { "console": "quiet", "memory_pages": "thp" } } }, "why": null },
+      "valid": true,
+      "warnings": [],
+      "runs": ["m8i-4xlarge-r1", "m8i-4xlarge-r2", "quiet-r1", "quiet-r2", "quiet-i8042-r1", "quiet-i8042-r2", "thp-r1", "thp-r2", "quiet-thp-r1", "quiet-thp-r2"],
+      "differs": ["microvm.console", "microvm.memory_pages"],
+      "expected_usd": 3.88,
+      "worst_case_usd": 7.94
+    },
+    {
+      "name": "a console of verbose and memory pages of 4k are the same as leaving them out",
+      "quota": 32,
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "base": { "microvm": { "console": "verbose", "memory_pages": "4k" } } },
+      "valid": true,
+      "warnings": [],
+      "runs": ["m8i-4xlarge-r1", "m8i-4xlarge-r2", "m8i-2xlarge-r1", "m8i-2xlarge-r2"],
+      "differs": ["worker_host.instance_type", "densities"],
+      "expected_usd": 1.22,
+      "worst_case_usd": 2.54,
+      "waves": [["m8i-4xlarge-r1", "m8i-2xlarge-r1"], ["m8i-4xlarge-r2", "m8i-2xlarge-r2"]]
+    },
+    {
+      "name": "a named spec whose console and memory pages are the base's defaults",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "specs": { "again": { "microvm": { "console": "verbose", "memory_pages": "4k" } } } },
+      "valid": false,
+      "errors": ["specs.again: expands to the same spec as m8i-4xlarge; to run a spec again, raise replicas"]
+    },
+    {
+      "name": "Cloud Hypervisor with a quiet console and transparent huge pages",
+      "quota": 32,
+      "from": "campaigns/nested-hv-1.json",
+      "patch": { "specs": { "cloud-hypervisor-quiet-thp": { "hypervisor": { "name": "cloud-hypervisor", "virtio_transport": "pci", "virtio_rng": true }, "microvm": { "console": "quiet", "memory_pages": "thp" } } }, "why": null },
+      "valid": true,
+      "warnings": [],
+      "runs": ["firecracker-r1", "firecracker-r2", "cloud-hypervisor-r1", "cloud-hypervisor-r2", "firecracker-mmio-r1", "firecracker-mmio-r2", "cloud-hypervisor-quiet-thp-r1", "cloud-hypervisor-quiet-thp-r2"],
+      "differs": ["hypervisor.name", "hypervisor.virtio_transport", "hypervisor.virtio_rng", "microvm.console", "microvm.memory_pages"],
+      "expected_usd": 3.1,
+      "worst_case_usd": 6.35
+    },
+    {
+      "name": "an unknown guest console",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "specs": { "m8i-2xlarge": { "microvm": { "console": "silent" } } } },
+      "valid": false,
+      "errors": ["specs.m8i-2xlarge.microvm.console: must be one of verbose, quiet, quiet-i8042"]
+    },
+    {
+      "name": "memory pages written as a size",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "base": { "microvm": { "memory_pages": "2M" } } },
+      "valid": false,
+      "errors": ["base.microvm.memory_pages: must be one of 4k, thp"]
+    },
+    {
+      "name": "a guest console written as true, and memory pages in capitals",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "specs": { "m8i-2xlarge": { "microvm": { "console": true, "memory_pages": "THP" } } } },
+      "valid": false,
+      "errors": ["specs.m8i-2xlarge.microvm.console: must be text", "specs.m8i-2xlarge.microvm.memory_pages: must be one of 4k, thp"]
     }
   ]
 }

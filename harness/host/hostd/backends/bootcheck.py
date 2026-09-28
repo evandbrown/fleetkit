@@ -1,7 +1,8 @@
 """Boot one microVM with a hypervisor backend, exactly as hostd would, and check it end to end.
 
     python3 -m hostd.backends.bootcheck [--hypervisor '{"name": "cloud-hypervisor"}'] [--slot 99]
-        [--vcpus 2] [--mem-mib 2048] [--egress-url http://10.200.0.1:8081/index.html] [--out DIR]
+        [--vcpus 2] [--mem-mib 2048] [--console quiet] [--memory-pages thp]
+        [--egress-url http://10.200.0.1:8081/index.html] [--out DIR]
 
 Creates the microVM (tap, scope, hypervisor), waits for the guest daemon's /health, optionally
 has the guest fetch a URL through /egress-check, samples the scope's cgroup and threads,
@@ -10,7 +11,10 @@ format images/host/hostcheck.sh prints) and exits non-zero if any failed. Run as
 Linux host with /dev/kvm, the bridge, the kernel and the rootfs in place.
 
 --hypervisor is the spec's hypervisor section as JSON; options it leaves out take the
-backend's defaults. --out keeps the console log, /health and the sample there.
+backend's defaults. --console and --memory-pages are the spec's microvm.console and
+microvm.memory_pages; with a console other than verbose, CONSOLE_ARGS checks the guest's own
+kernel command line carries its words, and with thp, THP_PAGES checks the host backs some of the
+guest's memory with transparent huge pages. --out keeps the console log, /health and the sample there.
 """
 from __future__ import annotations
 
@@ -24,7 +28,7 @@ import urllib.parse
 from typing import Any, Dict, List, Optional
 
 from ..guest import GuestClient, GuestError
-from ..model import MicroVM
+from ..model import CONSOLE_BOOT_ARGS, CONSOLES, DEFAULT_CONSOLE, DEFAULT_MEMORY_PAGES, MEMORY_PAGES, MicroVM
 from ..runner import Runner
 from . import make_hypervisor_backend
 from .hypervisor import DEFAULT_KERNEL, DEFAULT_ROOTFS, RUN_ROOT
@@ -41,6 +45,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("--slot", type=int, default=99)
     p.add_argument("--vcpus", type=int, default=2)
     p.add_argument("--mem-mib", type=int, default=2048)
+    p.add_argument("--console", choices=CONSOLES, default=DEFAULT_CONSOLE, help="the spec's microvm.console")
+    p.add_argument("--memory-pages", choices=MEMORY_PAGES, default=DEFAULT_MEMORY_PAGES,
+                   help="the spec's microvm.memory_pages")
     p.add_argument("--timeout", type=float, default=120.0, help="seconds to wait for /health")
     p.add_argument("--egress-url", default=None, help="a URL the guest fetches itself (PASS needs HTTP 200)")
     p.add_argument("--hold", type=float, default=0.0, help="seconds to keep the ready microVM before sampling")
@@ -71,8 +78,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     vm = MicroVM(id=MicroVM.new_id(args.slot), slot=args.slot, backend=backend.name,
                  address=backend.address(args.slot), vcpus=args.vcpus, mem_mib=args.mem_mib, fault=args.fault,
                  ready_timeout_s=args.timeout, max_lifetime_s=0, idle_timeout_s=0,
-                 fixture_base_url=backend.fixture_base_url, hypervisor=dict(hypervisor, name=name))
-    print("microVM %s: %s" % (vm.id, json.dumps(backend.options(vm))))
+                 fixture_base_url=backend.fixture_base_url, hypervisor=dict(hypervisor, name=name),
+                 console=args.console, memory_pages=args.memory_pages)
+    print("microVM %s: %s console=%s memory_pages=%s" % (vm.id, json.dumps(backend.options(vm)), vm.console,
+                                                       vm.memory_pages))
     print("argv: %s" % " ".join(backend.scope_argv(vm)))
     guest = GuestClient()
     health: Any = None
@@ -95,6 +104,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         ready_s = time.monotonic() - t0
         print("guest /health after %.1f s: %s" % (ready_s, json.dumps(health)[:600] if health else None))
         res("GUEST_HEALTH", health is not None)
+        if health is not None and vm.console != DEFAULT_CONSOLE:
+            cmdline = str(health.get("kernel_cmdline") or "")
+            print("guest kernel command line: %s" % cmdline)
+            res("CONSOLE_ARGS", all(w in cmdline.split() for w in CONSOLE_BOOT_ARGS[vm.console]))
         if health is not None and args.egress_url:
             path = "/egress-check?" + urllib.parse.urlencode({"url": args.egress_url})
             try:
@@ -110,6 +123,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             print("sample: %s" % json.dumps(sample))
             res("SAMPLE", all(sample.get(k) is not None for k in ("cgroup_memory_current", "cpu_usage_usec",
                                                                     "cpu_vcpu_usec", "cpu_hypervisor_usec")))
+            if vm.memory_pages == "thp":
+                # guest memory the host backs with transparent huge pages (the scope's memory.stat anon_thp)
+                res("THP_PAGES", (sample.get("anon_thp_bytes") or 0) > 0)
     except Exception as e:
         print("error: %s: %s" % (type(e).__name__, e))
         res("GUEST_HEALTH", False)
@@ -128,6 +144,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 shutil.copyfile(log, os.path.join(args.out, os.path.basename(log)))
             with open(os.path.join(args.out, "bootcheck.json"), "w") as f:
                 json.dump({"hypervisor": backend.options(vm), "name": name, "version": backend.version(),
+                           "console": vm.console, "memory_pages": vm.memory_pages,
                            "health": health, "sample": sample, "results": results}, f, indent=2)
     return 0 if all(v == "PASS" for v in results.values()) else 1
 

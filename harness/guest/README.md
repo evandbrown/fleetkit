@@ -47,7 +47,8 @@ after a browser crash until the relaunch is up, and forever under `never_ready`.
 | `chromium_flags` | the exact flag list guestd launches Chromium with: the base flags, the spec's extra flags, `about:blank` |
 | `chromium_extra_flags` | the spec's extra flags alone (`[]` for none) |
 | `chromium_running_flags` | the flags the running browser process has, read back from `/proc/<pid>/cmdline`: what the driver checks against the spec; `null` while no browser runs, and without `/proc` |
-| `kernel_cmdline` | `/proc/cmdline` |
+| `kernel_cmdline` | `/proc/cmdline`: in a microVM, where the driver finds the spec's guest console words (`quiet loglevel=3`, ...) |
+| `console` | the guest console mode the host passed in `FLEETKIT_CONSOLE`, which only the Docker backend sets (there is no guest kernel to quiet there); `null` otherwise. An unknown mode stops guestd with exit 2 |
 | `vcpus` | `os.cpu_count()` |
 | `mem_total` | bytes, from `/proc/meminfo` |
 

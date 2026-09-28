@@ -122,7 +122,7 @@ def flatten(obj: dict, prefix: str = "") -> dict:
 
 def optional_defaults() -> dict:
     """{path: default} for the spec fields a spec may leave out, which then stand at their default:
-    procedure.release_after_ready_s and workload.chromium_extra_flags."""
+    procedure.release_after_ready_s, workload.chromium_extra_flags, microvm.console and microvm.memory_pages."""
     s = SCHEMAS["spec.schema.json"]
     out = {}
     for k, node in s["properties"].items():

@@ -19,8 +19,8 @@ from .hostclient import HostClient, HostError
 from .ladder import LadderPlanner, Outcome
 from .metrics import HostMetricsSampler
 from .outputs import LegacyRunDirError, RunDir, read_json
-from .spec import (HARNESS, SPEC_OWNED_OPTIONS, RunSpec, SpecError, chromium_argv, load as load_spec, refusals,
-                   same_spec)
+from .spec import (HARNESS, SPEC_OWNED_OPTIONS, RunSpec, SpecError, chromium_argv, docker_notes, load as load_spec,
+                   refusals, same_spec)
 from .telemetry import Tracer
 from .trial import TrialRunner
 
@@ -403,6 +403,9 @@ def cmd_trial(a) -> int:
             record["harness"].update(_run_harness(a, rs))
             inv.rundir.update_run_json(criteria=criteria, observed=observed, **record)
             history, warmups_done, illustrated = _resume(inv)
+            if a.backend == "docker":
+                for note in docker_notes(rs):
+                    inv.rundir.log_ops("docker_backend_note", **note)
         else:
             inv.rundir.update_run_json(criteria=criteria, spec=_run_spec(a, criteria, densities), observed=observed)
             warmups_done, illustrated = 0, False
@@ -411,6 +414,9 @@ def cmd_trial(a) -> int:
         fault_label = f"fault-{schemas.fault_name(a.fault)}" if a.fault else None
         extra_flags = rs.chromium_extra_flags if rs is not None else []
         expected_flags = chromium_argv(extra_flags)
+        # the guest console and memory pages, sent only when the spec asks for something other than the default
+        console = rs.console if rs is not None and rs.console != "verbose" else None
+        memory_pages = rs.memory_pages if rs is not None and rs.memory_pages != "4k" else None
 
         def run_one(density: int, trial_kind: str, label: str | None = None, shots: bool = False):
             cfg = TrialConfig(run_id=inv.run_id, backend=a.backend, density=density,
@@ -421,7 +427,7 @@ def cmd_trial(a) -> int:
                               sample_interval_ms=a.sample_interval_ms, screenshot_each_step=shots,
                               hypervisor=rs.hypervisor if rs is not None and a.backend != "docker" else None,
                               release_after_ready_s=a.release_after_ready_s, chromium_extra_flags=list(extra_flags),
-                              chromium_flags_expected=expected_flags)
+                              chromium_flags_expected=expected_flags, console=console, memory_pages=memory_pages)
             runner = TrialRunner(cfg, inv.client, inv.rundir, inv.writers, inv.tracer, metrics=inv.sampler)
             doc, harness_error = None, None
             try:

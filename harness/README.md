@@ -111,6 +111,11 @@ For each density in `--densities`, and for each trial at it (`--trials-per-densi
    guest reads them back from the browser process (`guest_info.chromium_running_flags`). If one isn't,
    or a spec with extra flags meets a guest that can't say, the trial ends with the error
    `chromium flags: ...` and no tasks: a failure outside the experiment, run again once, then not tested.
+   Likewise with a spec whose guest console isn't `verbose` (`microvm.console`): every ready guest's
+   kernel command line (`guest_info.kernel_cmdline`) must carry the console's words, or on docker the
+   guest must report the console it was passed (`guest_info.console`); otherwise the error is
+   `guest console: ...`. A spec's console and memory pages (`microvm.memory_pages`) go in the create
+   request only when they aren't the defaults, so a default spec's request is what it always was.
 4. `release_wait`, only with a wait after ready (the spec's `procedure.release_after_ready_s`, or
    `--release-after-ready-s`; 0 by default): every ready microVM sits ready and idle that many
    seconds more, so the tasks meet a warm pool rather than browsers still finishing startup.
@@ -350,8 +355,9 @@ from the uptimes the guest reports in its first ready `/health`)
 `cpu_count, hostd_cpu_usec, hostd_rss_bytes`; per microVM: `rss_bytes, cgroup_memory_current,
 cgroup_memory_peak, cpu_usage_usec`, and on Firecracker `cpu_vcpu_usec, cpu_hypervisor_usec` (the
 microVM's vCPU threads and the hypervisor's other threads), `cpu_throttled_usec, cpu_nr_throttled,
-cpu_pressure_some_total_us, cpu_pressure_full_total_us, memory_pressure_some_total_us` (the
-microVM's cgroup); subject `driver`: `driver_cpu_usec, driver_rss_bytes`; subject `fixture`:
+cpu_pressure_some_total_us, cpu_pressure_full_total_us, memory_pressure_some_total_us,
+anon_thp_bytes` (the microVM's cgroup; the last is guest memory the host backs with transparent huge
+pages, which shows whether `microvm.memory_pages` took effect); subject `driver`: `driver_cpu_usec, driver_rss_bytes`; subject `fixture`:
 `fixture_rtt_ms` (1 Hz). Counters are cumulative. Nulls (PSI and steal where the platform has none)
 are not written. Sampled at `--metrics-hz` (the host daemon's `--metrics-period` must match).
 

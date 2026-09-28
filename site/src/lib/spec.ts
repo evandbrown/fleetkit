@@ -96,6 +96,9 @@ export function mib(v: number): string {
 export function show(path: string, value: unknown): string {
   // optional: a spec that leaves the flags out runs none, as one with an empty list does
   if (path === 'workload.chromium_extra_flags') return Array.isArray(value) && value.length ? value.join(' ') : 'none';
+  // optional: a spec that leaves them out boots as every spec before them did
+  if (path === 'microvm.console') return String(value ?? 'verbose');
+  if (path === 'microvm.memory_pages') return value === 'thp' ? 'transparent huge pages' : '4 KiB pages';
   if (value === undefined) return '–';
   if (path === 'hypervisor.name') return HYPERVISOR[String(value)] ?? String(value);
   if (path === 'hypervisor.virtio_rng') return value ? 'yes' : 'no';
@@ -112,9 +115,29 @@ export const hypervisorName = (h: string) => HYPERVISOR[h] ?? h;
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
-/** The paths whose values differ between the specs, in the schema's order. */
+/** {path: default} for the fields a spec may leave out, added after the first campaigns ran (expand.py
+ * optional_defaults): a spec that leaves one out runs its default, so it never differs from one that writes it. */
+export const OPTIONAL_DEFAULTS: Record<string, unknown> = (() => {
+  type Def = Node & { default?: unknown; required?: string[]; properties?: Record<string, Node & { default?: unknown }> };
+  const defs = schema.$defs as Record<string, Def>;
+  const required = schema.required as string[];
+  const out: Record<string, unknown> = {};
+  for (const [k, n] of Object.entries(schema.properties as Record<string, Def>)) {
+    const d = defs[k];
+    if (d.type !== 'object') {
+      if (!required.includes(k) && 'default' in d) out[k] = d.default;
+      continue;
+    }
+    const req = required.includes(k) ? (n.required ?? []) : [];
+    for (const [f, fs] of Object.entries(d.properties ?? {})) if (!req.includes(f) && 'default' in fs) out[`${k}.${f}`] = fs.default;
+  }
+  return out;
+})();
+
+/** The paths whose values differ between the specs, in the schema's order. An optional field a spec leaves out is at
+ * its default. */
 export function differing(specs: Spec[]): string[] {
-  const flat = specs.map((s) => flatten(s));
+  const flat = specs.map((s) => ({ ...OPTIONAL_DEFAULTS, ...flatten(s) }));
   const paths = [...new Set(flat.flatMap((x) => Object.keys(x)))];
   const ordered = [...FIELDS.map((x) => x.path).filter((p) => paths.includes(p)), ...paths.filter((p) => !BY_PATH.has(p))];
   return ordered.filter((p) => flat.some((x) => !same(x[p], flat[0][p])));

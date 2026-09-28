@@ -14,7 +14,7 @@ from .backends.docker import DockerBackend
 from .backends.firecracker import DEFAULT_FIRECRACKER, DEFAULT_KERNEL, DEFAULT_ROOTFS
 from .manager import Manager
 from .metrics import HostSampler
-from .model import Defaults, MicroVM, validate_fault
+from .model import CONSOLES, DEFAULT_CONSOLE, DEFAULT_MEMORY_PAGES, MEMORY_PAGES, Defaults, MicroVM, validate_fault
 from .runner import Runner
 from .server import HostdApp, Server
 from .telemetry import Telemetry
@@ -53,6 +53,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--vcpus", type=int, default=2)
     p.add_argument("--mem-mib", type=int, default=2048)
     p.add_argument("--fault", default=None)
+    p.add_argument("--console", choices=CONSOLES, default=DEFAULT_CONSOLE, help="the spec's microvm.console")
+    p.add_argument("--memory-pages", choices=MEMORY_PAGES, default=DEFAULT_MEMORY_PAGES,
+                   help="the spec's microvm.memory_pages")
     return p
 
 
@@ -70,7 +73,8 @@ def render(args: argparse.Namespace) -> int:
     fault = validate_fault(args.fault)
     s = MicroVM(id=MicroVM.new_id(args.slot), slot=args.slot, backend=backend.name, address=backend.address(args.slot),
                 vcpus=args.vcpus, mem_mib=args.mem_mib, fault=fault, ready_timeout_s=60, max_lifetime_s=600,
-                idle_timeout_s=120, fixture_base_url=backend.fixture_base_url)
+                idle_timeout_s=120, fixture_base_url=backend.fixture_base_url, console=args.console,
+                memory_pages=args.memory_pages)
     sys.stdout.write("# %s backend, slot %d, microVM %s, address %s\n" % (backend.name, s.slot, s.id, s.address))
     sys.stdout.write("# --- create ---\n")
     backend.create(s)

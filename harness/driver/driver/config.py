@@ -59,12 +59,27 @@ class TrialConfig:
     # What every microVM's Chromium must run with after its binary (base + extra flags + start page), checked
     # against what each guest reads back from its browser process once ready; None: not checked.
     chromium_flags_expected: list | None = None
+    # The spec's guest console and memory pages, sent with every create when the spec sets something other than
+    # the default (None: not sent, and each microVM boots as every microVM did before the fields existed). A
+    # console is checked once every microVM is ready: on a hypervisor, the guest's own kernel command line must
+    # carry the mode's words (CONSOLE_KERNEL_ARGS); on docker, which has no guest kernel, the guest must report
+    # the mode the host passed.
+    console: str | None = None
+    memory_pages: str | None = None
 
     def guest_fixture_base_url(self) -> str:
         if self.fixture_base_url:
             return self.fixture_base_url
         return DEFAULT_FIXTURE_BASE_URL[self.backend]
 
+
+# The words each console mode puts on the guest kernel's command line: hostd.model.CONSOLE_BOOT_ARGS, which
+# builds the command line (a test holds the two equal).
+CONSOLE_KERNEL_ARGS = {
+    "verbose": [],
+    "quiet": ["quiet", "loglevel=3"],
+    "quiet-i8042": ["quiet", "loglevel=3", "i8042.noaux", "i8042.nomux", "i8042.dumbkbd"],
+}
 
 # Design section 3: guests reach the fixture by service name on docker, by the bridge address on firecracker.
 DEFAULT_FIXTURE_BASE_URL = {

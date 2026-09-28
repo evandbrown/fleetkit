@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import {
   FLAGS,
   InputError,
+  OPTIONAL,
   SPEC_FIELDS,
   VARIABLE_SECTIONS,
   checkSpec,
@@ -116,17 +117,34 @@ describe('the schema', () => {
     expect(checkSpec(spec)).toEqual([[], []]);
   });
 
-  it('has two optional fields, the wait after ready and the extra Chromium flags, held at their defaults when left out', () => {
+  it('has four optional fields, the guest console and pages, the wait after ready and the extra Chromium flags, held at their defaults when left out', () => {
     expect(SPEC_FIELDS.filter((f) => f.optional).map((f) => f.path)).toEqual([
+      'microvm.console',
+      'microvm.memory_pages',
       'procedure.release_after_ready_s',
       'workload.chromium_extra_flags',
     ]);
+    expect(OPTIONAL).toEqual({
+      'microvm.console': 'verbose',
+      'microvm.memory_pages': '4k',
+      'procedure.release_after_ready_s': 0,
+      'workload.chromium_extra_flags': [],
+    });
+    const consoleField = fieldAt('microvm.console')!;
+    const pages = fieldAt('microvm.memory_pages')!;
+    expect(consoleField.variable && pages.variable).toBe(true);
+    expect([consoleField.tier, pages.tier]).toEqual(['advanced', 'advanced']);
+    expect(consoleField.schema.enum).toEqual(['verbose', 'quiet', 'quiet-i8042']);
+    expect(pages.schema.enum).toEqual(['4k', 'thp']);
+    expect(valueIn({ microvm: { vcpus: 2, memory_mib: 2048 } }, consoleField)).toBe('verbose');
+    expect(valueIn({ microvm: { vcpus: 2, memory_mib: 2048 } }, pages)).toBe('4k');
+    expect(valueIn({ microvm: { console: 'quiet', memory_pages: 'thp' } }, pages)).toBe('thp');
     const flags = fieldAt('workload.chromium_extra_flags')!;
     expect(valueIn({}, flags)).toEqual([]);
     expect(flags.variable).toBe(true);
     expect(flags.help).toContain('chromium-flags.json');
     expect(VARIABLE_SECTIONS).toEqual(['worker_host', 'hypervisor', 'microvm', 'densities', 'workload']);
-    const wait = SPEC_FIELDS.find((f) => f.optional)!;
+    const wait = fieldAt('procedure.release_after_ready_s')!;
     const base = (read('campaigns/nested-sizes-1.json') as Obj).base as Obj;
     expect((base.procedure as Obj).release_after_ready_s).toBeUndefined();
     expect(valueIn(base, wait)).toBe(0);

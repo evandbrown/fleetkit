@@ -76,13 +76,22 @@ export interface SpecCard {
   densities: number[];
 }
 
+/** The microVM as a card shows it: its size, then its guest console and memory pages where they aren't the defaults
+ * ("2 vCPU · 2 GiB · quiet console · transparent huge pages"), so specs that differ only there don't read the same. */
+function microvmCard(m: Spec['microvm']): string {
+  const parts = [`${m.vcpus} vCPU`, mib(m.memory_mib)];
+  if (m.console && m.console !== 'verbose') parts.push(m.console === 'quiet-i8042' ? 'quiet console, no keyboard probe' : `${m.console} console`);
+  if (m.memory_pages && m.memory_pages !== '4k') parts.push(show('microvm.memory_pages', m.memory_pages));
+  return parts.join(' · ');
+}
+
 /** A spec's inputs as the card shows them: the host, the hypervisor, the microVM, the densities. */
 export function specCard(s: SpecDoc, showDevices = false): SpecCard {
   const h = s.spec.hypervisor;
   return {
     host: { value: s.host.instance_type, sub: `${s.host.vcpus} vCPU · ${f.num(s.host.memory_gib)} GiB · ${s.host.host_kind}` },
     hypervisor: { value: hypervisorName(h.name), sub: showDevices ? `${devices(h)} devices` : null },
-    microvm: `${s.spec.microvm.vcpus} vCPU · ${mib(s.spec.microvm.memory_mib)}`,
+    microvm: microvmCard(s.spec.microvm),
     densities: s.spec.densities,
   };
 }

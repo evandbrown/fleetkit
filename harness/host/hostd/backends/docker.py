@@ -5,6 +5,11 @@ so the daemon addresses microVMs by host port on every platform. Memory and CPU
 limits stand in for the VM shape. Lifecycle goes through the docker CLI (so
 `--dry-run` renders readable commands); per-container stats come from the
 Engine API over the unix socket, because `docker stats` blocks for a second.
+
+A container has no guest kernel and no guest memory of its own. The spec's guest console
+reaches the guest as `FLEETKIT_CONSOLE=<mode>` (quiet or quiet-i8042; none for verbose), which the
+guest reports back, so a local run shows the setting arrived; there is no kernel log to quiet. The
+spec's memory pages thp is accepted and ignored, with a note in the daemon's log.
 """
 from __future__ import annotations
 
@@ -14,7 +19,7 @@ import os
 import socket
 from typing import Any, Dict, List, Optional
 
-from ..model import MicroVM, encode_chromium_flags
+from ..model import CONSOLES, DEFAULT_CONSOLE, MEMORY_PAGES, MicroVM, encode_chromium_flags
 from ..runner import CommandError, Runner
 from .base import Backend, BackendError, empty_sample
 
@@ -51,6 +56,11 @@ class DockerBackend(Backend):
     name = "docker"
     max_slots = PORT_LAST - PORT_BASE + 1
     fixture_base_url = "http://fixture"
+    # Every console and memory-page value is accepted, so a spec runs locally as it would on a worker host.
+    microvm_options = {"console": list(CONSOLES), "memory_pages": list(MEMORY_PAGES)}
+    # What the manager logs for a value this backend accepts but can't give effect to.
+    option_notes = {("memory_pages", "thp"): "ignored on the docker backend: a container has no guest memory "
+                                             "for a hypervisor to back with huge pages"}
 
     def __init__(self, runner: Runner, log_dir: str, image: str = "fleetkit-guest:dev",
                  network: str = NETWORK, docker_bin: str = "docker", extra_env: Optional[Dict[str, str]] = None):
@@ -105,6 +115,8 @@ class DockerBackend(Backend):
             argv += ["-e", "FLEETKIT_FAULT=%s" % microvm.fault]
         if microvm.chromium_extra_flags:
             argv += ["-e", "FLEETKIT_CHROMIUM_EXTRA_FLAGS=%s" % encode_chromium_flags(microvm.chromium_extra_flags)]
+        if microvm.console != DEFAULT_CONSOLE:
+            argv += ["-e", "FLEETKIT_CONSOLE=%s" % microvm.console]
         for k, v in sorted(self.extra_env.items()):
             argv += ["-e", "%s=%s" % (k, v)]
         argv.append(self.image)

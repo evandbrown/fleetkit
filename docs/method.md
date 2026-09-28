@@ -38,7 +38,7 @@ Every trial at a density has identical inputs, down to which product each microV
 
 | Input | Meaning |
 |---|---|
-| **Spec** | Everything fixed about one run, including the list of densities to test. It covers the worker host, the hypervisor and the microVM's devices, the microVM's size, the densities, the pass criteria, the procedure, the support host and any extra Chromium flags; [spec.md](spec.md) lists every field. What is the same in every run, such as the guest, the task, and the sampling and attribution rules, is set by this page and the harness, not by the spec. |
+| **Spec** | Everything fixed about one run, including the list of densities to test. It covers the worker host, the hypervisor and the microVM's devices, the microVM's size, its guest console and how its memory is paged, the densities, the pass criteria, the procedure, the support host and any extra Chromium flags; [spec.md](spec.md) lists every field. What is the same in every run, such as the guest, the task, and the sampling and attribution rules, is set by this page and the harness, not by the spec. |
 | **Campaign definition** | What the experiment builder produces: the question, a base spec, the named specs written as their changes from the base, the number of replicas, and optionally one sentence per spec on why it's there. |
 | **Replicas** | How many runs each spec gets, each on its own worker host. |
 

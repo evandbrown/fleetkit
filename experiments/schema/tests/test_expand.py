@@ -238,11 +238,34 @@ def test_extra_chromium_flags_are_optional_and_absent_is_none():
     spec = json.loads(run_cli("campaigns/nested-sizes-1.json", "--run", "m8i-4xlarge-r1").stdout)["spec"]
     assert "workload" not in spec
     assert "workload" not in expand.SCHEMAS["spec.schema.json"]["required"]
-    assert expand.OPTIONAL == {"procedure.release_after_ready_s": 0, "workload.chromium_extra_flags": []}
+    assert expand.OPTIONAL == {"microvm.console": "verbose", "microvm.memory_pages": "4k",
+                               "procedure.release_after_ready_s": 0, "workload.chromium_extra_flags": []}
     empty = copy.deepcopy(spec)
     empty["workload"] = {"chromium_extra_flags": []}
     assert expand.filled(empty) == expand.filled(spec) and expand.differing([("a", spec), ("b", empty)]) == []
     assert expand.check_spec(empty) == expand.check_spec(spec)
+
+
+def test_the_guest_console_and_memory_pages_are_optional_and_absent_is_as_before():
+    # Added after the first campaigns ran: --run adds nothing to a spec that leaves them out, so the specs those
+    # runs recorded stay what they were, and a spec that leaves them out runs what one that sets verbose and 4k runs.
+    spec = json.loads(run_cli("campaigns/nested-sizes-1.json", "--run", "m8i-4xlarge-r1").stdout)["spec"]
+    assert spec["microvm"] == {"vcpus": 2, "memory_mib": 2048}
+    microvm = expand.SCHEMAS["spec.schema.json"]["$defs"]["microvm"]
+    required = expand.SCHEMAS["spec.schema.json"]["properties"]["microvm"]["required"]
+    assert "console" not in required and "memory_pages" not in required
+    assert microvm["properties"]["console"]["enum"] == ["verbose", "quiet", "quiet-i8042"]
+    assert microvm["properties"]["memory_pages"]["enum"] == ["4k", "thp"]
+    explicit = copy.deepcopy(spec)
+    explicit["microvm"].update({"console": "verbose", "memory_pages": "4k"})
+    assert expand.filled(explicit) == expand.filled(spec) and expand.differing([("a", spec), ("b", explicit)]) == []
+    assert expand.check_spec(explicit) == expand.check_spec(spec)
+    assert expand.run_minutes(explicit) == expand.run_minutes(spec)
+    quiet = copy.deepcopy(spec)
+    quiet["microvm"].update({"console": "quiet-i8042", "memory_pages": "thp"})
+    assert expand.validate(quiet, expand.SCHEMAS["spec.schema.json"]) == [] and expand.check_spec(quiet) == ([], [])
+    assert [d["field"] for d in expand.differing([("a", spec), ("b", quiet)])] == ["microvm.console",
+                                                                                  "microvm.memory_pages"]
 
 
 def test_a_named_spec_may_change_the_extra_chromium_flags_and_nothing_else_new():

@@ -1,10 +1,12 @@
 """Entry point: ``python3 -m guestd [--selftest | --serve-site HOST:PORT]``.
 
 Production has no flags: the daemon listens on 0.0.0.0:8080, reads the fault from
-``FLEETKIT_FAULT`` and the spec's extra Chromium flags from ``FLEETKIT_CHROMIUM_EXTRA_FLAGS``
+``FLEETKIT_FAULT``, the spec's extra Chromium flags from ``FLEETKIT_CHROMIUM_EXTRA_FLAGS``
 (a bad value is a configuration error: exit 2, so Chromium never runs other flags than it was
-sent), and runs until SIGTERM (tini forwards it). The remaining options exist
-for local proofs and tests.
+sent) and the spec's guest console from ``FLEETKIT_CONSOLE`` (set by the Docker backend only,
+which has no guest kernel to quiet: the daemon reports it in /health so a run can show it
+arrived; an unknown mode is a configuration error too), and runs until SIGTERM (tini forwards
+it). The remaining options exist for local proofs and tests.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ import asyncio
 import os
 import signal
 import sys
+from typing import Optional
 
 from . import __version__
 from . import chromium as chromium_mod
@@ -22,6 +25,17 @@ from .log import LogRing
 from .server import Daemon
 
 CRASH_ON_START_EXIT_CODE = 3
+CONSOLE_ENV = "FLEETKIT_CONSOLE"
+CONSOLES = ("verbose", "quiet", "quiet-i8042")   # the spec's microvm.console
+
+
+def parse_console(value: Optional[str]) -> Optional[str]:
+    """The console mode the host passed, or None when it passed none. ValueError for an unknown mode."""
+    if value in (None, ""):
+        return None
+    if value not in CONSOLES:
+        raise ValueError("%s=%r is not one of %s" % (CONSOLE_ENV, value, ", ".join(CONSOLES)))
+    return value
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -45,8 +59,11 @@ async def run_daemon(args: argparse.Namespace, log: LogRing) -> int:
     extra = chromium_mod.decode_extra_flags(os.environ.get(chromium_mod.EXTRA_FLAGS_ENV))
     if extra:
         log.info("chromium extra flags", flags=extra)
+    console = parse_console(os.environ.get(CONSOLE_ENV))
+    if console is not None:
+        log.info("guest console from the host", console=console)
     chromium = chromium_mod.Chromium(log, binary=args.chromium, port=args.devtools_port, extra_flags=extra)
-    daemon = Daemon(log, chromium, fault)
+    daemon = Daemon(log, chromium, fault, console=console)
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
 
@@ -86,7 +103,7 @@ def main(argv=None) -> int:
         return asyncio.run(run_selftest(chromium_binary=args.chromium, devtools_port=args.devtools_port, fault=fault))
     try:
         return asyncio.run(run_daemon(args, log))
-    except ValueError as e:  # an unknown fault name is a configuration error
+    except ValueError as e:  # an unknown fault name, bad extra flags or an unknown console mode: a configuration error
         log.error("configuration error", error=str(e))
         return 2
 
