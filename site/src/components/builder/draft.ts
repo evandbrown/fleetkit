@@ -195,6 +195,7 @@ const n = (x: number) => x.toLocaleString('en-US');
 
 /** A value as the builder shows it. */
 export function show(path: string, value: unknown): string {
+  if (path === 'workload.chromium_extra_flags') return Array.isArray(value) && value.length ? value.join(' ') : 'none';
   if (value === undefined) return '–';
   if (typeof value === 'boolean') return value ? 'on' : 'off';
   if (Array.isArray(value)) return value.join(', ');
@@ -249,7 +250,7 @@ export const SPEC_NAME_HELP =
   'The spec’s name. Its runs are named after it, one per replica: name-r1, name-r2, and so on.';
 
 export const ADD_HELP =
-  'Sets one input differently for this spec: the worker host, the hypervisor, the microVM or the densities. Every other input stays as the base spec has it.';
+  'Sets one input differently for this spec: the worker host, the hypervisor, the microVM, the densities or the extra Chromium flags. Every other input stays as the base spec has it.';
 export const WHY_HELP = 'Optional: one sentence on why this spec is in the campaign, shown beside the spec.';
 
 export const REVIEW_HELP = {

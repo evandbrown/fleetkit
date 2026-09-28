@@ -3,7 +3,8 @@
 Sections 2-4 of the design, per slot s:
   a tap attached to fcbr0; guest IP 10.200.0.(10+s); MAC 06:00:0A:C8:00:<10+s hex>;
   kernel `ip=10.200.0.<10+s>::10.200.0.1:255.255.255.0:vm<s>:eth0:off:10.42.0.2`;
-  `fleetkit.fault=<name>` on the command line when a fault is requested;
+  `fleetkit.fault=<name>` on the command line when a fault is requested, and
+  `fleetkit.chromium_extra_flags=<word>` when the spec adds Chromium flags (model.encode_chromium_flags);
   the same guest kernel and read-only rootfs, the same vCPUs and memory, whichever hypervisor runs it;
   `systemd-run --scope` with MemoryMax and CPUQuota around the hypervisor process, which gives a
   cgroup v2 leaf for memory.current, memory.peak, cpu.stat and the pressure files;
@@ -32,7 +33,7 @@ import shutil
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-from ..model import MicroVM
+from ..model import MicroVM, encode_chromium_flags
 from ..procfs import (PROC_ROOT, cgroup_pids, parse_flat_keyed, parse_pressure, read_int, read_text,
                       status_rss_bytes, thread_cpu_split)
 from ..runner import CommandError, Runner
@@ -148,6 +149,8 @@ class HypervisorBackend(Backend):
         args = self.base_boot_args(microvm) + [self.ip_arg(microvm.slot)]
         if microvm.fault:
             args.append("fleetkit.fault=%s" % microvm.fault)
+        if microvm.chromium_extra_flags:
+            args.append("fleetkit.chromium_extra_flags=%s" % encode_chromium_flags(microvm.chromium_extra_flags))
         if self.extra_boot_args:
             args.append(self.extra_boot_args)
         return " ".join(args)
@@ -171,7 +174,8 @@ class HypervisorBackend(Backend):
                 "options": self.options(microvm), "guest_ip": self.guest_ip(microvm.slot),
                 "guest_mac": self.guest_mac(microvm.slot), "tap": self.tap(microvm.slot),
                 "unit": self.unit(microvm.slot) + ".scope", "console_log": self.console_log_path(microvm),
-                "hypervisor_log": self.hypervisor_log_path(microvm), "fault": microvm.fault}
+                "hypervisor_log": self.hypervisor_log_path(microvm), "fault": microvm.fault,
+                "chromium_extra_flags": list(microvm.chromium_extra_flags)}
 
     def hypervisor_argv(self, microvm: MicroVM) -> List[str]:
         """The hypervisor's own command line (subclass)."""

@@ -45,6 +45,8 @@ export interface Spec {
   /** release_after_ready_s is optional: specs recorded before it existed leave it out, and absent is 0. */
   procedure: { trials_per_density: number; boundary_trials: number; settle_s: number; release_after_ready_s?: number };
   support_host: { instance_type: string };
+  /** Optional: specs recorded before it existed leave it out, and absent is no extra Chromium flags. */
+  workload?: { chromium_extra_flags?: string[] };
 }
 
 export type DeepPartial<T> = { [K in keyof T]?: T[K] extends object ? (T[K] extends unknown[] ? T[K] : DeepPartial<T[K]>) : T[K] };

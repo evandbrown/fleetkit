@@ -12,6 +12,7 @@ HEALTH = {"ready": True, "chromium_version": "Chrome/154.0.8037.57", "uptime_s":
           "guestd_version": "0.2.0", "guestd_uptime_s": 2.5, "kernel_uptime_s": 3.0,
           "chromium_launch_s": 0.1, "chromium_ready_s": 1.9,
           "chromium_flags": ["--headless=new", "--remote-debugging-port=9222"],
+          "chromium_extra_flags": [], "chromium_running_flags": ["--headless=new", "--remote-debugging-port=9222"],
           "kernel_cmdline": "console=ttyS0 reboot=k panic=1 pci=off", "vcpus": 2, "mem_total": 2_046_820_352}
 
 
@@ -48,6 +49,7 @@ def test_missing_inputs_give_none():
 def test_guest_info_keys():
     info = guest_info(HEALTH)
     assert set(info) == set(GUEST_INFO_KEYS) == {"guestd_version", "chromium_version", "chromium_flags",
+                                                 "chromium_extra_flags", "chromium_running_flags",
                                                  "kernel_cmdline", "vcpus", "mem_total"}
     assert info["chromium_flags"] == HEALTH["chromium_flags"] and info["vcpus"] == 2
     assert guest_info({"chromium_version": "154.0"}) == {**{k: None for k in GUEST_INFO_KEYS},

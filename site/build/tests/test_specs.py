@@ -18,7 +18,9 @@ def load(name):
 def test_fields_come_from_the_schema_in_order():
     paths = [f["path"] for f in SP.FIELDS]
     assert paths[:2] == ["worker_host.instance_type", "hypervisor.name"]
-    assert "densities" in paths and "support_host.instance_type" == paths[-1]
+    assert "densities" in paths and paths[-2:] == ["support_host.instance_type", "workload.chromium_extra_flags"]
+    flags = SP.LABEL["workload.chromium_extra_flags"]
+    assert flags["required"] is False and flags["default"] == [] and flags["label"] == "Extra Chromium flags"
     assert SP.LABEL["microvm.memory_mib"]["unit"] == "MiB"
     assert {f["tier"] for f in SP.FIELDS} == {"basic", "advanced", "rare"}
 
@@ -41,6 +43,17 @@ def test_labels_name_what_sets_each_spec_apart():
     assert hv["firecracker-mmio"] == "Firecracker, mmio, no random-number device"
     one = SP.resolve({**load("nested-sizes-1"), "specs": {"only": {}}})
     assert SP.labels(one) == {"only": "m8i.4xlarge, Firecracker, 2 vCPU / 2 GiB"}
+
+
+def test_extra_chromium_flags_label_a_spec_and_left_out_are_none():
+    d = load("nested-sizes-1")
+    d = {**d, "specs": {"default": {}, "one-renderer": {"workload": {"chromium_extra_flags": ["--renderer-process-limit=1"]}}}}
+    resolved = SP.resolve(d)
+    assert SP.labels(resolved) == {"default": "no extra Chromium flags", "one-renderer": "--renderer-process-limit=1"}
+    assert SP.changes(d["base"], dict(resolved)["one-renderer"]) == [
+        {"path": "workload.chromium_extra_flags", "base": [], "value": ["--renderer-process-limit=1"]}]
+    with pytest.raises(SP.SpecError, match="same spec"):
+        SP.resolve({**d, "specs": {"aa": {}, "bb": {"workload": {"chromium_extra_flags": []}}}})
 
 
 def test_host_facts_follow_from_the_instance_type():

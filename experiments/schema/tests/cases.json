@@ -239,7 +239,7 @@
     {
       "name": "an unknown worker instance type",
       "from": "campaigns/nested-sizes-1.json",
-      "patch": { "specs": { "m8i-2xlarge": { "worker_host": { "instance_type": "m7i.2xlarge" } } } },
+      "patch": { "specs": { "m8i-2xlarge": { "worker_host": { "instance_type": "m6i.2xlarge" } } } },
       "valid": false,
       "errors": ["specs.m8i-2xlarge.worker_host.instance_type: must be one of"]
     },
@@ -428,6 +428,131 @@
       "patch": { "specs": { "warm": { "procedure": { "release_after_ready_s": 30 } } } },
       "valid": false,
       "errors": ["specs.warm.procedure: shared by every spec in a campaign"]
+    },
+    {
+      "name": "m7i and c7i worker hosts, at their listed prices",
+      "quota": 64,
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "specs": { "m8i-2xlarge": null, "m7i-4xlarge": { "worker_host": { "instance_type": "m7i.4xlarge" } }, "c7i-2xlarge": { "worker_host": { "instance_type": "c7i.2xlarge" }, "densities": [1, 2, 3, 4, 5, 6, 7] } }, "why": null },
+      "valid": true,
+      "warnings": [],
+      "runs": ["m8i-4xlarge-r1", "m8i-4xlarge-r2", "m7i-4xlarge-r1", "m7i-4xlarge-r2", "c7i-2xlarge-r1", "c7i-2xlarge-r2"],
+      "differs": ["worker_host.instance_type", "densities"],
+      "expected_usd": 1.92,
+      "worst_case_usd": 3.97
+    },
+    {
+      "name": "a named spec that adds Chromium flags",
+      "quota": 32,
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "specs": { "m8i-2xlarge": null, "one-renderer": { "workload": { "chromium_extra_flags": ["--renderer-process-limit=1"] } } }, "why": null },
+      "valid": true,
+      "warnings": [],
+      "runs": ["m8i-4xlarge-r1", "m8i-4xlarge-r2", "one-renderer-r1", "one-renderer-r2"],
+      "differs": ["workload.chromium_extra_flags"],
+      "expected_usd": 1.55,
+      "worst_case_usd": 3.18
+    },
+    {
+      "name": "a base with one of each kind of allowed Chromium flag",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "base": { "workload": { "chromium_extra_flags": ["--renderer-process-limit=4", "--disable-site-isolation-trials", "--disable-features=BackForwardCache,site-per-process", "--js-flags=--max-old-space-size=512 --jitless"] } } },
+      "valid": true,
+      "warnings": [],
+      "differs": ["worker_host.instance_type", "densities"],
+      "expected_usd": 1.22,
+      "worst_case_usd": 2.54
+    },
+    {
+      "name": "no extra Chromium flags is the same as an empty list",
+      "quota": 32,
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "base": { "workload": { "chromium_extra_flags": [] } } },
+      "valid": true,
+      "warnings": [],
+      "differs": ["worker_host.instance_type", "densities"],
+      "expected_usd": 1.22,
+      "worst_case_usd": 2.54
+    },
+    {
+      "name": "a named spec whose empty flag list is the base's",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "specs": { "again": { "workload": { "chromium_extra_flags": [] } } } },
+      "valid": false,
+      "errors": ["specs.again: expands to the same spec as m8i-4xlarge; to run a spec again, raise replicas"]
+    },
+    {
+      "name": "a Chromium flag not on the allowed list",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "base": { "workload": { "chromium_extra_flags": ["--enable-automation"] } } },
+      "valid": false,
+      "errors": ["base.workload.chromium_extra_flags[0]: --enable-automation is not on the allowed list in chromium-flags.json"]
+    },
+    {
+      "name": "Chromium flags the base flags already set",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "specs": { "m8i-2xlarge": { "workload": { "chromium_extra_flags": ["--disable-background-networking", "--window-size=800,600"] } } } },
+      "valid": false,
+      "errors": ["specs.m8i-2xlarge.workload.chromium_extra_flags[0]: --disable-background-networking is one of the base flags every run has", "specs.m8i-2xlarge.workload.chromium_extra_flags[1]: --window-size is one of the base flags every run has"]
+    },
+    {
+      "name": "a refused Chromium flag says why",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "base": { "workload": { "chromium_extra_flags": ["--blink-settings=imagesEnabled=false"] } } },
+      "valid": false,
+      "errors": ["base.workload.chromium_extra_flags[0]: --blink-settings is refused: It can switch off images or scripts"]
+    },
+    {
+      "name": "Chromium flag values out of range or where none is taken",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "base": { "workload": { "chromium_extra_flags": ["--renderer-process-limit=0", "--no-zygote=1", "--process-per-site", "--renderer-process-limit=33"] } } },
+      "valid": false,
+      "errors": ["base.workload.chromium_extra_flags[0]: --renderer-process-limit takes a whole number from 1 to 32, as --renderer-process-limit=N", "base.workload.chromium_extra_flags[1]: --no-zygote takes no value", "base.workload.chromium_extra_flags[3]: --renderer-process-limit takes a whole number from 1 to 32", "base.workload.chromium_extra_flags[3]: --renderer-process-limit appears twice; give each flag once"]
+    },
+    {
+      "name": "a feature or a V8 flag not on the allowed list",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "base": { "workload": { "chromium_extra_flags": ["--disable-features=BackForwardCache,LazyImageLoading,BackForwardCache", "--js-flags=--jitless --allow-natives-syntax --max-old-space-size=8"] } } },
+      "valid": false,
+      "errors": ["base.workload.chromium_extra_flags[0]: --disable-features: LazyImageLoading is not an allowed feature", "base.workload.chromium_extra_flags[0]: --disable-features: BackForwardCache appears twice", "base.workload.chromium_extra_flags[1]: --js-flags: --allow-natives-syntax is not an allowed V8 flag", "base.workload.chromium_extra_flags[1]: --js-flags: --max-old-space-size takes a whole number from 16 to 16384"]
+    },
+    {
+      "name": "Chromium flags that aren't a list of --name=value",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "specs": { "text": { "workload": { "chromium_extra_flags": "--no-zygote" } }, "bare": { "workload": { "chromium_extra_flags": ["renderer-process-limit=1", 7, "--disable-extensions=", "--no-zygote\n"] } } } },
+      "valid": false,
+      "errors": ["specs.text.workload.chromium_extra_flags: must be a list", "specs.bare.workload.chromium_extra_flags[0]: a flag is --name or --name=value", "specs.bare.workload.chromium_extra_flags[1]: a flag is --name or --name=value", "specs.bare.workload.chromium_extra_flags[2]: a flag is --name or --name=value", "specs.bare.workload.chromium_extra_flags[3]: a flag is --name or --name=value"]
+    },
+    {
+      "name": "more than 8 Chromium flags",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "specs": { "many": { "workload": { "chromium_extra_flags": ["--process-per-site", "--disable-site-isolation-trials", "--no-zygote", "--disable-extensions", "--disable-renderer-backgrounding", "--disable-background-timer-throttling", "--disable-backgrounding-occluded-windows", "--renderer-process-limit=2", "--js-flags=--jitless"] } } } },
+      "valid": false,
+      "errors": ["specs.many.workload.chromium_extra_flags: allows at most 8 values"]
+    },
+    {
+      "name": "Chromium flags of more than 512 characters together",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "specs": { "long": { "workload": { "chromium_extra_flags": ["--renderer-process-limit=0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001", "--js-flags=--max-old-space-size=000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000512", "--disable-features=IsolateOrigins,site-per-process,SpareRendererForSitePerProcess,BackForwardCache,Translate,OptimizationHints,MediaRouter"] } } } },
+      "valid": false,
+      "errors": ["specs.long.workload.chromium_extra_flags[0]: --renderer-process-limit takes a whole number from 1 to 32",
+                 "specs.long.workload.chromium_extra_flags[1]: --js-flags: --max-old-space-size takes a whole number from 16 to 16384",
+                 "specs.long.workload.chromium_extra_flags: the flags add up to 538 characters, more than 512"]
+    },
+    {
+      "name": "a number in a Chromium flag is written without leading zeros, so =2 and =02 aren't two specs",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "specs": { "two": { "workload": { "chromium_extra_flags": ["--renderer-process-limit=2"] } }, "zero-two": { "workload": { "chromium_extra_flags": ["--renderer-process-limit=02", "--js-flags=--max-semi-space-size=08"] } } } },
+      "valid": false,
+      "errors": ["specs.zero-two.workload.chromium_extra_flags[0]: --renderer-process-limit takes a whole number from 1 to 32, as --renderer-process-limit=N",
+                 "specs.zero-two.workload.chromium_extra_flags[1]: --js-flags: --max-semi-space-size takes a whole number from 1 to 256"]
+    },
+    {
+      "name": "an unknown field in the workload",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "specs": { "m8i-2xlarge": { "workload": { "chromium_flags": ["--no-zygote"] } } } },
+      "valid": false,
+      "errors": ["specs.m8i-2xlarge.workload.chromium_flags: not a field"]
     }
   ]
 }

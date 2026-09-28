@@ -5,17 +5,25 @@ Chromium is started as ``/usr/lib/chromium/chromium`` directly, not through Debi
 wrapper (which sources ``/etc/chromium.d/*`` and adds API keys, extensions and
 background traffic). The VM (or container) is the security boundary; the sandbox is
 dropped inside it.
+
+A spec may add flags (``workload.chromium_extra_flags``, checked against
+experiments/schema/chromium-flags.json before any run): they arrive in
+``FLEETKIT_CHROMIUM_EXTRA_FLAGS`` (see ``decode_extra_flags``) and go after the base
+flags, before the start page. With none, the flag list is exactly the base list.
+``running_flags`` reads back what the running browser process was started with.
 """
 
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import json
 import os
 import shutil
 import signal
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 from . import metrics, minihttp
 from .cdp import CDPClient
@@ -24,10 +32,45 @@ CHROMIUM_BIN = "/usr/lib/chromium/chromium"
 DEVTOOLS_PORT = 9222
 USER_DATA_DIR = "/tmp/profile"
 STDERR_PATH = "/tmp/chromium.stderr.log"
+START_PAGE = "about:blank"
+# The spec's extra flags, from the host: the Docker backend sets it, the microVM init copies it
+# from the kernel command line (fleetkit.chromium_extra_flags=...). Absent or empty: none.
+EXTRA_FLAGS_ENV = "FLEETKIT_CHROMIUM_EXTRA_FLAGS"
+MAX_EXTRA_FLAGS = 16
+MAX_EXTRA_FLAG_CHARS = 512
 
 
-def chromium_flags(port: int = DEVTOOLS_PORT, user_data_dir: str = USER_DATA_DIR) -> List[str]:
-    """The flag list from design section 2, in order."""
+def encode_extra_flags(flags: Sequence[str]) -> str:
+    """The flags as one word safe on a kernel command line: unpadded URL-safe base64 of their JSON list.
+    hostd writes the same encoding (hostd.model.encode_chromium_flags)."""
+    raw = json.dumps(list(flags), separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def decode_extra_flags(text: Optional[str]) -> List[str]:
+    """encode_extra_flags reversed, checked: a list of at most MAX_EXTRA_FLAGS strings, each a
+    ``--flag``, with no line breaks or NULs, MAX_EXTRA_FLAG_CHARS at most together. Raises ValueError,
+    so a guest never starts Chromium with flags other than the ones it was sent."""
+    if not text:
+        return []
+    try:
+        raw = base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
+        flags = json.loads(raw.decode("utf-8"))
+    except (binascii.Error, ValueError, UnicodeDecodeError) as e:
+        raise ValueError("%s is not an encoded flag list: %s" % (EXTRA_FLAGS_ENV, e)) from None
+    if not isinstance(flags, list) or len(flags) > MAX_EXTRA_FLAGS:
+        raise ValueError("%s must hold a list of at most %d flags" % (EXTRA_FLAGS_ENV, MAX_EXTRA_FLAGS))
+    for f in flags:
+        if not isinstance(f, str) or not f.startswith("--") or any(c in f for c in "\0\r\n"):
+            raise ValueError("%s: %r is not a --flag" % (EXTRA_FLAGS_ENV, f))
+    if sum(len(f) for f in flags) > MAX_EXTRA_FLAG_CHARS:
+        raise ValueError("%s: more than %d characters of flags" % (EXTRA_FLAGS_ENV, MAX_EXTRA_FLAG_CHARS))
+    return flags
+
+
+def chromium_flags(port: int = DEVTOOLS_PORT, user_data_dir: str = USER_DATA_DIR,
+                   extra: Sequence[str] = ()) -> List[str]:
+    """The flag list from design section 2, in order, with any extra flags before the start page."""
     return [
         "--headless=new",
         "--no-sandbox",
@@ -42,8 +85,31 @@ def chromium_flags(port: int = DEVTOOLS_PORT, user_data_dir: str = USER_DATA_DIR
         "--disable-sync",
         "--disable-default-apps",
         "--window-size=1280,800",
-        "about:blank",
+        *extra,
+        START_PAGE,
     ]
+
+
+def read_process_flags(pid: Optional[int], proc_root: str = "/proc") -> Optional[List[str]]:
+    """The arguments after argv[0] that process ``pid`` is running with, from ``/proc/<pid>/cmdline``;
+    None when there is no such process or no /proc. Chromium's browser process keeps its
+    NUL-separated arguments; a process that retitled itself (Chromium's children do) leaves one
+    space-joined string, split on spaces here."""
+    if pid is None:
+        return None
+    try:
+        with open(os.path.join(proc_root, str(pid), "cmdline"), "rb") as f:
+            raw = f.read()
+    except OSError:
+        return None
+    args = raw.split(b"\0")
+    while args and args[-1] == b"":  # the terminating NUL, and a retitled process's padding
+        args.pop()
+    if not args:
+        return None  # a zombie or kernel thread
+    if len(args) == 1 and b" " in args[0]:
+        args = args[0].split(b" ")
+    return [a.decode("utf-8", "replace") for a in args[1:]]
 
 
 class Chromium:
@@ -57,9 +123,13 @@ class Chromium:
         user_data_dir: str = USER_DATA_DIR,
         stderr_path: str = STDERR_PATH,
         poll_interval_s: float = 0.1,
+        extra_flags: Sequence[str] = (),
+        proc_root: str = "/proc",
     ) -> None:
         self._log = log
         self.binary = binary
+        self.extra_flags = list(extra_flags)
+        self.proc_root = proc_root
         self.port = port
         self.user_data_dir = user_data_dir
         self.stderr_path = stderr_path
@@ -94,7 +164,15 @@ class Chromium:
     @property
     def flags(self) -> List[str]:
         """The flag list this supervisor launches Chromium with."""
-        return chromium_flags(self.port, self.user_data_dir)
+        return chromium_flags(self.port, self.user_data_dir, self.extra_flags)
+
+    def running_flags(self) -> Optional[List[str]]:
+        """The flags the running browser process was started with, read back from /proc; None while
+        no process runs, or without /proc."""
+        proc = self.proc
+        if proc is None or proc.returncode is not None:
+            return None
+        return read_process_flags(proc.pid, self.proc_root)
 
     def rss_bytes(self) -> Optional[int]:
         return metrics.rss_of_processes(self.binary)

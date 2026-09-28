@@ -21,6 +21,7 @@ A campaign definition says what to run. A spec says what one run does. This page
 | [`experiments/schema/campaign.schema.json`](../experiments/schema/campaign.schema.json) | JSON Schema for a campaign definition |
 | [`experiments/schema/instance-types.json`](../experiments/schema/instance-types.json) | Each instance type's vCPUs, memory, whether it's metal, and its price (some estimated) |
 | [`experiments/schema/limits.json`](../experiments/schema/limits.json) | The cost limit per campaign, the project cap, the vCPU quota, and the estimate of a run's length |
+| [`experiments/schema/chromium-flags.json`](../experiments/schema/chromium-flags.json) | Chromium's base flags, and the extra flags a spec may add, each with why it's allowed |
 | [`experiments/schema/expand.py`](../experiments/schema/expand.py) | Expands and checks a campaign, and estimates its cost; standard library only |
 | [`experiments/schema/tests/cases.json`](../experiments/schema/tests/cases.json) | Cases that `expand.py` and the site's builder must both pass |
 | `experiments/campaigns/<name>.json` | The campaigns to run, one file each |
@@ -28,7 +29,7 @@ A campaign definition says what to run. A spec says what one run does. This page
 
 ## The spec
 
-Every field is required but one, so a spec never depends on a default; the defaults are what the builder starts a new campaign with. The exception is `procedure.release_after_ready_s`, added after the first campaigns ran: absent means 0, so the specs those campaigns recorded stay valid and unchanged. **Basic** fields are on the builder's first screen, **advanced** ones behind a disclosure, and **rare** ones in the full spec view.
+Every field is required but two, so a spec never depends on a default; the defaults are what the builder starts a new campaign with. The exceptions were added after the first campaigns ran, so the specs those campaigns recorded stay valid and unchanged: `procedure.release_after_ready_s`, absent 0, and `workload.chromium_extra_flags`, absent none (the whole `workload` section may be left out). A spec that leaves one out runs exactly what one that sets its default runs. **Basic** fields are on the builder's first screen, **advanced** ones behind a disclosure, and **rare** ones in the full spec view.
 
 | Field | What it controls | Default | Tier |
 |---|---|---|---|
@@ -46,6 +47,7 @@ Every field is required but one, so a spec never depends on a default; the defau
 | `procedure.boundary_trials` | Extra trials at the highest passing density and the lowest failing one, once the run stops going up. | 2 | advanced |
 | `procedure.release_after_ready_s` | Seconds every trial waits, 0 to 60, once all its microVMs are ready, before it releases their tasks together. 0 is a cold start; a wait measures a warm pool. Task times start at the release, so no task's time includes it. Optional: absent is 0. | 0 | advanced |
 | `support_host.instance_type` | The instance that serves the test shopping site and collects telemetry: `m8i.xlarge`, `m8i.2xlarge` or `m8i.4xlarge`. | `m8i.xlarge` | advanced |
+| `workload.chromium_extra_flags` | Chromium flags added after the base flags, to compare browser configurations: each from the allowed list below, each once, at most 8. Optional: absent is none. | `[]` | advanced |
 | `criteria.ready_timeout_s` | Every microVM must report its browser ready within this many seconds. | 180 | rare |
 | `criteria.step_timeout_ms` | A step that takes longer fails its task. | 10000 | rare |
 | `criteria.task_timeout_ms` | A task that takes longer fails. | 45000 | rare |
@@ -58,8 +60,40 @@ Checked beyond the schema, each error shown next to its field:
 - `densities` are in increasing order, each density once.
 - `step_p50_target_ms` ≤ `step_p95_target_ms` < `step_timeout_ms` ≤ `task_timeout_ms`, and `task_p95_target_ms` < `task_timeout_ms`.
 - With Cloud Hypervisor, `virtio_transport` is `pci` and `virtio_rng` is `true`.
+- Every extra Chromium flag is on the allowed list and takes the value it lists, none is a base flag, and they add up to at most 512 characters ([below](#extra-chromium-flags)).
 
-The same in every run, so not fields: the guest and the browser it boots, the five-step shopping task, the test site's catalog, the warm-up and illustration trials, the stop at the first failing density, sampling five times a second on the worker host and in each microVM, each microVM's CPU cap and memory headroom, and the thresholds that name what limited a trial ([method](method.md)). One becomes a field when a campaign needs to vary it.
+The same in every run, so not fields: the guest and the browser it boots with its base flags, the five-step shopping task, the test site's catalog, the warm-up and illustration trials, the stop at the first failing density, sampling five times a second on the worker host and in each microVM, each microVM's CPU cap and memory headroom, and the thresholds that name what limited a trial ([method](method.md)). One becomes a field when a campaign needs to vary it.
+
+## Extra Chromium flags
+
+Each microVM's Chromium runs the base flags every run has ([harness design](harness-design.md), section 2), then the spec's `workload.chromium_extra_flags`, then its start page. The flags a spec may add are listed in [`experiments/schema/chromium-flags.json`](../experiments/schema/chromium-flags.json), which `expand.py` and the builder check against, each with why it's allowed. Every allowed flag changes how Chromium spends memory and CPU: its process model, its scheduling, V8's heap and compilers. None changes what a task does: each task still loads every page, image, script and stylesheet and verifies the cart, so the workload check's bytes and requests stay the same, and a difference between specs is Chromium's configuration alone.
+
+| Flag | Why it's allowed |
+|---|---|
+| `--renderer-process-limit=N`, N from 1 to 32 | Caps how many renderer processes Chromium keeps. Fewer renderers use less memory per microVM, a trade against step time; the pages are the same. |
+| `--process-per-site` | One renderer for all pages of a site instead of one per navigation: a process-model choice that changes memory, not the pages. |
+| `--disable-site-isolation-trials` | Turns off the site-isolation trials, so frames from different sites may share a renderer: fewer processes, the same pages. The microVM is the security boundary here, as it is for `--no-sandbox`. |
+| `--no-zygote` | Starts renderers directly instead of forking them from zygote processes, which saves the zygotes' memory. It needs `--no-sandbox`, which the base flags have. |
+| `--disable-extensions` | Turns off the extension system. No extension is installed, so only its startup work and memory go. |
+| `--disable-renderer-backgrounding` | Keeps a renderer at normal priority when Chromium thinks its page is in the background: scheduling only. |
+| `--disable-background-timer-throttling` | Stops Chromium slowing the timers of pages it thinks are in the background: scheduling only. |
+| `--disable-backgrounding-occluded-windows` | Stops Chromium treating a hidden window as backgrounded: scheduling only. |
+| `--disable-features=A,B` | Turns off the named features, each from this list: `IsolateOrigins`, `site-per-process` and `SpareRendererForSitePerProcess` (the process model only); `BackForwardCache` (keeps pages the task has left alive for going back, which it never does); `Translate`, `OptimizationHints` and `MediaRouter` (background services, no page content). |
+| `--js-flags=--a --b` | V8 options, space-separated, each from this list; every script still runs in full. `--max-old-space-size=N` (16 to 16384 MiB) caps the JavaScript heap; `--max-semi-space-size=N` (1 to 256 MiB) sizes the young generation; `--jitless`, `--lite-mode`, `--optimize-for-size` and `--no-opt` trade script speed for memory and compile work. |
+
+Refused, with the reason the checker gives: any base flag again (`--disable-background-networking` is already one), anything not listed, and these:
+
+- `--blink-settings`: it can switch off images or scripts, so pages would do less of the work the task measures (images are most of a task's bytes).
+- `--disable-http-cache`: it changes how many requests a task makes, which the workload check holds the same in every run.
+- `--disk-cache-size`: it changes how many requests a task makes, which the workload check holds the same in every run.
+- `--proxy-server`: it changes how the guest reaches the test site, which is the same in every run.
+- `--proxy-pac-url`: it changes how the guest reaches the test site, which is the same in every run.
+- `--host-resolver-rules`: it changes how the guest reaches the test site, which is the same in every run.
+- `--disable-web-security`: it changes what pages may do.
+- `--enable-features`: it turns on features the base flags don't have; only turning off listed features is allowed.
+- `--single-process`: it runs every page inside the browser process, a debugging mode Chromium doesn't support.
+
+Each flag once, at most 8, at most 512 characters together, and a number written without leading zeros (`=2`, never `=02`), so one configuration can't pass as two specs. A run proves its flags: once every microVM is ready, the driver compares what each browser process runs with, as its guest reads it back from `/proc/<pid>/cmdline`, against the base flags plus the spec's plus the start page (`run.json` `harness.chromium_flags`), and records each microVM's in `trial.json` (`microvms[].chromium_flags`). A trial where they differ, or where a guest can't say while the spec adds flags, is a failure outside the experiment: it runs again once, then the density is not tested.
 
 ## The campaign definition
 
@@ -91,12 +125,12 @@ The same in every run, so not fields: the guest and the browser it boots, the fi
 | `base` | A complete spec. It isn't run by itself; a named spec `{}` runs it as it is. | | |
 | `specs` | The named specs, 1 to 12, each written as its changes from the base. | | |
 
-A named spec may change `worker_host`, `hypervisor`, `microvm` and `densities`. The criteria, the procedure and the support host are set once in the base, so every run in a campaign is tested and judged the same way.
+A named spec may change `worker_host`, `hypervisor`, `microvm`, `densities` and `workload` (its one field, the extra Chromium flags). The criteria, the procedure and the support host are set once in the base, so every run in a campaign is tested and judged the same way.
 
 ## How a campaign expands into runs
 
 1. **Merge.** Each named spec is the base with its changes merged in. Objects merge key by key; lists and values replace, so a spec that sets `densities` gives the whole list.
-2. **Check.** The campaign is valid when it matches the schemas, every expanded spec passes the checks above, no two specs expand to the same spec (to run a spec again, raise `replicas`), every `why` names a spec, a run is expected to finish before the shutdown timer, and the worst case is within the limit for one campaign ($75).
+2. **Check.** The campaign is valid when it matches the schemas, every expanded spec passes the checks above, no two specs expand to the same spec (to run a spec again, raise `replicas`; an optional field left out counts as its default), every `why` names a spec, a run is expected to finish before the shutdown timer, and the worst case is within the limit for one campaign ($75).
 3. **Name the runs.** Spec S gets `replicas` runs, `S-r1`, `S-r2` and so on. Run `m8i-2xlarge-r2` of campaign `nested-sizes-1` is `nested-sizes-1/m8i-2xlarge-r2`, and that's also where its results go.
 4. **Cost and quota.** The expected cost assumes every run tests every density, at the trial lengths cap-baseline-1 measured. The worst case assumes every worker and support host runs until its shutdown timer. Each run needs its worker's and its support host's vCPUs at once; runs that don't all fit under the vCPU quota go in waves.
 
@@ -109,7 +143,7 @@ python3 experiments/schema/expand.py experiments/campaigns/examples/hv-host-1.js
 
 Exit status 0 means valid, 1 not valid, 2 a usage error. Errors and warnings each start with the field they're about. Warnings don't block a campaign: one replica per spec, microVM memory that adds up to the host's memory, a run too big for today's quota.
 
-The harness must refuse a spec value it can't carry out yet, so a recorded spec is always what ran. Today it can't carry out Cloud Hypervisor, Firecracker on `pci` or with a random-number device, or metal worker hosts.
+The harness must refuse a spec value it can't carry out yet, so a recorded spec is always what ran. The driver refuses extra Chromium flags on a host daemon that doesn't pass them to its guests (its `GET /host/info` has no `chromium_extra_flags`). Today it can't carry out Cloud Hypervisor, Firecracker on `pci` or with a random-number device, or metal worker hosts.
 
 ## Where results go
 

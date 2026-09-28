@@ -485,3 +485,81 @@ def test_what_the_experiment_itself_causes_is_a_result():
                 "http://10.42.0.15:8081/: net::ERR_TIMED_OUT"):
         m = {"microvm_id": "a", "task": {"error": err, "failure_category": "step_timeout"}}
         assert outside_cause(_doc(microvms=[m])) is None
+
+
+# ---- extra Chromium flags --------------------------------------------------------------------
+
+FLAGS = ["--renderer-process-limit=1", "--js-flags=--max-old-space-size=512"]
+
+
+def test_extra_chromium_flags_reach_every_microvm_and_each_trial_records_what_ran(tmp_path, fixture_site):
+    out = tmp_path / "run"
+    spec = write_spec(tmp_path / "spec.json", densities=[1, 2], workload={"chromium_extra_flags": FLAGS})
+    with StubServer(telemetry_dir=str(tmp_path / "hostd"), proxy_margin_ms=300, startup_ms=40, step_ms=5,
+                    backend="firecracker", max_slots=200, running_flags="echo") as hostd:
+        assert run_cli(*spec_args(hostd, fixture_site, out, spec)) == 0
+        reqs = [s.request for s in hostd.host.microvms.values()]
+    assert reqs and all(r["chromium_extra_flags"] == FLAGS for r in reqs)
+    run = json.loads((out / "run.json").read_text())
+    assert run["spec"]["workload"] == {"chromium_extra_flags": FLAGS}
+    want = run["harness"]["chromium_flags"]
+    assert want[-3:] == FLAGS + ["about:blank"] and want[0] == "--headless=new"
+    assert run["observed"]["guest_info"]["chromium_running_flags"] == want
+    for tid in trial_ids(out):
+        t = json.loads((out / "trials" / tid / "trial.json").read_text())
+        assert t["chromium_extra_flags"] == FLAGS and t["passed"] in (True, None) and t["error"] is None, tid
+        assert t["microvms"] and all(m["chromium_flags"] == want for m in t["microvms"]), tid
+
+
+def test_no_extra_flags_sends_none_and_checks_the_base_flags(tmp_path, fc_hostd, fixture_site):
+    # A spec without the workload section: the create request is what it always was, and a guest that reads
+    # its flags back must be running the base flags exactly.
+    out = tmp_path / "run"
+    fc_hostd.host.o.running_flags = "echo"
+    assert run_cli(*spec_args(fc_hostd, fixture_site, out, write_spec(tmp_path / "spec.json", densities=[1]))) == 0
+    reqs = [s.request for s in fc_hostd.host.microvms.values()]
+    assert reqs and all("chromium_extra_flags" not in r for r in reqs)
+    t = json.loads((out / "trials" / "d1-t1" / "trial.json").read_text())
+    assert t["chromium_extra_flags"] == [] and t["microvms"][0]["chromium_flags"][-1] == "about:blank"
+    assert json.loads((out / "run.json").read_text())["harness"]["chromium_flags"] == t["microvms"][0]["chromium_flags"]
+
+
+@pytest.mark.parametrize("reported", [None, ["--headless=new", "about:blank"]])
+def test_a_browser_not_running_the_specs_flags_is_not_a_result(tmp_path, fixture_site, reported):
+    # A guest that reports no flags (older than the read-back), or other flags than the spec's: the trial is
+    # set aside, run again, and the density is not tested.
+    out = tmp_path / "run"
+    spec = write_spec(tmp_path / "spec.json", densities=[1, 2], workload={"chromium_extra_flags": FLAGS})
+    with StubServer(telemetry_dir=str(tmp_path / "hostd"), proxy_margin_ms=300, startup_ms=40, step_ms=5,
+                    backend="firecracker", max_slots=200, running_flags=reported) as hostd:
+        run_cli(*spec_args(hostd, fixture_site, out, spec))
+    causes = [o.get("cause", "") for o in ops(out) if o.get("event") == "trial_set_aside"]
+    assert causes and all(c.startswith("chromium flags: microVM ") for c in causes), causes
+    attempts = [o["attempt"] for o in ops(out) if o.get("event") == "trial_set_aside"]
+    assert attempts[:2] == [1, 2] and attempts == [1, 2] * (len(attempts) // 2)  # each trial runs again once
+    plan = json.loads((out / "run.json").read_text())["plan"]
+    assert plan["stop_reason"] == "not_clean" and plan["densities_run"] == [] and trial_ids(out) == []
+
+
+def test_a_daemon_that_cannot_pass_flags_is_refused(tmp_path):
+    rs = load_spec(write_spec(tmp_path / "spec.json", workload={"chromium_extra_flags": FLAGS}))
+    assert rs.chromium_extra_flags == FLAGS
+    msg = "workload.chromium_extra_flags: this host daemon doesn't pass extra flags to Chromium"
+    assert refusals(rs, {"backend": "firecracker"}, {}) == [msg]
+    assert refusals(rs, {"backend": "docker"}, {}, local_docker=True) == [msg]
+    assert refusals(rs, {"backend": "firecracker"}, {"chromium_extra_flags": True}) == []
+    plain = load_spec(write_spec(tmp_path / "spec.json"))
+    assert plain.chromium_extra_flags == [] and refusals(plain, {"backend": "firecracker"}, {}) == []
+
+
+def test_a_spec_with_a_flag_off_the_allowed_list_is_refused(tmp_path):
+    with pytest.raises(SpecError) as e:
+        load_spec(write_spec(tmp_path / "spec.json", workload={"chromium_extra_flags": ["--blink-settings=imagesEnabled=false"]}))
+    assert e.value.problems == ["workload.chromium_extra_flags[0]: --blink-settings is refused: It can switch off "
+                                "images or scripts, so pages would do less of the work the task measures (images "
+                                "are most of a task's bytes)."]
+
+
+def test_outside_cause_names_a_flag_mismatch():
+    assert outside_cause({"error": "chromium flags: microVM x's browser runs [], not [1]"}) == \
+        "chromium flags: microVM x's browser runs [], not [1]"

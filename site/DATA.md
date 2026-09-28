@@ -63,8 +63,10 @@ interface Spec {
   densities: number[];
   criteria: { step_p50_target_ms: number; step_p95_target_ms: number; task_p95_target_ms: number;
               ready_timeout_s: number; step_timeout_ms: number; task_timeout_ms: number };
-  procedure: { trials_per_density: number; boundary_trials: number; settle_s: number };
+  procedure: { trials_per_density: number; boundary_trials: number; settle_s: number;
+               release_after_ready_s?: number };            // optional: absent is 0
   support_host: { instance_type: string };
+  workload?: { chromium_extra_flags?: string[] };            // optional: absent is no extra Chromium flags
 }
 ```
 

@@ -50,17 +50,21 @@ else
     say "resolv.conf empty (no /proc/net/pnp)"
 fi
 
-# Faults are pushed by the host on the kernel command line: fleetkit.fault=<name>.
+# Faults are pushed by the host on the kernel command line: fleetkit.fault=<name>. So are the spec's
+# extra Chromium flags, as one encoded word (guestd decodes it): fleetkit.chromium_extra_flags=<word>.
 FLEETKIT_FAULT=""
+FLEETKIT_CHROMIUM_EXTRA_FLAGS=""
 if [ -r /proc/cmdline ]; then
     for word in $(cat /proc/cmdline); do
         case "$word" in
             fleetkit.fault=*) FLEETKIT_FAULT="${word#fleetkit.fault=}" ;;
+            fleetkit.chromium_extra_flags=*) FLEETKIT_CHROMIUM_EXTRA_FLAGS="${word#fleetkit.chromium_extra_flags=}" ;;
         esac
     done
 fi
-export FLEETKIT_FAULT
+export FLEETKIT_FAULT FLEETKIT_CHROMIUM_EXTRA_FLAGS
 say "fault='${FLEETKIT_FAULT}'"
+[ -z "$FLEETKIT_CHROMIUM_EXTRA_FLAGS" ] || say "chromium extra flags='${FLEETKIT_CHROMIUM_EXTRA_FLAGS}'"
 
 # The kernel sets the hostname from ip=...:<hostname>:...; keep it, or name the VM.
 [ -n "$(hostname 2>/dev/null)" ] || hostname fleetkit-guest 2>/dev/null

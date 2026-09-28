@@ -8,6 +8,8 @@ A trial is clean unless something the spec doesn't test got in its way:
 * the support host reported its fixture unhealthy or itself overloaded during the trial,
   measured on the support host (experiments/launcher/support_health.py), not from the worker
   host, whose own load is what the experiment measures;
+* a microVM's Chromium wasn't running the flags the spec says (base + extra flags, read back from
+  its browser process): the harness didn't set up what the spec tests;
 * Chromium in a microVM reported that the guest's network changed under a navigation
   (``net::ERR_NETWORK_CHANGED``): the guest's network setup moved, which load doesn't cause.
   Seen once in nested-hv-1 (Cloud Hypervisor, 230 ms into a home step). Other navigation
@@ -43,7 +45,7 @@ def outside_cause(doc: dict | None, *, harness_error: str | None = None, trial_s
     err = str(d.get("error") or "")
     if err.startswith("fixture check failed"):
         return f"fixture: {err}"
-    if err.startswith("host daemon:"):
+    if err.startswith("host daemon:") or err.startswith("chromium flags:"):
         return err
     vc = d.get("verify_clean") if isinstance(d.get("verify_clean"), dict) else {}
     if vc.get("error"):

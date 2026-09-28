@@ -25,7 +25,8 @@ What the Dockerfile does beyond installing packages:
 
 - removes `/etc/chromium.d/apikeys` and `/etc/chromium.d/extensions`. The daemon never runs
   Debian's `/usr/bin/chromium` wrapper anyway; it launches `/usr/lib/chromium/chromium`
-  directly with the flag list from the design.
+  directly with the flag list from the design (plus any extra flags the spec adds, which
+  `init` passes from the kernel command line to guestd).
 - records `apt list --installed` into `/etc/fleetkit-packages.txt` (the manifest reads it).
 - installs the daemon at `/usr/lib/python3/dist-packages/guestd`, so `python3 -m guestd`
   needs no `PYTHONPATH` under either entry point.

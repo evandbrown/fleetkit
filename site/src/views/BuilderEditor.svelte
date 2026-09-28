@@ -429,7 +429,7 @@
               facts={baseFacts(f.path)}
               spec={base}
             >
-              {#if f.variable && f.path !== 'densities'}
+              {#if f.variable && f.schema.type !== 'array'}
                 <button type="button" class="ghost" aria-expanded={comparing === f.path} onclick={() => openCompare(f.path)}>
                   Vary this
                 </button>

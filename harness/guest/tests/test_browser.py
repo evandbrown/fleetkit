@@ -31,6 +31,27 @@ def _chromium(log, binary):
     )
 
 
+def test_extra_flags_reach_the_running_browser(chromium_binary):
+    async def go():
+        log = LogRing(stream=open(os.devnull, "w"))
+        tmp = tempfile.mkdtemp(prefix="guestd-test-")
+        chromium = chromium_mod.Chromium(log, binary=chromium_binary, port=free_port(), user_data_dir=os.path.join(tmp, "profile"),
+                                         stderr_path=os.path.join(tmp, "chromium.log"), extra_flags=["--renderer-process-limit=1"])
+        daemon = Daemon(log, chromium, None)
+        port = await daemon.start("127.0.0.1", 0)
+        try:
+            assert await chromium.wait_ready(60)
+            status, h = await minihttp.request_json("127.0.0.1", port, "GET", "/health")
+            assert status == 200 and h["chromium_extra_flags"] == ["--renderer-process-limit=1"]
+            assert h["chromium_flags"][-2:] == ["--renderer-process-limit=1", "about:blank"]
+            if os.path.isdir("/proc/self"):
+                assert h["chromium_running_flags"] == h["chromium_flags"]
+        finally:
+            await daemon.stop()
+
+    asyncio.run(go())
+
+
 def test_selftest_passes(chromium_binary):
     assert asyncio.run(run_selftest(chromium_binary=chromium_binary, devtools_port=free_port())) == 0
 
@@ -148,6 +169,8 @@ def test_health_boot_facts_step_counters_samples_and_filmstrip(chromium_binary):
             assert status == 200 and h["guestd_version"] and h["guestd_uptime_s"] == h["uptime_s"]
             assert 0 <= h["chromium_launch_s"] <= h["chromium_ready_s"] <= h["uptime_s"]
             assert h["chromium_flags"] == chromium_mod.chromium_flags(chromium.port, chromium.user_data_dir)
+            # read back from the running browser process: Linux has /proc, macOS doesn't
+            assert h["chromium_running_flags"] == (h["chromium_flags"] if os.path.isdir("/proc/self") else None)
             assert h["vcpus"] == os.cpu_count()
 
             product = site.products[0]

@@ -13,11 +13,11 @@ nothing else. `python3 -m guestd` is the whole invocation; production takes no f
 
 | File | Role |
 |---|---|
-| `guestd/__main__.py` | CLI: `python3 -m guestd [--selftest \| --serve-site HOST:PORT]`; `FLEETKIT_FAULT` |
+| `guestd/__main__.py` | CLI: `python3 -m guestd [--selftest \| --serve-site HOST:PORT]`; `FLEETKIT_FAULT`, `FLEETKIT_CHROMIUM_EXTRA_FLAGS` |
 | `guestd/server.py` | `/health`, `/task`, `/metrics`, `/logs`, `/egress-check` on an asyncio HTTP server; one task at a time |
 | `guestd/task.py` | the five steps: actions, settle points, assertions; failure categories; timing |
 | `guestd/cdp.py` | raw CDP on one websocket: one reader task, flat CDP sessions (`flatten: true`), event queues, listeners |
-| `guestd/chromium.py` | launches `/usr/lib/chromium/chromium` with the exact flag list; readiness; relaunch on death |
+| `guestd/chromium.py` | launches `/usr/lib/chromium/chromium` with the exact flag list (the base flags, then any extra flags the spec adds); readiness; relaunch on death; reads the running flags back from `/proc` |
 | `guestd/clock.py` | `Deadline`: the one timeout mechanism for steps, the task and every DevTools wait |
 | `guestd/faults.py` | the five faults and what they do |
 | `guestd/metrics.py` | `/proc/meminfo`, Chromium's RSS, `/proc/uptime`, `/proc/cmdline` |
@@ -44,13 +44,24 @@ after a browser crash until the relaunch is up, and forever under `never_ready`.
 | `guestd_uptime_s` | same value as `uptime_s`: seconds (monotonic) since the daemon started |
 | `kernel_uptime_s` | first field of `/proc/uptime` |
 | `chromium_launch_s`, `chromium_ready_s` | guestd uptime at which the current Chromium process was launched / became ready; `null` before that and while a relaunch is pending |
-| `chromium_flags` | the exact flag list Chromium runs with |
+| `chromium_flags` | the exact flag list guestd launches Chromium with: the base flags, the spec's extra flags, `about:blank` |
+| `chromium_extra_flags` | the spec's extra flags alone (`[]` for none) |
+| `chromium_running_flags` | the flags the running browser process has, read back from `/proc/<pid>/cmdline`: what the driver checks against the spec; `null` while no browser runs, and without `/proc` |
 | `kernel_cmdline` | `/proc/cmdline` |
 | `vcpus` | `os.cpu_count()` |
 | `mem_total` | bytes, from `/proc/meminfo` |
 
 The `/proc` ones are `null` without `/proc`. The host turns the uptimes into boot-phase
 timestamps on its own clock (kernel start, guestd start, Chromium launch, Chromium ready).
+
+**Extra Chromium flags.** A spec's `workload.chromium_extra_flags` (checked against
+`experiments/schema/chromium-flags.json` before any run) arrives in `FLEETKIT_CHROMIUM_EXTRA_FLAGS`:
+the Docker backend sets it, and the microVM init copies it from `fleetkit.chromium_extra_flags=` on
+the kernel command line. The value is one word, the unpadded URL-safe base64 of the flags' JSON list
+(`chromium.encode_extra_flags`). guestd puts the flags after the base flags, before `about:blank`;
+without them the flag list is exactly the base list. A value that doesn't decode to at most 16
+`--flags` of at most 512 characters together stops guestd with exit status 2 before Chromium starts,
+so a guest never runs other flags than it was sent.
 
 **`POST /task`** with the `traceparent` header and body
 `{task_id, fixture_base_url, product_id, query, expected_title, step_timeout_ms, task_timeout_ms, sample_interval_ms, screenshot_each_step}`

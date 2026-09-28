@@ -4,6 +4,7 @@ Everything here is the closed vocabulary from docs/harness-design.md section 4.
 """
 from __future__ import annotations
 
+import base64
 import json
 import threading
 import uuid
@@ -80,6 +81,35 @@ def validate_fault(fault: Optional[str]) -> Optional[str]:
     elif arg:
         raise ValueError("fault %r takes no argument" % name)
     return fault
+
+
+# The spec's extra Chromium flags (workload.chromium_extra_flags) reach the guest on every microVM as
+# ``MicroVM.chromium_extra_flags``. expand.py checked them against experiments/schema/chromium-flags.json's
+# allowed list before the run; hostd checks only their shape and size, so they fit on a kernel command line.
+MAX_CHROMIUM_FLAGS = 16
+MAX_CHROMIUM_FLAG_CHARS = 512
+
+
+def validate_chromium_flags(flags: Any) -> List[str]:
+    """The flags as a list, or ValueError: at most MAX_CHROMIUM_FLAGS strings, each a ``--flag`` of printable
+    ASCII (spaces allowed, for --js-flags), MAX_CHROMIUM_FLAG_CHARS at most together. None is none."""
+    if flags is None:
+        return []
+    if not isinstance(flags, list) or len(flags) > MAX_CHROMIUM_FLAGS:
+        raise ValueError("chromium_extra_flags must be a list of at most %d flags" % MAX_CHROMIUM_FLAGS)
+    for f in flags:
+        if not isinstance(f, str) or not f.startswith("--") or not all(" " <= c <= "~" for c in f):
+            raise ValueError("chromium_extra_flags: %r is not a --flag in printable ASCII" % (f,))
+    if sum(len(f) for f in flags) > MAX_CHROMIUM_FLAG_CHARS:
+        raise ValueError("chromium_extra_flags: more than %d characters of flags" % MAX_CHROMIUM_FLAG_CHARS)
+    return list(flags)
+
+
+def encode_chromium_flags(flags: List[str]) -> str:
+    """The flags as one word with no spaces or quotes, for an environment variable or the kernel command
+    line: unpadded URL-safe base64 of their JSON list. guestd.chromium.decode_extra_flags reverses it."""
+    raw = json.dumps(list(flags), separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
 
 
 # The spec's hypervisor section reaches a backend on every microVM as ``MicroVM.hypervisor``:
@@ -165,6 +195,8 @@ class MicroVM:
     trial_id: Optional[str] = None
     # The spec's hypervisor section this microVM was created with (see DEFAULT_HYPERVISOR_OPTIONS).
     hypervisor: Dict[str, Any] = field(default_factory=dict)
+    # The spec's extra Chromium flags, added after the guest's base flags (see validate_chromium_flags).
+    chromium_extra_flags: List[str] = field(default_factory=list)
     state: str = State.CREATING
     created_ts: Optional[float] = None
     process_started_ts: Optional[float] = None
@@ -242,6 +274,7 @@ class MicroVM:
             "run_id": self.run_id,
             "trial_id": self.trial_id,
             "hypervisor": dict(self.hypervisor),
+            "chromium_extra_flags": list(self.chromium_extra_flags),
             "console_log": self.console_log,
             "trace_id": self.trace.trace_id if self.trace else None,
             "kernel_start_ts": self.kernel_start_ts,

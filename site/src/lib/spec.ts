@@ -94,6 +94,8 @@ export function mib(v: number): string {
 
 /** A spec value in words, with its unit. */
 export function show(path: string, value: unknown): string {
+  // optional: a spec that leaves the flags out runs none, as one with an empty list does
+  if (path === 'workload.chromium_extra_flags') return Array.isArray(value) && value.length ? value.join(' ') : 'none';
   if (value === undefined) return '–';
   if (path === 'hypervisor.name') return HYPERVISOR[String(value)] ?? String(value);
   if (path === 'hypervisor.virtio_rng') return value ? 'yes' : 'no';

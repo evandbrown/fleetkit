@@ -7,8 +7,8 @@
     python3 expand.py CAMPAIGN.json --quota N   waves under a vCPU quota other than limits.json's
 
 Exit status: 0 valid, 1 not valid, 2 usage error. Errors and warnings go to stderr, each starting
-with the field it is about. Standard library only; the schemas, instance-types.json and limits.json
-are read from this script's directory. tests/cases.json holds the cases this script and the site's
+with the field it is about. Standard library only; the schemas, instance-types.json, limits.json and
+chromium-flags.json are read from this script's directory. tests/cases.json holds the cases this script and the site's
 builder must both pass.
 """
 from __future__ import annotations
@@ -71,6 +71,7 @@ def read_json(path):
 SCHEMAS = {n: read_json(HERE / n) for n in ("spec.schema.json", "campaign.schema.json")}
 TYPES = read_json(HERE / "instance-types.json")["types"]
 LIMITS = read_json(HERE / "limits.json")
+FLAGS = read_json(HERE / "chromium-flags.json")
 
 
 # ------------------------------------------------------------------ small helpers
@@ -116,6 +117,36 @@ def flatten(obj: dict, prefix: str = "") -> dict:
             out.update(flatten(v, f"{prefix}{k}."))
         else:
             out[f"{prefix}{k}"] = v
+    return out
+
+
+def optional_defaults() -> dict:
+    """{path: default} for the spec fields a spec may leave out, which then stand at their default:
+    procedure.release_after_ready_s and workload.chromium_extra_flags."""
+    s = SCHEMAS["spec.schema.json"]
+    out = {}
+    for k, node in s["properties"].items():
+        d = s["$defs"][k]
+        if d.get("type") != "object":
+            if k not in s["required"] and "default" in d:
+                out[k] = d["default"]
+            continue
+        req = set(node.get("required", [])) if k in s["required"] else set()
+        for f, fs in d["properties"].items():
+            if f not in req and "default" in fs:
+                out[f"{k}.{f}"] = fs["default"]
+    return out
+
+
+OPTIONAL = optional_defaults()
+
+
+def filled(spec: dict) -> dict:
+    """A spec's leaves, flattened, with every optional field it leaves out at its default (after the rest):
+    what it runs."""
+    out = flatten(spec)
+    for k, v in OPTIONAL.items():
+        out.setdefault(k, copy.deepcopy(v))
     return out
 
 
@@ -244,6 +275,85 @@ def _check(inst, s, path, doc, errs):
                 _v(v, extra, join(path, k), doc, errs)
 
 
+# ------------------------------------------------------------------ extra Chromium flags
+def flag_name(flag: str) -> str:
+    """--name of --name=value."""
+    return flag.split("=", 1)[0]
+
+
+def chromium_argv(extra) -> list:
+    """What Chromium runs with after its binary: the base flags, the spec's extra flags, the start page."""
+    return list(FLAGS["base"]) + list(extra) + [FLAGS["start_page"]]
+
+
+def _value_problems(name: str, has_value: bool, value: str, rule: dict) -> list:
+    """Why ``value`` isn't what the flag ``name`` takes under ``rule`` ({value: none | integer}); empty when it is.
+    A number is written one way only (no leading zeros), so =2 and =02 can't pass as two different specs."""
+    if rule["value"] == "none":
+        return [f"{name} takes no value"] if has_value else []
+    lo, hi = rule["minimum"], rule["maximum"]
+    if not has_value or not re.fullmatch(r"0|[1-9][0-9]*", value) or not lo <= int(value) <= hi:
+        return [f"{name} takes a whole number from {lo} to {hi}, as {name}=N"]
+    return []
+
+
+def flag_problems(flag: str) -> list:
+    """Why one extra Chromium flag isn't allowed (chromium-flags.json); empty when it is."""
+    name, eq, value = flag.partition("=")
+    if name in {flag_name(b) for b in FLAGS["base"]}:
+        return [f"{name} is one of the base flags every run has"]
+    if name in FLAGS["refused"]:
+        return [f"{name} is refused: {FLAGS['refused'][name]}"]
+    rule = FLAGS["allowed"].get(name)
+    if rule is None:
+        return [f"{name} is not on the allowed list in chromium-flags.json"]
+    if rule["value"] == "features":
+        if not eq or not value:
+            return [f"{name} takes features, comma-separated, as {name}=BackForwardCache"]
+        out, seen = [], set()
+        for feat in value.split(","):
+            if feat not in rule["features"]:
+                out.append(f"{name}: {feat or 'an empty name'} is not an allowed feature "
+                           f"(allowed: {', '.join(rule['features'])})")
+            elif feat in seen:
+                out.append(f"{name}: {feat} appears twice")
+            seen.add(feat)
+        return out
+    if rule["value"] == "v8":
+        if not eq or not value:
+            return [f"{name} takes V8 flags, space-separated, as {name}=--jitless"]
+        out, seen = [], set()
+        for tok in value.split(" "):
+            vname, veq, vval = tok.partition("=")
+            vrule = rule["v8"].get(vname)
+            if vrule is None:
+                out.append(f"{name}: {tok or 'an empty flag'} is not an allowed V8 flag "
+                           f"(allowed: {', '.join(rule['v8'])})")
+                continue
+            out += [f"{name}: {p}" for p in _value_problems(vname, bool(veq), vval, vrule)]
+            if vname in seen:
+                out.append(f"{name}: {vname} appears twice")
+            seen.add(vname)
+        return out
+    return _value_problems(name, bool(eq), value, rule)
+
+
+def flags_problems(flags: list) -> list:
+    """Errors for workload.chromium_extra_flags, each starting with its field."""
+    errs, seen = [], set()
+    for i, flag in enumerate(flags):
+        where = f"workload.chromium_extra_flags[{i}]"
+        errs += [f"{where}: {p}" for p in flag_problems(flag)]
+        name = flag_name(flag)
+        if name in seen:
+            errs.append(f"{where}: {name} appears twice; give each flag once")
+        seen.add(name)
+    total, most = sum(len(f) for f in flags), FLAGS["max_total_chars"]
+    if total > most:
+        errs.append(f"workload.chromium_extra_flags: the flags add up to {total} characters, more than {most}")
+    return errs
+
+
 # ------------------------------------------------------------------ rules the schema can't state
 def check_spec(spec: dict) -> tuple[list, list]:
     """Errors and warnings for one complete, schema-valid spec; paths are relative to the spec."""
@@ -260,6 +370,7 @@ def check_spec(spec: dict) -> tuple[list, list]:
         errs.append("criteria.step_timeout_ms: must be at most criteria.task_timeout_ms")
     if c["task_p95_target_ms"] >= c["task_timeout_ms"]:
         errs.append("criteria.task_p95_target_ms: must be below criteria.task_timeout_ms")
+    errs += flags_problems(spec.get("workload", {}).get("chromium_extra_flags", []))
     host = TYPES[spec["worker_host"]["instance_type"]]
     top = max(d)
     gib = top * spec["microvm"]["memory_mib"] / 1024
@@ -306,8 +417,9 @@ def pack_waves(runs: list, quota: int) -> list:
 
 
 def differing(specs: list) -> list:
-    """[{field, values: {spec: value}}] for every field whose value isn't the same in every spec."""
-    flat = [(name, flatten(spec)) for name, spec in specs]
+    """[{field, values: {spec: value}}] for every field whose value isn't the same in every spec. An optional
+    field a spec leaves out is at its default."""
+    flat = [(name, filled(spec)) for name, spec in specs]
     keys = list(dict.fromkeys(k for _, f in flat for k in f))
     out = []
     for k in keys:
@@ -345,7 +457,7 @@ def evaluate(camp, quota: int | None = None) -> dict:
             errs.append(f"why.{k}: no spec named {k}")
     for i, (a, sa) in enumerate(specs):
         for b, sb in specs[i + 1:]:
-            if same(sa, sb):
+            if same(filled(sa), filled(sb)):
                 errs.append(f"specs.{b}: expands to the same spec as {a}; to run a spec again, raise replicas")
     if errs:
         return out

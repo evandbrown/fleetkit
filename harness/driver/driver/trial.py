@@ -60,6 +60,13 @@ class MicrovmRec:
     def outcome(self) -> str:
         return str(self.info.get("outcome") or "")
 
+    @property
+    def running_flags(self) -> list | None:
+        """The flags this microVM's browser process runs with, as its guest read them back; None if not told."""
+        gi = self.info.get("guest_info")
+        flags = gi.get("chromium_running_flags") if isinstance(gi, dict) else None
+        return list(flags) if isinstance(flags, list) else None
+
 
 class TrialRunner:
     def __init__(self, cfg: TrialConfig, client: HostClient, rundir: RunDir, writers: Writers,
@@ -138,6 +145,11 @@ class TrialRunner:
             self._write_trial_json()
 
             ready = [s for s in self.microvms if s.ready]
+            wrong = self._chromium_flags_problem(ready)
+            if wrong:
+                self.error = wrong
+                self._log("ERROR", self.error)
+                ready = []
             if ready and cfg.release_after_ready_s > 0:
                 self.phase = "release_wait"
                 self._release_wait(len(ready))
@@ -151,7 +163,7 @@ class TrialRunner:
                 else:
                     self.phase = "tasks"
                     self._run_tasks(ready)
-            else:
+            elif not wrong:
                 self._log("WARN", "no microVM became ready; no tasks dispatched")
             self._write_trial_json()
         except KeyboardInterrupt:
@@ -221,6 +233,25 @@ class TrialRunner:
             sp.set(**{"fleetkit.cpu_util_mean": self.pre_trial["cpu_util_mean"]})
         self._log("INFO", "settled", **{k: v for k, v in self.pre_trial.items() if v is not None})
 
+    def _chromium_flags_problem(self, ready: list[MicrovmRec]) -> str | None:
+        """Why a ready microVM's Chromium isn't running the flags the spec says, or None. Each guest reads its
+        browser process's flags back from /proc (guest_info.chromium_running_flags). A guest that can't
+        (one older than the read-back) passes only when the spec adds no flags, as every run before them did."""
+        want = self.cfg.chromium_flags_expected
+        if want is None:
+            return None
+        for s in ready:
+            running = s.running_flags
+            if running is None:
+                if self.cfg.chromium_extra_flags:
+                    return (f"chromium flags: microVM {s.microvm_id} didn't report the flags its browser runs with, "
+                            f"so the spec's extra flags can't be shown to have run")
+                continue
+            if list(running) != list(want):
+                return (f"chromium flags: microVM {s.microvm_id}'s browser runs {json.dumps(running)}, "
+                        f"not {json.dumps(want)}")
+        return None
+
     def _release_wait(self, n_ready: int) -> None:
         """Hold every ready microVM ready and idle for release_after_ready_s before the barrier (a warm
         start), recording when the wait began and ended. hostd's idle reaper allows for it (spec.timeouts)."""
@@ -253,6 +284,8 @@ class TrialRunner:
         }
         if cfg.hypervisor is not None:
             create_request["hypervisor"] = dict(cfg.hypervisor)
+        if cfg.chromium_extra_flags:
+            create_request["chromium_extra_flags"] = list(cfg.chromium_extra_flags)
         with self.tr.start_span("microvms.create", self.span, {"fleetkit.count": cfg.density}) as sp:
             self.timestamps["create_start"] = time.time()
             created = self.client.create_microvms(create_request, self._headers(sp))
@@ -595,6 +628,7 @@ class TrialRunner:
             "fixture": {"check_url": cfg.fixture_check_url, "guest_base_url": cfg.guest_fixture_base_url(),
                         "products_source": self.products_source, "products": len(self.products)},
             "release_after_ready_s": float(cfg.release_after_ready_s),
+            "chromium_extra_flags": list(cfg.chromium_extra_flags),
             "timestamps": dict(self.timestamps),
             "pre_trial": self.pre_trial,
             "sample_interval_ms": cfg.sample_interval_ms, "screenshot_each_step": bool(cfg.screenshot_each_step),
@@ -623,7 +657,10 @@ class TrialRunner:
                 "microvm_id": s.microvm_id, "slot": s.slot, "address": s.address, "state": s.state,
                 "outcome": s.outcome, "startup_ms": s.info.get("startup_ms"), "cleanup_ms": s.info.get("cleanup_ms"),
                 "ready": s.ready, "failed_startup": s.failed, "state_after_task": s.state_after_task,
-                "error": s.info.get("error"), "driver_error": s.driver_error, "task": s.task,
+                "error": s.info.get("error"), "driver_error": s.driver_error,
+                # what the microVM's browser process runs with, read back in the guest (null: not reported)
+                "chromium_flags": s.running_flags,
+                "task": s.task,
             } for s in self.microvms],
             "written_at": time.time(),
         }

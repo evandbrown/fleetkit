@@ -15,8 +15,11 @@ The boot facts in ``/health``: ``guestd_version``; ``guestd_uptime_s`` (= ``upti
 seconds on the monotonic clock since the daemon started); ``kernel_uptime_s`` (the first
 field of /proc/uptime); ``chromium_launch_s`` and ``chromium_ready_s`` (guestd uptime at
 which the current Chromium process was launched and became ready; null before that and
-while it is being relaunched); ``chromium_flags``; ``kernel_cmdline``; ``vcpus``
-(``os.cpu_count()``); ``mem_total`` (bytes). Each /proc-derived one is null without /proc.
+while it is being relaunched); ``chromium_flags`` (the flags guestd launches Chromium with:
+the base flags, then the spec's extra flags); ``chromium_extra_flags`` (those extra flags alone);
+``chromium_running_flags`` (the flags the running browser process has, read back from
+``/proc/<pid>/cmdline``: the proof of what ran; null while no browser runs); ``kernel_cmdline``;
+``vcpus`` (``os.cpu_count()``); ``mem_total`` (bytes). Each /proc-derived one is null without /proc.
 """
 
 from __future__ import annotations
@@ -128,6 +131,7 @@ class Daemon:
         flags = getattr(c, "flags", None)
         if flags is None:
             flags = chromium_mod.chromium_flags(getattr(c, "port", chromium_mod.DEVTOOLS_PORT), getattr(c, "user_data_dir", chromium_mod.USER_DATA_DIR))
+        running = c.running_flags() if hasattr(c, "running_flags") else None
         uptime_s = round(time.monotonic() - self.started, 3)
         body = {
             "ready": self.ready,
@@ -139,6 +143,8 @@ class Daemon:
             "chromium_launch_s": self._since_start(getattr(c, "launch_mono", None)),
             "chromium_ready_s": self._since_start(getattr(c, "ready_mono", None)),
             "chromium_flags": list(flags),
+            "chromium_extra_flags": list(getattr(c, "extra_flags", None) or []),
+            "chromium_running_flags": list(running) if running is not None else None,
         }
         body.update(self._static)
         if not self.ready:

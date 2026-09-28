@@ -1,6 +1,7 @@
 <script lang="ts">
   // One input, drawn from its schema: a select for a list of values, a checkbox for on or off, the densities
-  // editor, or a text box that keeps what was typed and hands over a number when it is one. Beside the label, an ⓘ
+  // editor, a box of lines for a list of text (one item per line), or a text box that keeps what was typed and
+  // hands over a number when it is one. Beside the label, an ⓘ
   // with what the field means; under the input, one line of facts (what follows from the value, and the base's value
   // in a named spec), then its messages.
   import type { Snippet } from 'svelte';
@@ -40,7 +41,17 @@
 
   const s = $derived(field.schema);
   const kind = $derived(
-    field.path === 'densities' ? 'densities' : s.enum ? 'enum' : s.type === 'boolean' ? 'boolean' : s.type === 'integer' || s.type === 'number' ? 'number' : 'text',
+    field.path === 'densities'
+      ? 'densities'
+      : s.enum
+        ? 'enum'
+        : s.type === 'boolean'
+          ? 'boolean'
+          : s.type === 'integer' || s.type === 'number'
+            ? 'number'
+            : s.type === 'array'
+              ? 'lines'
+              : 'text',
   );
   const errored = $derived(msgs.some((m) => m.error));
   const line = $derived([facts, base !== undefined ? `base ${show(field.path, base)}` : ''].filter(Boolean).join(' · '));
@@ -53,11 +64,13 @@
   // A text box shows what was typed ("2." on the way to "2.5") for as long as it still means the current value,
   // and the value itself once it changes from elsewhere.
   const parse = (t: string): Json => {
+    if (kind === 'lines') return t.split('\n').map((x) => x.trim()).filter(Boolean);
     if (kind !== 'number') return t;
     const x = t.replace(/[,_\s]/g, '');
     return /^-?\d+(\.\d+)?$/.test(x) ? Number(x) : t;
   };
-  const asText = (v: unknown) => (v === undefined || v === null ? '' : String(v));
+  const asText = (v: unknown) =>
+    v === undefined || v === null ? '' : kind === 'lines' && Array.isArray(v) ? v.join('\n') : String(v);
   let typed: string | null = $state(null);
   const text = $derived(typed !== null && same(parse(typed), value) ? typed : asText(value));
   function input(e: Event & { currentTarget: HTMLInputElement | HTMLTextAreaElement }) {
@@ -107,6 +120,19 @@
           aria-invalid={errored}
         />
         {#if field.unit}<span class="unit">{field.unit}</span>{/if}
+      {:else if kind === 'lines'}
+        <textarea
+          {id}
+          class="lines"
+          rows="2"
+          spellcheck="false"
+          autocomplete="off"
+          placeholder="none"
+          value={text}
+          oninput={input}
+          aria-describedby={described}
+          aria-invalid={errored}
+        ></textarea>
       {:else if multiline}
         <textarea {id} rows="3" value={text} oninput={input} aria-describedby={described} aria-invalid={errored}></textarea>
       {:else}
@@ -188,6 +214,11 @@
   textarea {
     field-sizing: content;
     min-height: 4.8em;
+  }
+  textarea.lines {
+    min-height: 2.6em;
+    font-family: var(--mono);
+    font-size: 0.85rem;
   }
   .check {
     display: inline-flex;

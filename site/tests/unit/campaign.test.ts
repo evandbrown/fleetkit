@@ -4,9 +4,13 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  FLAGS,
   InputError,
   SPEC_FIELDS,
+  VARIABLE_SECTIONS,
   checkSpec,
+  fieldAt,
+  flagProblems,
   defaults,
   evaluate,
   parseJson,
@@ -112,8 +116,16 @@ describe('the schema', () => {
     expect(checkSpec(spec)).toEqual([[], []]);
   });
 
-  it('has one optional field, the wait after ready, which a spec that leaves it out holds at its default of 0', () => {
-    expect(SPEC_FIELDS.filter((f) => f.optional).map((f) => f.path)).toEqual(['procedure.release_after_ready_s']);
+  it('has two optional fields, the wait after ready and the extra Chromium flags, held at their defaults when left out', () => {
+    expect(SPEC_FIELDS.filter((f) => f.optional).map((f) => f.path)).toEqual([
+      'procedure.release_after_ready_s',
+      'workload.chromium_extra_flags',
+    ]);
+    const flags = fieldAt('workload.chromium_extra_flags')!;
+    expect(valueIn({}, flags)).toEqual([]);
+    expect(flags.variable).toBe(true);
+    expect(flags.help).toContain('chromium-flags.json');
+    expect(VARIABLE_SECTIONS).toEqual(['worker_host', 'hypervisor', 'microvm', 'densities', 'workload']);
     const wait = SPEC_FIELDS.find((f) => f.optional)!;
     const base = (read('campaigns/nested-sizes-1.json') as Obj).base as Obj;
     expect((base.procedure as Obj).release_after_ready_s).toBeUndefined();
@@ -159,6 +171,23 @@ describe('reading JSON', () => {
   it('says where it stopped', () => {
     expect(() => parseJson('{"a": 1,}')).toThrow(/expected a key/);
     expect(() => parseJson('{"a": 1} x')).toThrow(/more text/);
+  });
+});
+
+describe('extra Chromium flags', () => {
+  it('allows every listed flag in its simplest form and refuses the base flags', () => {
+    for (const [name, rule] of Object.entries(FLAGS.allowed)) {
+      const value = { none: '', integer: `=${rule.minimum}`, features: `=${Object.keys(rule.features ?? {})[0]}`, v8: '=--jitless' }[
+        rule.value
+      ];
+      expect(flagProblems(name + value)).toEqual([]);
+    }
+    for (const b of FLAGS.base) expect(flagProblems(b)[0]).toMatch(/is one of the base flags every run has$/);
+  });
+  it('says why a refused flag is refused', () => {
+    expect(flagProblems('--blink-settings=imagesEnabled=false')).toEqual([
+      `--blink-settings is refused: ${FLAGS.refused['--blink-settings']}`,
+    ]);
   });
 });
 

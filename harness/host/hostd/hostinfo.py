@@ -173,8 +173,10 @@ def collect_host_info(backend: Any, host_id: str, metrics_period_s: Optional[flo
         # the key runs recorded before Cloud Hypervisor, kept for their readers; it is set on Firecracker only.
         "hypervisor": facts,
         "firecracker": facts if backend.name == "firecracker" else None,
-        # What a spec may ask of this daemon: the most microVMs at once, and the hypervisor
-        # options its backend can carry out. The driver refuses a spec that asks for more.
+        # What a spec may ask of this daemon: the most microVMs at once, the hypervisor options its
+        # backend can carry out, and whether it passes a spec's extra Chromium flags to the guest (every
+        # backend does). The driver refuses a spec that asks for more.
         "max_slots": getattr(backend, "max_slots", None),
         "hypervisor_options": hypervisor_options(backend),
+        "chromium_extra_flags": True,
     }

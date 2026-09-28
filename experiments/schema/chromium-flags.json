@@ -1,0 +1,90 @@
+{
+  "description": "The Chromium flags a spec may add to the base flags (workload.chromium_extra_flags), and why each is allowed. Every allowed flag changes how Chromium spends memory and CPU: its process model, its scheduling, V8's heap and compilers. None changes what a task does: each still loads every page, image, script and stylesheet of the test site, runs its scripts, and verifies the cart, so the workload check's bytes and requests stay what they are, and a difference between specs is Chromium's configuration alone. A flag not listed is refused, and so is a flag already among the base flags. expand.py and the site's builder check a spec against this file; guestd adds the flags after the base flags, before the start page; the driver checks every microVM's Chromium ran with exactly base + extra flags + start page, read back from the running process.",
+  "base": [
+    "--headless=new",
+    "--no-sandbox",
+    "--disable-gpu",
+    "--disable-dev-shm-usage",
+    "--remote-debugging-port=9222",
+    "--user-data-dir=/tmp/profile",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-background-networking",
+    "--disable-component-update",
+    "--disable-sync",
+    "--disable-default-apps",
+    "--window-size=1280,800"
+  ],
+  "start_page": "about:blank",
+  "max_total_chars": 512,
+  "allowed": {
+    "--renderer-process-limit": {
+      "value": "integer", "minimum": 1, "maximum": 32,
+      "why": "Caps how many renderer processes Chromium keeps. Fewer renderers use less memory per microVM, a trade against step time; the pages are the same."
+    },
+    "--process-per-site": {
+      "value": "none",
+      "why": "One renderer for all pages of a site instead of one per navigation: a process-model choice that changes memory, not the pages."
+    },
+    "--disable-site-isolation-trials": {
+      "value": "none",
+      "why": "Turns off the site-isolation trials, so frames from different sites may share a renderer: fewer processes, the same pages. The microVM is the security boundary here, as it is for --no-sandbox."
+    },
+    "--no-zygote": {
+      "value": "none",
+      "why": "Starts renderers directly instead of forking them from zygote processes, which saves the zygotes' memory. It needs --no-sandbox, which the base flags have."
+    },
+    "--disable-extensions": {
+      "value": "none",
+      "why": "Turns off the extension system. No extension is installed, so only its startup work and memory go."
+    },
+    "--disable-renderer-backgrounding": {
+      "value": "none",
+      "why": "Keeps a renderer at normal priority when Chromium thinks its page is in the background: scheduling only."
+    },
+    "--disable-background-timer-throttling": {
+      "value": "none",
+      "why": "Stops Chromium slowing the timers of pages it thinks are in the background: scheduling only."
+    },
+    "--disable-backgrounding-occluded-windows": {
+      "value": "none",
+      "why": "Stops Chromium treating a hidden window as backgrounded: scheduling only."
+    },
+    "--disable-features": {
+      "value": "features",
+      "why": "Turns off the Chromium features it names, comma-separated, each from this list.",
+      "features": {
+        "IsolateOrigins": "Separate processes per origin: process model only.",
+        "site-per-process": "Separate processes per site: process model only.",
+        "SpareRendererForSitePerProcess": "A renderer started ahead of need: process model only.",
+        "BackForwardCache": "Keeps pages the task has left alive in memory for going back. The task never goes back.",
+        "Translate": "The page-translation service: background work, no page content.",
+        "OptimizationHints": "Background fetches of page hints: no page content.",
+        "MediaRouter": "Cast device discovery: background work only."
+      }
+    },
+    "--js-flags": {
+      "value": "v8",
+      "why": "Options for V8, Chromium's JavaScript engine, space-separated, each from this list. Every script still runs in full.",
+      "v8": {
+        "--max-old-space-size": { "value": "integer", "minimum": 16, "maximum": 16384, "why": "Caps the JavaScript heap, in MiB." },
+        "--max-semi-space-size": { "value": "integer", "minimum": 1, "maximum": 256, "why": "Sizes the young generation, in MiB: garbage-collection time against memory." },
+        "--jitless": { "value": "none", "why": "Runs JavaScript in the interpreter only: less memory, slower scripts, the same work." },
+        "--lite-mode": { "value": "none", "why": "V8's low-memory mode." },
+        "--optimize-for-size": { "value": "none", "why": "V8 prefers less memory to more speed." },
+        "--no-opt": { "value": "none", "why": "No optimizing compiler: less compile work and memory, slower hot code." }
+      }
+    }
+  },
+  "refused": {
+    "--blink-settings": "It can switch off images or scripts, so pages would do less of the work the task measures (images are most of a task's bytes).",
+    "--disable-http-cache": "It changes how many requests a task makes, which the workload check holds the same in every run.",
+    "--disk-cache-size": "It changes how many requests a task makes, which the workload check holds the same in every run.",
+    "--proxy-server": "It changes how the guest reaches the test site, which is the same in every run.",
+    "--proxy-pac-url": "It changes how the guest reaches the test site, which is the same in every run.",
+    "--host-resolver-rules": "It changes how the guest reaches the test site, which is the same in every run.",
+    "--disable-web-security": "It changes what pages may do.",
+    "--enable-features": "It turns on features the base flags don't have; only turning off listed features is allowed.",
+    "--single-process": "It runs every page inside the browser process, a debugging mode Chromium doesn't support."
+  }
+}

@@ -15,7 +15,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from .backends.base import Backend, BackendError
 from .guest import GuestClient, GuestError, boot_phases, guest_info
 from .model import (Defaults, FailureCategory, MicroVM, Outcome, State, TraceContext, hypervisor_problems,
-                    validate_fault)
+                    validate_chromium_flags, validate_fault)
 from .telemetry import Telemetry
 
 
@@ -125,6 +125,7 @@ class Manager:
         launch_interval_ms = _num(request, "launch_interval_ms", Defaults.LAUNCH_INTERVAL_MS, 0)
         try:
             fault = validate_fault(request.get("fault"))
+            chromium_extra_flags = validate_chromium_flags(request.get("chromium_extra_flags"))
         except ValueError as e:
             raise ApiError(400, str(e))
         # The spec's hypervisor section: refused unless this backend can carry it out, so what a
@@ -160,7 +161,8 @@ class Manager:
                             address=self.backend.address(slot), vcpus=vcpus, mem_mib=mem_mib, fault=fault,
                             ready_timeout_s=ready_timeout_s, max_lifetime_s=max_lifetime_s,
                             idle_timeout_s=idle_timeout_s, fixture_base_url=self.backend.fixture_base_url,
-                            run_id=run_id, trial_id=trial_id, hypervisor=dict(hypervisor))
+                            run_id=run_id, trial_id=trial_id, hypervisor=dict(hypervisor),
+                            chromium_extra_flags=list(chromium_extra_flags))
                 self.microvms[s.id] = s
                 created.append(s)
 

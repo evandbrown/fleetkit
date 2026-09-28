@@ -65,6 +65,8 @@ def show(path: str, value) -> str:
         return f"{value // 1024} GiB" if value % 1024 == 0 else f"{value:,} MiB"
     if path == "microvm.vcpus":
         return f"{value} vCPU" + ("" if value == 1 else "s")
+    if path == "workload.chromium_extra_flags":
+        return " ".join(value) if value else "no extra Chromium flags"
     if isinstance(value, list):
         return ", ".join(str(x) for x in value)
     return expand.fmt(value)
@@ -86,7 +88,7 @@ def labels(specs: list[tuple[str, dict]]) -> dict[str, str]:
     differ = [d["field"] for d in expand.differing(specs) if d["field"] != "densities"]
     if not differ:
         differ = ["densities"]
-    flat = {name: expand.flatten(spec) for name, spec in specs}
+    flat = {name: expand.filled(spec) for name, spec in specs}
     return {name: ", ".join(show(p, flat[name][p]) for p in differ) for name, _ in specs}
 
 
@@ -100,8 +102,9 @@ def host_of(instance_type: str) -> dict:
 
 
 def changes(base: dict, spec: dict) -> list[dict]:
-    """Every leaf path where ``spec`` differs from ``base``, in schema order."""
-    fb, fs = expand.flatten(base), expand.flatten(spec)
+    """Every leaf path where ``spec`` differs from ``base``, in schema order. An optional field either leaves out
+    is at its default."""
+    fb, fs = expand.filled(base), expand.filled(spec)
     order = [f["path"] for f in FIELDS] + [p for p in fs if p not in LABEL]
     return [{"path": p, "base": fb.get(p), "value": fs[p]} for p in order
             if p in fs and not expand.same(fb.get(p), fs[p])]
@@ -125,7 +128,7 @@ def resolve(definition: dict, whole: bool = True) -> list[tuple[str, dict]]:
         out.append((name, spec))
     for i, (a, sa) in enumerate(out):
         for b, sb in out[i + 1:]:
-            if expand.same(sa, sb):
+            if expand.same(expand.filled(sa), expand.filled(sb)):
                 raise SpecError(f"specs {a} and {b} are the same spec")
     return out
 

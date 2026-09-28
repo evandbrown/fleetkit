@@ -12,6 +12,7 @@
     same,
     scaleDensities,
     suggestName,
+    valueIn,
     type Json,
     type Obj,
   } from '../../lib/campaign';
@@ -87,13 +88,17 @@
   // ---- adding a change starts from a value that differs from the base
   function startValue(path: string): Json {
     const f = fieldAt(path)!;
-    const b = getPath(base, path) as Json;
+    const b = valueIn(base, f) as Json;
     const opts = f.schema.enum as Json[] | undefined;
     if (opts) {
       const i = opts.findIndex((o) => same(o, b));
       return opts[i > 0 ? i - 1 : Math.min(1, opts.length - 1)];
     }
     if (typeof b === 'boolean') return !b;
+    // extra Chromium flags: a first flag to edit when the base has none (the base's value when it leaves them out)
+    if (path === 'workload.chromium_extra_flags') {
+      return Array.isArray(b) && b.length ? structuredClone(b) : ['--renderer-process-limit=2'];
+    }
     if (typeof b === 'number' && path !== 'densities') {
       const max = f.schema.maximum ?? Infinity;
       return b * 2 <= max ? b * 2 : Math.max(f.schema.minimum ?? 1, Math.floor(b / 2));
@@ -181,7 +186,7 @@
         value={own[path]}
         onchange={(v) => set(path, v)}
         msgs={at(mine, `specs.${name}.${path}`)}
-        base={getPath(base, path) as Json}
+        base={valueIn(base, f) as Json}
         facts={facts(path, own[path])}
         {spec}
       >

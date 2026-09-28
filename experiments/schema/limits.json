@@ -5,7 +5,7 @@
   "project_cap_usd": 200,
   "project_cap_note": "Total spend for the project. The launcher checks what has been spent before it launches a campaign.",
   "vcpu_quota": 300,
-  "vcpu_quota_note": "Running On-Demand Standard instances in us-east-1, as the launcher read it on 2026-09-27; m8i and c8i, worker and support hosts alike, count against it. An increase to 1,024 is pending. Only the builder's and expand.py's estimates use this number: the launcher reads the live quota. Runs that don't fit at once go in waves.",
+  "vcpu_quota_note": "Running On-Demand Standard instances in us-east-1, as the launcher read it on 2026-09-27; m8i, c8i, m7i and c7i, worker and support hosts alike, count against it. An increase to 1,024 is pending. Only the builder's and expand.py's estimates use this number: the launcher reads the live quota. Runs that don't fit at once go in waves.",
   "run_time_estimate": {
     "note": "Used only to estimate how long a run takes: its expected cost, and whether it fits the shutdown timer. Fitted to cap-baseline-1. Metal setup is a planning ceiling for firmware and memory initialization, not a measurement.",
     "setup_minutes": { "nested": 7, "metal": 25 },

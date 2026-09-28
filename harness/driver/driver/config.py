@@ -55,6 +55,10 @@ class TrialConfig:
     screenshot_each_step: bool = False  # untimed per-step screenshots (the illustration trial)
     hypervisor: dict | None = None  # the spec's hypervisor section, sent with every create (None: the daemon's own)
     release_after_ready_s: float = 0.0  # wait between every microVM ready and the tasks' release
+    chromium_extra_flags: list = field(default_factory=list)  # the spec's, sent with every create
+    # What every microVM's Chromium must run with after its binary (base + extra flags + start page), checked
+    # against what each guest reads back from its browser process once ready; None: not checked.
+    chromium_flags_expected: list | None = None
 
     def guest_fixture_base_url(self) -> str:
         if self.fixture_base_url:

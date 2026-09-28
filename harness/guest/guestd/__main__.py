@@ -1,7 +1,9 @@
 """Entry point: ``python3 -m guestd [--selftest | --serve-site HOST:PORT]``.
 
 Production has no flags: the daemon listens on 0.0.0.0:8080, reads the fault from
-``FLEETKIT_FAULT`` and runs until SIGTERM (tini forwards it). The remaining options exist
+``FLEETKIT_FAULT`` and the spec's extra Chromium flags from ``FLEETKIT_CHROMIUM_EXTRA_FLAGS``
+(a bad value is a configuration error: exit 2, so Chromium never runs other flags than it was
+sent), and runs until SIGTERM (tini forwards it). The remaining options exist
 for local proofs and tests.
 """
 
@@ -40,7 +42,10 @@ async def run_daemon(args: argparse.Namespace, log: LogRing) -> int:
     if fault is not None and fault.name == "crash_on_start":
         log.error("fault crash_on_start: exiting now", exit_code=CRASH_ON_START_EXIT_CODE)
         return CRASH_ON_START_EXIT_CODE
-    chromium = chromium_mod.Chromium(log, binary=args.chromium, port=args.devtools_port)
+    extra = chromium_mod.decode_extra_flags(os.environ.get(chromium_mod.EXTRA_FLAGS_ENV))
+    if extra:
+        log.info("chromium extra flags", flags=extra)
+    chromium = chromium_mod.Chromium(log, binary=args.chromium, port=args.devtools_port, extra_flags=extra)
     daemon = Daemon(log, chromium, fault)
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()

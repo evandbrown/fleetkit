@@ -14,7 +14,7 @@ import os
 import socket
 from typing import Any, Dict, List, Optional
 
-from ..model import MicroVM
+from ..model import MicroVM, encode_chromium_flags
 from ..runner import CommandError, Runner
 from .base import Backend, BackendError, empty_sample
 
@@ -103,6 +103,8 @@ class DockerBackend(Backend):
                 "-e", "FLEETKIT_MICROVM_ID=%s" % microvm.id]
         if microvm.fault:
             argv += ["-e", "FLEETKIT_FAULT=%s" % microvm.fault]
+        if microvm.chromium_extra_flags:
+            argv += ["-e", "FLEETKIT_CHROMIUM_EXTRA_FLAGS=%s" % encode_chromium_flags(microvm.chromium_extra_flags)]
         for k, v in sorted(self.extra_env.items()):
             argv += ["-e", "%s=%s" % (k, v)]
         argv.append(self.image)

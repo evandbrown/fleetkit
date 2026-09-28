@@ -9,7 +9,9 @@ from typing import Any, Dict, Optional, Tuple
 
 
 # The /health fields kept on the microVM as `guest_info`: what the guest is, not how it booted.
-GUEST_INFO_KEYS = ("guestd_version", "chromium_version", "chromium_flags", "kernel_cmdline", "vcpus", "mem_total")
+# chromium_running_flags is what the browser process runs with, read back from /proc in the guest.
+GUEST_INFO_KEYS = ("guestd_version", "chromium_version", "chromium_flags", "chromium_extra_flags",
+                   "chromium_running_flags", "kernel_cmdline", "vcpus", "mem_total")
 
 
 class GuestError(Exception):

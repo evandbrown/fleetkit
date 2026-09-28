@@ -72,6 +72,12 @@ class RunSpec:
         return [int(d) for d in self.spec["densities"]]
 
     @property
+    def chromium_extra_flags(self) -> list[str]:
+        """The flags Chromium runs with after the base flags. Optional in the spec (specs recorded before it
+        existed leave the workload out): absent is none, and Chromium runs the base flags exactly."""
+        return list((self.spec.get("workload") or {}).get("chromium_extra_flags", []))
+
+    @property
     def release_after_ready_s(self) -> float:
         """Seconds each trial waits once every microVM is ready before it releases the tasks. Optional in
         the spec (specs recorded before it existed leave it out): absent is 0, the tasks start at once."""
@@ -113,6 +119,15 @@ def expand_module():
     return _expand
 
 
+def chromium_argv(extra) -> list[str] | None:
+    """What every microVM's Chromium must run with after its binary: the base flags, ``extra``, the start
+    page (expand.chromium_argv, from chromium-flags.json). None when expand.py can't be loaded."""
+    try:
+        return expand_module().chromium_argv(extra)
+    except SpecError:
+        return None
+
+
 def check(spec) -> list[str]:
     """The spec's errors under the same rules expand.py applies to every spec in a campaign."""
     ex = expand_module()
@@ -151,6 +166,9 @@ def refusals(rs: RunSpec, health: dict | None, host_info: dict | None, local_doc
     out: list[str] = []
     info = host_info if isinstance(host_info, dict) else {}
     backend = (health or {}).get("backend") or info.get("backend")
+    # A daemon older than the flags ignores them: its guests would run the base flags only.
+    if rs.chromium_extra_flags and not info.get("chromium_extra_flags"):
+        out.append("workload.chromium_extra_flags: this host daemon doesn't pass extra flags to Chromium")
     if local_docker:
         if backend and backend != "docker":
             out.append(f"--backend docker: this host's daemon runs {backend}, not docker")

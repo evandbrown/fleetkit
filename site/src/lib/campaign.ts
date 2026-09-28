@@ -1,11 +1,12 @@
 // A campaign definition: expand, validate, diff, cost and quota, exactly as experiments/schema/expand.py does them,
 // plus the few helpers the experiment builder needs to edit one. Both implementations must pass
-// experiments/schema/tests/cases.json (tests/unit/campaign.test.ts runs it here). The schemas, instance types and
-// limits are the same files expand.py reads, bundled at build time.
+// experiments/schema/tests/cases.json (tests/unit/campaign.test.ts runs it here). The schemas, instance types,
+// limits and allowed Chromium flags are the same files expand.py reads, bundled at build time.
 import specSchema from '../../../experiments/schema/spec.schema.json';
 import campaignSchema from '../../../experiments/schema/campaign.schema.json';
 import typesDoc from '../../../experiments/schema/instance-types.json';
 import limitsDoc from '../../../experiments/schema/limits.json';
+import flagsDoc from '../../../experiments/schema/chromium-flags.json';
 
 export type Json = null | boolean | number | string | Json[] | { [k: string]: Json };
 export type Obj = { [k: string]: Json };
@@ -25,6 +26,24 @@ export const SCHEMAS: Record<string, Schema> = {
 };
 export const TYPES = typesDoc.types as Record<string, InstanceType>;
 export const LIMITS = limitsDoc;
+
+/** A value rule in chromium-flags.json: no value, a whole number in a range, listed features, or listed V8 flags. */
+interface FlagRule {
+  value: 'none' | 'integer' | 'features' | 'v8';
+  minimum?: number;
+  maximum?: number;
+  why: string;
+  features?: Record<string, string>;
+  v8?: Record<string, FlagRule>;
+}
+/** The Chromium flags a spec may add (workload.chromium_extra_flags), each with why it is allowed. */
+export const FLAGS = flagsDoc as unknown as {
+  base: string[];
+  start_page: string;
+  max_total_chars: number;
+  allowed: Record<string, FlagRule>;
+  refused: Record<string, string>;
+};
 
 const has = (o: object, k: string) => Object.prototype.hasOwnProperty.call(o, k);
 export const isObj = (v: unknown): v is Obj => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -146,6 +165,32 @@ export function flatten(obj: Obj, prefix = ''): Record<string, Json> {
   return out;
 }
 
+/** {path: default} for the spec fields a spec may leave out, which then stand at their default:
+ * procedure.release_after_ready_s and workload.chromium_extra_flags (expand.py optional_defaults). */
+export const OPTIONAL: Record<string, Json> = (() => {
+  const s = specSchema as Schema;
+  const out: Record<string, Json> = {};
+  for (const [k, node] of Object.entries(s.properties as Record<string, Schema>)) {
+    const d = s.$defs[k];
+    if (d.type !== 'object') {
+      if (!s.required.includes(k) && has(d, 'default')) out[k] = d.default;
+      continue;
+    }
+    const req: string[] = s.required.includes(k) ? (node.required ?? []) : [];
+    for (const [f, fs] of Object.entries(d.properties as Record<string, Schema>)) {
+      if (!req.includes(f) && has(fs, 'default')) out[`${k}.${f}`] = fs.default;
+    }
+  }
+  return out;
+})();
+
+/** A spec's leaves, flattened, with every optional field it leaves out at its default (after the rest): what it runs. */
+export function filled(spec: Obj): Record<string, Json> {
+  const out = flatten(spec);
+  for (const [k, v] of Object.entries(OPTIONAL)) if (!has(out, k)) out[k] = clone(v);
+  return out;
+}
+
 /** A named spec: the base with its changes merged in. Objects merge key by key; lists and values replace. */
 export function merge(base: Obj, changes: Obj): Obj {
   const out = clone(base);
@@ -263,6 +308,83 @@ function check(inst: unknown, s: Schema, path: string, doc: string, errs: string
   }
 }
 
+// ------------------------------------------------------------------ extra Chromium flags
+/** --name of --name=value. */
+export const flagName = (flag: string) => flag.split('=', 1)[0];
+
+function partition(text: string): [string, boolean, string] {
+  const i = text.indexOf('=');
+  return i < 0 ? [text, false, ''] : [text.slice(0, i), true, text.slice(i + 1)];
+}
+
+/** A number is written one way only (no leading zeros), so =2 and =02 can't pass as two different specs. */
+function valueProblems(name: string, hasValue: boolean, value: string, rule: FlagRule): string[] {
+  if (rule.value === 'none') return hasValue ? [`${name} takes no value`] : [];
+  const [lo, hi] = [rule.minimum!, rule.maximum!];
+  if (!hasValue || !/^(0|[1-9][0-9]*)$/.test(value) || Number(value) < lo || Number(value) > hi) {
+    return [`${name} takes a whole number from ${lo} to ${hi}, as ${name}=N`];
+  }
+  return [];
+}
+
+/** Why one extra Chromium flag isn't allowed (chromium-flags.json); empty when it is (expand.py flag_problems). */
+export function flagProblems(flag: string): string[] {
+  const [name, eq, value] = partition(flag);
+  if (FLAGS.base.some((b) => flagName(b) === name)) return [`${name} is one of the base flags every run has`];
+  if (has(FLAGS.refused, name)) return [`${name} is refused: ${FLAGS.refused[name]}`];
+  if (!has(FLAGS.allowed, name)) return [`${name} is not on the allowed list in chromium-flags.json`];
+  const rule = FLAGS.allowed[name];
+  if (rule.value === 'features') {
+    if (!eq || !value) return [`${name} takes features, comma-separated, as ${name}=BackForwardCache`];
+    const out: string[] = [];
+    const seen = new Set<string>();
+    const features = rule.features!;
+    for (const feat of value.split(',')) {
+      if (!has(features, feat)) {
+        out.push(`${name}: ${feat || 'an empty name'} is not an allowed feature (allowed: ${Object.keys(features).join(', ')})`);
+      } else if (seen.has(feat)) out.push(`${name}: ${feat} appears twice`);
+      seen.add(feat);
+    }
+    return out;
+  }
+  if (rule.value === 'v8') {
+    if (!eq || !value) return [`${name} takes V8 flags, space-separated, as ${name}=--jitless`];
+    const out: string[] = [];
+    const seen = new Set<string>();
+    const v8 = rule.v8!;
+    for (const tok of value.split(' ')) {
+      const [vname, veq, vval] = partition(tok);
+      if (!has(v8, vname)) {
+        out.push(`${name}: ${tok || 'an empty flag'} is not an allowed V8 flag (allowed: ${Object.keys(v8).join(', ')})`);
+        continue;
+      }
+      out.push(...valueProblems(vname, veq, vval, v8[vname]).map((p) => `${name}: ${p}`));
+      if (seen.has(vname)) out.push(`${name}: ${vname} appears twice`);
+      seen.add(vname);
+    }
+    return out;
+  }
+  return valueProblems(name, eq, value, rule);
+}
+
+/** Errors for workload.chromium_extra_flags, each starting with its field. */
+export function flagsProblems(flags: string[]): string[] {
+  const errs: string[] = [];
+  const seen = new Set<string>();
+  flags.forEach((flag, i) => {
+    const where = `workload.chromium_extra_flags[${i}]`;
+    errs.push(...flagProblems(flag).map((p) => `${where}: ${p}`));
+    const name = flagName(flag);
+    if (seen.has(name)) errs.push(`${where}: ${name} appears twice; give each flag once`);
+    seen.add(name);
+  });
+  const total = flags.reduce((a, f) => a + [...f].length, 0);
+  if (total > FLAGS.max_total_chars) {
+    errs.push(`workload.chromium_extra_flags: the flags add up to ${total} characters, more than ${FLAGS.max_total_chars}`);
+  }
+  return errs;
+}
+
 // ------------------------------------------------------------------ rules the schema can't state
 /** Errors and warnings for one complete, schema-valid spec; paths are relative to the spec. */
 export function checkSpec(spec: any): [string[], string[]] {
@@ -279,6 +401,7 @@ export function checkSpec(spec: any): [string[], string[]] {
   if (c.step_p95_target_ms >= c.step_timeout_ms) errs.push('criteria.step_p95_target_ms: must be below criteria.step_timeout_ms');
   if (c.step_timeout_ms > c.task_timeout_ms) errs.push('criteria.step_timeout_ms: must be at most criteria.task_timeout_ms');
   if (c.task_p95_target_ms >= c.task_timeout_ms) errs.push('criteria.task_p95_target_ms: must be below criteria.task_timeout_ms');
+  errs.push(...flagsProblems(spec.workload?.chromium_extra_flags ?? []));
   const host = TYPES[spec.worker_host.instance_type];
   const top = Math.max(...d);
   const gib = (top * spec.microvm.memory_mib) / 1024;
@@ -326,9 +449,9 @@ export interface Differs {
   values: Record<string, Json | undefined>;
 }
 
-/** Every field whose value isn't the same in every spec. */
+/** Every field whose value isn't the same in every spec. An optional field a spec leaves out is at its default. */
 export function differing(specs: [string, Obj][]): Differs[] {
-  const flat = specs.map(([name, spec]) => [name, flatten(spec)] as const);
+  const flat = specs.map(([name, spec]) => [name, filled(spec)] as const);
   const keys = [...new Set(flat.flatMap(([, f]) => Object.keys(f)))];
   const out: Differs[] = [];
   for (const k of keys) {
@@ -410,7 +533,9 @@ export function evaluate(camp: any, quota: number = LIMITS.vcpu_quota): Evaluati
   }
   specs.forEach(([a, sa], i) => {
     for (const [b, sb] of specs.slice(i + 1)) {
-      if (same(sa, sb)) errs.push(`specs.${b}: expands to the same spec as ${a}; to run a spec again, raise replicas`);
+      if (same(filled(sa), filled(sb))) {
+        errs.push(`specs.${b}: expands to the same spec as ${a}; to run a spec again, raise replicas`);
+      }
     }
   });
   if (errs.length) return out;
@@ -505,10 +630,11 @@ export interface Field {
   description: string;
   /** What the builder's ⓘ beside the label says: one or two plain sentences for a reader new to the experiment. */
   help: string;
-  /** A named spec may change it: the worker host, the hypervisor, the microVM and the densities. */
+  /** A named spec may change it: the worker host, the hypervisor, the microVM, the densities and the workload's
+   * extra Chromium flags. */
   variable: boolean;
-  /** A spec may leave it out, and then it is the schema's default: procedure.release_after_ready_s, added after the
-   * first campaigns ran. Every other field is required. */
+  /** A spec may leave it out, and then it is the schema's default: procedure.release_after_ready_s and
+   * workload.chromium_extra_flags, added after the first campaigns ran. Every other field is required. */
   optional: boolean;
 }
 
@@ -561,6 +687,8 @@ export const HELP: Record<string, string> = {
     'Seconds each trial waits, once every microVM is ready, before starting their tasks together. 0 starts them at once, while browsers may still be settling; a wait tests a warm pool, and no task’s time includes it.',
   'support_host.instance_type':
     'The EC2 instance that serves the test shopping site and collects telemetry, one per run. It grows with the worker host so it is never what runs out.',
+  'workload.chromium_extra_flags':
+    'Chromium flags added to the ones every run has, one per line, to compare browsers set up differently. Only flags that change how Chromium uses memory and CPU, never what a task does, are allowed; chromium-flags.json lists them and why.',
   name: 'The campaign’s short name; its results are saved under results/<name>. 2–40 lowercase letters, digits or hyphens, starting with a letter.',
   question: 'The one question this campaign’s runs answer together, in a line. It heads the campaign on Results.',
   replicas:

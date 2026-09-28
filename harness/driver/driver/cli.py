@@ -19,7 +19,8 @@ from .hostclient import HostClient, HostError
 from .ladder import LadderPlanner, Outcome
 from .metrics import HostMetricsSampler
 from .outputs import LegacyRunDirError, RunDir, read_json
-from .spec import HARNESS, SPEC_OWNED_OPTIONS, RunSpec, SpecError, load as load_spec, refusals, same_spec
+from .spec import (HARNESS, SPEC_OWNED_OPTIONS, RunSpec, SpecError, chromium_argv, load as load_spec, refusals,
+                   same_spec)
 from .telemetry import Tracer
 from .trial import TrialRunner
 
@@ -408,6 +409,8 @@ def cmd_trial(a) -> int:
         inv.rundir.update_run_json(plan=planner.summary(history))
         base = _timeouts(a)
         fault_label = f"fault-{schemas.fault_name(a.fault)}" if a.fault else None
+        extra_flags = rs.chromium_extra_flags if rs is not None else []
+        expected_flags = chromium_argv(extra_flags)
 
         def run_one(density: int, trial_kind: str, label: str | None = None, shots: bool = False):
             cfg = TrialConfig(run_id=inv.run_id, backend=a.backend, density=density,
@@ -417,7 +420,8 @@ def cmd_trial(a) -> int:
                               trial_kind="fault" if a.fault else trial_kind, criteria=criteria, settle_s=a.settle_s,
                               sample_interval_ms=a.sample_interval_ms, screenshot_each_step=shots,
                               hypervisor=rs.hypervisor if rs is not None and a.backend != "docker" else None,
-                              release_after_ready_s=a.release_after_ready_s)
+                              release_after_ready_s=a.release_after_ready_s, chromium_extra_flags=list(extra_flags),
+                              chromium_flags_expected=expected_flags)
             runner = TrialRunner(cfg, inv.client, inv.rundir, inv.writers, inv.tracer, metrics=inv.sampler)
             doc, harness_error = None, None
             try:
@@ -531,6 +535,9 @@ def _run_harness(a, rs: RunSpec) -> dict:
     # the wait after ready as carried out: the spec's, or 0 when the spec leaves it out (HARNESS held it before
     # it was a field, so every run.json still says what the wait was)
     return {**rs.timeouts(), "release_after_ready_s": a.release_after_ready_s,
+            # what every microVM's Chromium must run with: the base flags, the spec's extra flags, the start page;
+            # each trial.json records what each one read back from its running browser
+            "chromium_flags": chromium_argv(rs.chromium_extra_flags),
             "backend": a.backend, "fixture_check_url": a.fixture_check_url,
             "fixture_base_url": a.fixture_base_url or DEFAULT_FIXTURE_BASE_URL.get(a.backend),
             "support_health_url": a.support_health_url, "otlp_endpoint": None if a.no_lgtm else a.otlp_endpoint,

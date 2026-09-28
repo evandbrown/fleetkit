@@ -106,7 +106,11 @@ For each density in `--densities`, and for each trial at it (`--trials-per-densi
    timeouts; `create_start` is taken just before.
 3. `wait_ready`: `GET /microvms/{id}` every 250 ms until every microVM is `ready` or terminal;
    hostd enforces `ready_timeout_s`, the driver waits at most 30 s longer for a terminal state.
-   `all_ready` is taken when the loop ends.
+   `all_ready` is taken when the loop ends. Then every ready microVM's Chromium must be running the
+   base flags, the spec's extra flags (`workload.chromium_extra_flags`) and the start page, as its
+   guest reads them back from the browser process (`guest_info.chromium_running_flags`). If one isn't,
+   or a spec with extra flags meets a guest that can't say, the trial ends with the error
+   `chromium flags: ...` and no tasks: a failure outside the experiment, run again once, then not tested.
 4. `release_wait`, only with a wait after ready (the spec's `procedure.release_after_ready_s`, or
    `--release-after-ready-s`; 0 by default): every ready microVM sits ready and idle that many
    seconds more, so the tasks meet a warm pool rather than browsers still finishing startup.
@@ -361,6 +365,7 @@ group (`browser, renderer, gpu, network, utility, zygote, chromium_other, guestd
 for labelled trials), `sequence`, `trial_kind`, `backend`, `fault`, `vcpus`, `mem_mib`, `timeouts`
 used (including the derived proxy deadline and client timeout), `fixture` (check URL, guest base
 URL, products source), `release_after_ready_s` (the wait after ready asked for, 0 for none),
+`chromium_extra_flags` (the spec's extra Chromium flags, `[]` for none),
 `timestamps` (`create_start`, `all_ready`, `release_wait_start` and `release_wait_end` (null
 without a wait), `barrier_release`, `last_task_return`, `verify_clean_pass`), `counts` (`microvms_requested`, `microvms_created`,
 `microvms_ready`, `microvms_failed_startup`, `microvms_by_outcome`, `tasks_dispatched`, `tasks_ok`,
@@ -370,7 +375,9 @@ without a wait), `barrier_release`, `last_task_return`, `verify_clean_pass`), `c
 p95; `task_ms`, `wall_ms` and harness overhead cover ok tasks only, and `failed_task_elapsed_ms`
 summarizes the guest's elapsed time to failure for the others, which is not a task duration; each
 carries its sample `count`), `means` (`bytes_received`, `request_count`), and `microvms` (per
-microVM: `microvm_id`, state, outcome, timings, `state_after_task`, its task summary).
+microVM: `microvm_id`, state, outcome, timings, `state_after_task`, `chromium_flags` (what its browser
+process runs with, read back in the guest; null when the guest didn't say), its task summary).
+`run.json`'s `harness.chromium_flags` is what every one of them must be.
 
 **`spans.jsonl` / `logs.jsonl`** (driver, hostd, and the collector's copies): one OTLP-JSON
 `ExportTraceServiceRequest` / `ExportLogsServiceRequest` per line holding one span or one log

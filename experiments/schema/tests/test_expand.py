@@ -230,3 +230,51 @@ def test_every_trial_waits_after_ready_in_the_run_estimate():
         s["procedure"]["release_after_ready_s"] = wait
         trial_minutes[wait] = expand.run_minutes(s) - t["setup_minutes"]["nested"] - t["finish_minutes"]
     assert trial_minutes == {0: 5, 20: 10, 60: 20}  # 283.8 s of trials, then 300 s and 900 s more, rounded up
+
+
+def test_extra_chromium_flags_are_optional_and_absent_is_none():
+    # Added after the first campaigns ran: --run adds nothing to a spec that leaves them out, so the specs those
+    # runs recorded stay what they were, and a spec that leaves them out runs what one with an empty list runs.
+    spec = json.loads(run_cli("campaigns/nested-sizes-1.json", "--run", "m8i-4xlarge-r1").stdout)["spec"]
+    assert "workload" not in spec
+    assert "workload" not in expand.SCHEMAS["spec.schema.json"]["required"]
+    assert expand.OPTIONAL == {"procedure.release_after_ready_s": 0, "workload.chromium_extra_flags": []}
+    empty = copy.deepcopy(spec)
+    empty["workload"] = {"chromium_extra_flags": []}
+    assert expand.filled(empty) == expand.filled(spec) and expand.differing([("a", spec), ("b", empty)]) == []
+    assert expand.check_spec(empty) == expand.check_spec(spec)
+
+
+def test_a_named_spec_may_change_the_extra_chromium_flags_and_nothing_else_new():
+    changes = expand.SCHEMAS["campaign.schema.json"]["$defs"]["spec_changes"]["properties"]
+    variable = sorted(k for k, v in changes.items() if "$ref" in v)
+    assert variable == ["densities", "hypervisor", "microvm", "worker_host", "workload"]
+    workload = expand.SCHEMAS["spec.schema.json"]["$defs"]["workload"]
+    assert list(workload["properties"]) == ["chromium_extra_flags"]
+
+
+def test_chromium_flags_file_is_consistent():
+    f = expand.FLAGS
+    item = expand.SCHEMAS["spec.schema.json"]["$defs"]["workload"]["properties"]["chromium_extra_flags"]["items"]
+    base_names = {expand.flag_name(b) for b in f["base"]}
+    assert len(base_names) == len(f["base"])
+    for name, rule in f["allowed"].items():
+        assert expand.validate(name, item) == [], name
+        assert name not in base_names and name not in f["refused"], name
+        assert rule["why"] and rule["value"] in ("none", "integer", "features", "v8"), name
+        for sub in rule.get("v8", {}).values():
+            assert sub["why"] and sub["value"] in ("none", "integer")
+    for name, why in f["refused"].items():
+        assert expand.validate(name, item) == [] and why and name not in base_names, name
+    assert expand.chromium_argv([]) == f["base"] + ["about:blank"]
+    assert expand.chromium_argv(["--no-zygote"]) == f["base"] + ["--no-zygote", "about:blank"]
+
+
+def test_every_allowed_chromium_flag_passes_in_its_simplest_form():
+    for name, rule in expand.FLAGS["allowed"].items():
+        kind = rule["value"]
+        value = {"none": "", "integer": f"={rule.get('minimum')}", "features": f"={next(iter(rule.get('features', [''])))}",
+                 "v8": "=--jitless"}[kind]
+        assert expand.flag_problems(name + value) == [], name + value
+    assert expand.flags_problems(["--js-flags=--max-old-space-size=512 --max-semi-space-size=16 --no-opt"]) == []
+    assert expand.flags_problems(["--js-flags=--jitless  --no-opt"])  # two spaces: an empty V8 flag between them

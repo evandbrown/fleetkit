@@ -54,6 +54,11 @@ class StubOptions:
         self.backend = kw.get("backend", "docker")  # what /health and /host/info say the daemon runs
         self.max_slots = kw.get("max_slots")  # /host/info max_slots (None: absent, as on an older daemon)
         self.hypervisor_options = kw.get("hypervisor_options")  # /host/info hypervisor_options (None: absent)
+        # /host/info chromium_extra_flags: whether the daemon passes a spec's extra Chromium flags on
+        self.chromium_extra_flags = kw.get("chromium_extra_flags", True)
+        # guest_info.chromium_running_flags: None (an older guest reports none), "echo" (the base flags from
+        # chromium-flags.json, the create request's extra flags, the start page), or a list to report as is
+        self.running_flags = kw.get("running_flags")
 
 
 class MicroVM:
@@ -170,6 +175,8 @@ class StubHost:
                       "chromium_launch_ts": p0 + 0.006, "chromium_ready_ts": s.ready_ts - 0.001,
                       "guest_info": {"guestd_version": "stub", "chromium_version": "154.0.0.0-stub",
                                      "chromium_flags": ["--headless=new", "--remote-debugging-port=9222"],
+                                     "chromium_extra_flags": list(s.request.get("chromium_extra_flags") or []),
+                                     "chromium_running_flags": self._running_flags(s),
                                      "kernel_cmdline": "console=ttyS0 reboot=k panic=1 fleetkit.stub=1",
                                      "vcpus": int(s.request.get("vcpus", 2)),
                                      "mem_total": int(s.request.get("mem_mib", 2048)) * 1024 * 1024}}
@@ -177,6 +184,12 @@ class StubHost:
         if self.tel:
             self.tel.span("hostd", "microvm.create", traceparent, span_start, time.time_ns(),
                           {"fleetkit.microvm_id": s.id, "fleetkit.run_id": run_id or ""})
+
+    def _running_flags(self, s: MicroVM):
+        if self.o.running_flags != "echo":
+            return self.o.running_flags
+        doc = json.loads((Path(__file__).resolve().parents[3] / "experiments/schema/chromium-flags.json").read_text())
+        return doc["base"] + list(s.request.get("chromium_extra_flags") or []) + [doc["start_page"]]
 
     def get(self, mid: str):
         return self.microvms.get(mid)
@@ -342,6 +355,8 @@ class StubHost:
             info["max_slots"] = self.o.max_slots
         if self.o.hypervisor_options is not None:
             info["hypervisor_options"] = self.o.hypervisor_options
+        if self.o.chromium_extra_flags:
+            info["chromium_extra_flags"] = True
         return info
 
     def verify_clean(self) -> dict:
