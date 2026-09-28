@@ -57,7 +57,7 @@ Two kinds of value are never inputs:
 | **Pass** | A trial passes if it meets every criterion in its spec. A density passes if every trial at it passed. |
 | **Result** | A run's result is the highest density that passed with every lower density passing too. It is stated as "tested successfully", never as a maximum, because the densities between the last pass and the first miss were not tried. |
 | **Density per host vCPU** | A run's result divided by the worker host's vCPUs. It puts hosts of different sizes on one scale. |
-| **Cost per 1,000 tasks** | What 1,000 tasks cost at a run's result, from the worker host's hourly price and the time the tasks took. It puts hosts at different prices on one scale. |
+| **Cost per 1,000 tasks** | What 1,000 tasks cost at a run's result, in dollars at the worker host's on-demand price. The headline is the steady-state cost: the host CPU a task uses over its microVM's whole life, boot included, at the host's price per vCPU-second, over 0.9 utilisation, which is what a full fleet pays per task; it is stated only at a density where the host was at least 85% busy. Beside it, the cost of one burst: the host's time from the first microVM's creation to the last one's destruction, any warm-start wait taken out and its CPU charged. Both put hosts at different prices on one scale. |
 
 Extra trials at one density show how much the same test varies on the same host. Replicas show how much it varies from host to host. A difference between two specs means more the larger it is than both, so a comparison always shows every replica (see Compare, below).
 
