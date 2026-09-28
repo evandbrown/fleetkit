@@ -1,8 +1,9 @@
 # Fleetkit site
 
-The static site we ship at `evan.mx/fleetkit/`, a design document for technical reviewers: **Results** (the campaigns,
-opening on the featured one, with Compare specs as an action), **Builder** (defines a campaign to paste into chat) and
-**About** (what we evaluate, the architecture, the task, the SLOs, how we test and what we measure). Light theme only.
+The static site we ship at `evan.mx/fleetkit/`, a design document for technical reviewers: **About**, the home page
+(what Fleetkit is, the architecture, the task, the standard SLOs, how we test and what we measure), **Results** (the
+campaigns, opening on the featured one, with Compare specs as an action) and **Builder** (defines a campaign to paste
+into chat). Light theme only.
 Routes are listed in [DATA.md](DATA.md#routes) and [src/lib/router.ts](src/lib/router.ts).
 
 Svelte 5 and Vite, with hash routes and relative URLs (`base: './'`) so it works under any path prefix. No CDN, no web

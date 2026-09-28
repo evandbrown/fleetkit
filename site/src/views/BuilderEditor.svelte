@@ -42,6 +42,7 @@
     nextName,
     saveDraft,
     type CompareOptions,
+    START_HELP,
     type Draft,
     type Msg,
   } from '../components/builder/draft';
@@ -49,6 +50,7 @@
   import SpecCard from '../components/builder/SpecCard.svelte';
   import Compare from '../components/builder/Compare.svelte';
   import Review from '../components/builder/Review.svelte';
+  import Help from '../components/builder/Help.svelte';
 
   // ---------------------------------------------------------------- the draft
   // A link's ?from= wins; a bundled campaign loads at once, a published one once it's fetched (the effect below).
@@ -350,8 +352,8 @@
 
 <div class="builder">
   <div class="startbar">
-    <label for="start">Start from</label>
-    <select id="start" value={STARTS.some((s) => s.key === label) ? label : ''} onchange={(e) => pick(e.currentTarget.value)}>
+    <span class="startname"><label for="start">Start from</label><Help id="start-about" label="Start from" text={START_HELP} /></span>
+    <select id="start" aria-describedby="start-about" value={STARTS.some((s) => s.key === label) ? label : ''} onchange={(e) => pick(e.currentTarget.value)}>
       {#if !STARTS.some((s) => s.key === label)}<option value="">{label}</option>{/if}
       <optgroup label="Campaigns">
         {#each STARTS.filter((s) => !s.example) as s (s.key)}<option value={s.key}>{s.title}</option>{/each}
@@ -480,10 +482,16 @@
         <h2 id="h-runs">Runs</h2>
         <div class="box">
           <div class="line">
-            <span class="lname" id="l-replicas">Replicas</span>
+            <span class="lname"
+              ><span id="l-replicas">{CAMPAIGN_FIELDS.replicas.label}</span><Help
+                id="c-replicas-about"
+                label={CAMPAIGN_FIELDS.replicas.label}
+                text={CAMPAIGN_FIELDS.replicas.help}
+              /></span
+            >
             <div>
               <div class="replicas">
-                <div class="stepper" role="group" aria-labelledby="l-replicas">
+                <div class="stepper" role="group" aria-labelledby="l-replicas" aria-describedby="c-replicas-about">
                   <button type="button" aria-label="Fewer replicas" disabled={reps <= 1} onclick={() => setReplicas(reps - 1)}>−</button>
                   <output id="c-replicas" aria-live="polite">{String(snap.replicas ?? '–')}</output>
                   <button type="button" aria-label="More replicas" disabled={reps >= 5} onclick={() => setReplicas(reps + 1)}>+</button>
@@ -504,7 +512,7 @@
             />
           {:else}
             <div class="line">
-              <span class="lname">{TIMER.label}</span>
+              <span class="lname">{TIMER.label}<Help id="c-shutdown-about" label={TIMER.label} text={TIMER.help} /></span>
               <span class="timer">
                 {String(snap.shutdown_after_minutes)} min
                 <button type="button" class="link" onclick={() => (showTimer = true)}>Change</button>
@@ -552,6 +560,10 @@
     color: var(--ink-2);
     font-size: 0.92rem;
   }
+  .startname {
+    display: inline-flex;
+    align-items: center;
+  }
   .small {
     font-size: 0.88rem;
   }
@@ -576,10 +588,11 @@
     align-items: start;
     margin-top: 28px;
   }
+  /* Sticks below the site's sticky 56px header, not under it. */
   .side {
     position: sticky;
-    top: 12px;
-    max-height: calc(100vh - 24px);
+    top: 68px;
+    max-height: calc(100vh - 80px);
     overflow: auto;
     overscroll-behavior: contain;
   }

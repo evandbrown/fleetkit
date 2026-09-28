@@ -1,9 +1,10 @@
 <script lang="ts">
   // The review, always in view: the runs, the time, the expected and worst-case cost against the limit, the vCPUs
   // at once against the quota, what changes between the specs, the runs as a grid of hosts (a row per spec, a dot per
-  // replica), and the definition to copy into Claude Code.
+  // replica), and the definition to copy into Claude Code. Each figure has an ⓘ that says what it counts.
   import { LIMITS, TYPES, differing, fieldAt, getPath, usd, type Obj, type Plan } from '../../lib/campaign';
-  import { show, type Msg } from './draft';
+  import { REVIEW_HELP as HELP, show, type Msg } from './draft';
+  import Help from './Help.svelte';
 
   let {
     est,
@@ -82,22 +83,22 @@
   {#if est}
     <dl class="stats">
       <div class="stat">
-        <dt>Runs</dt>
+        <dt>Runs<Help id="r-runs-about" label="Runs" text={HELP.runs} /></dt>
         <dd class="v">{est.runs.length}</dd>
       </div>
       <div class="stat">
-        <dt>Time</dt>
+        <dt>Time<Help id="r-time-about" label="Time" text={HELP.time} /></dt>
         <dd class="v">≈{est.minutes_in_waves} min</dd>
         <dd class="s">
           {est.waves.length === 1 ? 'all at once' : est.waves.length ? `${est.waves.length} waves` : 'over quota'}
         </dd>
       </div>
       <div class="stat">
-        <dt>Expected</dt>
+        <dt>Expected<Help id="r-expected-about" label="Expected" text={HELP.expected} /></dt>
         <dd class="v">{usd(est.expected_usd)}</dd>
       </div>
       <div class="stat" class:over>
-        <dt>Worst case</dt>
+        <dt>Worst case<Help id="r-worst-about" label="Worst case" text={HELP.worst} /></dt>
         <dd class="v">{usd(est.worst_case_usd)}</dd>
         <dd class="s">{est.shutdown_after_minutes} min per host</dd>
       </div>
@@ -105,14 +106,14 @@
 
     <div class="meters">
       <div class="meter-row">
-        <span class="mk">vCPUs</span>
+        <span class="mk">vCPUs<Help id="r-vcpus-about" label="vCPUs" text={HELP.vcpus} /></span>
         <span class="meter" role="img" aria-label="{peak} of {est.vcpu_quota} vCPUs at once">
           <span style:width={pct(peak, est.vcpu_quota)}></span>
         </span>
         <span class="mv">{peak} / {est.vcpu_quota}</span>
       </div>
       <div class="meter-row" class:over>
-        <span class="mk">Cost</span>
+        <span class="mk">Cost<Help id="r-cost-about" label="Cost" text={HELP.cost} /></span>
         <span class="meter" role="img" aria-label="Worst case {usd(est.worst_case_usd)} of the {usd(limit)} limit">
           <span style:width={pct(est.worst_case_usd, limit)}></span>
         </span>
@@ -124,7 +125,7 @@
   {/if}
 
   {#if specs.length > 1}
-    <h3>What changes</h3>
+    <div class="h3"><h3>What changes</h3><Help id="r-changes-about" label="What changes" text={HELP.changes} /></div>
     {#if !differs.length && !hostRows.length}
       <p class="muted small">Nothing yet.</p>
     {:else}
@@ -155,7 +156,7 @@
   {/if}
 
   {#if est?.runs.length}
-    <h3>Hosts</h3>
+    <div class="h3"><h3>Hosts</h3><Help id="r-hosts-about" label="Hosts" text={HELP.hosts} /></div>
     <div class="hosts">
       <span class="grid" role="img" aria-label="{plural(est.runs.length, 'worker host')}">
         {#each grid as row, i (i)}
@@ -211,9 +212,17 @@
   h2 {
     margin: 0 0 12px;
   }
+  .h3 {
+    display: flex;
+    align-items: center;
+    margin: 20px 0 8px;
+  }
   h3 {
     font-size: 0.92rem;
     margin: 20px 0 8px;
+  }
+  .h3 h3 {
+    margin: 0;
   }
   .small {
     font-size: 0.86rem;
@@ -261,12 +270,14 @@
   }
   .meter-row {
     display: grid;
-    grid-template-columns: 3rem 1fr auto;
+    grid-template-columns: 4.2rem 1fr auto;
     align-items: center;
     gap: 10px;
     font-size: 0.78rem;
   }
   .mk {
+    display: inline-flex;
+    align-items: center;
     color: var(--ink-2);
   }
   .mv {

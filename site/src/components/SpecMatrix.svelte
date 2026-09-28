@@ -1,8 +1,8 @@
 <script lang="ts">
   // What we tested. One spec: its host, hypervisor, microVM and densities side by side. Several: one column per spec
   // and one row per input; an input that is the same for every spec is written once across the row, and one that
-  // differs is highlighted in each column. A square is one vCPU. The header row names each column and gives its why;
-  // with no why, and names that only echo the host or hypervisor row, it is left out.
+  // differs is highlighted in each column. The header row names each column and gives its why; with no why, and names
+  // that only echo the host or hypervisor row, it is left out. A cell doesn't restate its column's name.
   import { differingRows, specCard, type CardRow } from '../lib/shape';
   import type { SpecDoc } from '../lib/types';
 
@@ -26,7 +26,12 @@
         (row) => diff.has(row) && items.every((it, i) => it.title === (row === 'host' ? cards[i].host.value : cards[i].hypervisor.value)),
       ),
   );
-  const cells = (n: number) => Array.from({ length: Math.min(n, 64) }, (_, i) => i);
+  /** A differing cell whose value is its column's name: shown without the name. */
+  const echo = (row: CardRow, i: number) =>
+    heads &&
+    items.length > 1 &&
+    diff.has(row) &&
+    (row === 'host' ? items[i].title === cards[i].host.value : items[i].title === cards[i].hypervisor.value && !!cards[i].hypervisor.sub);
   const ROWS: { key: CardRow; label: string }[] = [
     { key: 'host', label: 'Host' },
     { key: 'hypervisor', label: 'Hypervisor' },
@@ -46,15 +51,12 @@
 
 {#snippet value(row: CardRow, i: number)}
   {@const c = cards[i]}
-  {@const s = items[i].spec}
   {#if row === 'host'}
-    <strong>{c.host.value}</strong><span class="sub">{c.host.sub}</span>
-    {#if s.host.vcpus <= 64}<span class="vcpus" aria-hidden="true">{#each cells(s.host.vcpus) as k (k)}<i></i>{/each}</span>{/if}
+    {#if !echo(row, i)}<strong>{c.host.value}</strong>{/if}<span class="sub">{c.host.sub}</span>
   {:else if row === 'hypervisor'}
-    <strong>{c.hypervisor.value}</strong>{#if c.hypervisor.sub}<span class="sub">{c.hypervisor.sub}</span>{/if}
+    {#if !echo(row, i)}<strong>{c.hypervisor.value}</strong>{/if}{#if c.hypervisor.sub}<span class="sub">{c.hypervisor.sub}</span>{/if}
   {:else if row === 'microvm'}
     <strong>{c.microvm}</strong>
-    <span class="vcpus vm" aria-hidden="true">{#each cells(s.spec.microvm.vcpus) as k (k)}<i></i>{/each}</span>
   {:else}
     <span class="chips">{#each c.densities as d (d)}<span>{d}</span>{/each}</span>
   {/if}
@@ -197,22 +199,6 @@
   .sub {
     font-size: 0.82rem;
     color: var(--ink-2);
-  }
-  .vcpus {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 2px;
-    max-width: calc(16 * 9px);
-    margin-top: 2px;
-  }
-  .vcpus i {
-    width: 7px;
-    height: 7px;
-    border-radius: 1.5px;
-    background: var(--ordinal-1);
-  }
-  .vcpus.vm i {
-    background: var(--ordinal-3);
   }
   .chips {
     display: flex;

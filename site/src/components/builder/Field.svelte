@@ -1,12 +1,14 @@
 <script lang="ts">
   // One input, drawn from its schema: a select for a list of values, a checkbox for on or off, the densities
-  // editor, or a text box that keeps what was typed and hands over a number when it is one. Under it, one line of
-  // facts (what follows from the value, and the base's value in a named spec), then its messages.
+  // editor, or a text box that keeps what was typed and hands over a number when it is one. Beside the label, an ⓘ
+  // with what the field means; under the input, one line of facts (what follows from the value, and the base's value
+  // in a named spec), then its messages.
   import type { Snippet } from 'svelte';
   import { same, type Field, type Json } from '../../lib/campaign';
   import { optionLabel, show, type Msg } from './draft';
   import Densities from './Densities.svelte';
   import DensityScale from './DensityScale.svelte';
+  import Help from './Help.svelte';
 
   let {
     id,
@@ -42,7 +44,11 @@
   );
   const errored = $derived(msgs.some((m) => m.error));
   const line = $derived([facts, base !== undefined ? `base ${show(field.path, base)}` : ''].filter(Boolean).join(' · '));
+  let help: Help | undefined = $state();
   const helpId = $derived(`${id}-help`);
+  const aboutId = $derived(`${id}-about`);
+  /** The input names its explanation first, then the facts and messages under it. */
+  const described = $derived(`${aboutId} ${helpId}`);
 
   // A text box shows what was typed ("2." on the way to "2.5") for as long as it still means the current value,
   // and the value itself once it changes from elsewhere.
@@ -67,21 +73,28 @@
 </script>
 
 <div class="field" class:errored class:inspec={base !== undefined}>
-  <label class="name" for={id}>{label}</label>
+  <div class="name">
+    <label for={id} onpointerenter={(e) => help?.peek(e)} onpointerleave={(e) => help?.unpeek(e)}>{label}</label><Help
+      bind:this={help}
+      id={aboutId}
+      {label}
+      text={field.help}
+    />
+  </div>
   <div class="body">
     <div class="control">
       {#if kind === 'enum'}
-        <select {id} value={value} onchange={(e) => onchange(s.enum.find((o: Json) => String(o) === e.currentTarget.value) ?? e.currentTarget.value)} aria-describedby={helpId} aria-invalid={errored}>
+        <select {id} value={value} onchange={(e) => onchange(s.enum.find((o: Json) => String(o) === e.currentTarget.value) ?? e.currentTarget.value)} aria-describedby={described} aria-invalid={errored}>
           {#if !s.enum.some((o: Json) => same(o, value))}<option value={asText(value)}>{asText(value) || '(none)'}</option>{/if}
           {#each s.enum as o (o)}<option value={o}>{optionLabel(field.path, o)}</option>{/each}
         </select>
       {:else if kind === 'boolean'}
         <label class="check">
-          <input {id} type="checkbox" checked={value === true} onchange={(e) => onchange(e.currentTarget.checked)} aria-describedby={helpId} />
+          <input {id} type="checkbox" checked={value === true} onchange={(e) => onchange(e.currentTarget.checked)} aria-describedby={described} />
           {value === true ? 'on' : value === false ? 'off' : asText(value)}
         </label>
       {:else if kind === 'densities'}
-        <Densities {id} {value} {onchange} invalid={errored} describedby={helpId} />
+        <Densities {id} {value} {onchange} invalid={errored} describedby={described} />
       {:else if kind === 'number'}
         <input
           {id}
@@ -90,14 +103,14 @@
           autocomplete="off"
           value={text}
           oninput={input}
-          aria-describedby={helpId}
+          aria-describedby={described}
           aria-invalid={errored}
         />
         {#if field.unit}<span class="unit">{field.unit}</span>{/if}
       {:else if multiline}
-        <textarea {id} rows="3" value={text} oninput={input} aria-describedby={helpId} aria-invalid={errored}></textarea>
+        <textarea {id} rows="3" value={text} oninput={input} aria-describedby={described} aria-invalid={errored}></textarea>
       {:else}
-        <input {id} class="text" autocomplete="off" spellcheck="false" value={text} oninput={input} aria-describedby={helpId} aria-invalid={errored} />
+        <input {id} class="text" autocomplete="off" spellcheck="false" value={text} oninput={input} aria-describedby={described} aria-invalid={errored} />
       {/if}
       {@render children?.()}
     </div>
@@ -124,6 +137,15 @@
   }
   .errored .name {
     color: var(--critical);
+  }
+  /* The label explains itself on hover, as its ⓘ does. */
+  .name label {
+    cursor: help;
+    text-decoration: underline dotted transparent;
+    text-underline-offset: 3px;
+  }
+  .name label:hover {
+    text-decoration-color: var(--muted);
   }
   .control {
     display: flex;

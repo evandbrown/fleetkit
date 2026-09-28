@@ -1,5 +1,5 @@
 <script lang="ts">
-  // #/ : Results, opened on the featured campaign (D58).
+  // #/results : Results, opened on the featured campaign (D58). The home page, #/, is About (D72).
   import { loadIndex } from '../lib/data';
   import Failed from '../components/Failed.svelte';
   import Campaign from './Campaign.svelte';

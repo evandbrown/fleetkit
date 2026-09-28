@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { areaPath, linear, linePath, nearest, niceDomain } from '../../src/lib/scale';
+import { areaPath, ceilingTop, linear, linePath, nearest, niceDomain } from '../../src/lib/scale';
 
 describe('scales', () => {
   it('map a domain onto a range and back', () => {
@@ -8,6 +8,11 @@ describe('scales', () => {
     expect(x(8)).toBe(120);
     expect(x.invert(120)).toBe(8);
     expect(x.ticks(4)).toEqual([0, 5, 10, 15]);
+  });
+  it("stop an axis bounded by a host's vCPUs about a tenth above them", () => {
+    expect(ceilingTop(192)).toBeCloseTo(211.2, 9);
+    expect(Math.min(niceDomain([0, 192], { count: 4 })[1], ceilingTop(192))).toBe(200);
+    expect(Math.min(niceDomain([0, 16], { count: 4 })[1], ceilingTop(16))).toBeCloseTo(17.6, 9);
   });
   it('put a zero-width domain in the middle', () => {
     expect(linear([3, 3], [0, 100])(3)).toBe(50);

@@ -2,10 +2,11 @@
   // Every microVM in a trial as one lane on the trial's clock: its boot phases (a grey ramp), its five steps (one
   // colour each), and its destruction. The boot phases are named once, inside the first lane, where they fit.
   // Vertical rules mark when all were ready, when the tasks started and when the last one was done. Pointing at a lane
-  // reads it out beside those marks. Each lane's number links to that microVM.
+  // reads it out beside those marks. Each lane's number links to that microVM. Hundreds of lanes pack into thin rows
+  // (laneLayout), so a trial of 192 microVMs stays about as tall as one of 64.
   import * as f from '../lib/format';
   import { SUBJECT_LABEL } from '../lib/glossary';
-  import { linear } from '../lib/scale';
+  import { laneLayout, linear } from '../lib/scale';
   import { type Lane, type LaneSeg } from '../lib/shape';
   import { STEP_NAMES, type Range, type TrialMarks } from '../lib/types';
 
@@ -15,15 +16,27 @@
     marks,
     selected = null,
     hrefFor,
-  }: { lanes: Lane[]; domain: Range; marks: TrialMarks; selected?: number | null; hrefFor: (index: number) => string } =
-    $props();
+    compact = false,
+  }: {
+    lanes: Lane[];
+    domain: Range;
+    marks: TrialMarks;
+    selected?: number | null;
+    hrefFor: (index: number) => string;
+    /** Thinner lanes, for a trial shown inside another page. */
+    compact?: boolean;
+  } = $props();
 
   let w = $state(0);
   let hover: { lane: Lane; seg: LaneSeg | null; t: number; px: number } | null = $state(null);
 
   const n = $derived(lanes.length);
-  const rowH = $derived(n <= 16 ? 18 : n <= 32 ? 12 : n <= 64 ? 7 : 5);
-  const labelEvery = $derived(rowH >= 12 ? 1 : n <= 64 ? 5 : 10);
+  const layout = $derived(laneLayout(n, compact));
+  const rowH = $derived(layout.rowH);
+  const selRow = $derived(selected === null ? -1 : lanes.findIndex((l) => l.index === selected));
+  /** A lane's number shows at the layout's rows and for the selected lane; in thin rows, the others make room for it. */
+  const labelled = (r: number) =>
+    r === selRow || (layout.labelled(r) && (!layout.dense || selRow < 0 || Math.abs(r - selRow) * rowH >= 12));
   const M = { top: 6, right: 12, bottom: 26, left: 44 };
   const H = $derived(M.top + n * rowH + M.bottom);
   const x = $derived(linear(domain, [M.left, Math.max(M.left + 1, w - M.right)]));
@@ -85,13 +98,13 @@
 
   <div class="plot" bind:clientWidth={w}>
     {#if w > 0}
-      <svg width={w} height={H} role="img" aria-label="Each microVM's start, steps and destruction over the trial; the table below lists the same times" onpointermove={move} onpointerleave={() => (hover = null)}>
+      <svg class:dense={layout.dense} width={w} height={H} role="img" aria-label="Each microVM's start, steps and destruction over the trial; the table below lists the same times" onpointermove={move} onpointerleave={() => (hover = null)}>
         {#each lanes as lane, r (lane.index)}
           {@const y0 = M.top + r * rowH}
           {#if selected === lane.index}
             <rect class="sel" x="0" y={y0} width={w} height={rowH} />
           {/if}
-          {#if r % labelEvery === 0 || selected === lane.index}
+          {#if labelled(r)}
             <a href={hrefFor(lane.index)} aria-label="microVM {lane.index}">
               <text class="lane-label" class:bad={lane.ok === false} x={M.left - 8} y={y0 + rowH / 2} dy="0.34em" text-anchor="end"
                 >{lane.index}</text
@@ -103,9 +116,9 @@
             {@const sw = Math.max(1, x(s.end) - x0)}
             <rect
               x={sw > 3 ? x0 + 0.5 : x0}
-              y={y0 + (rowH > 8 ? 2 : 0.5)}
+              y={y0 + (rowH > 8 ? 2 : layout.dense ? 0 : 0.5)}
               width={sw > 3 ? sw - 1 : sw}
-              height={rowH - (rowH > 8 ? 4 : 1)}
+              height={rowH - (rowH > 8 ? 4 : layout.dense ? 0 : 1)}
               rx={rowH > 8 ? 2 : 0}
               fill={fill(s)}
               class:failed={s.kind === 'step' && !s.ok}
@@ -115,6 +128,9 @@
             {/if}
           {/each}
         {/each}
+        {#if layout.dense && selRow >= 0}
+          <rect class="sel-ring" x={M.left - 2} y={M.top + selRow * rowH - 1} width={Math.max(0, w - M.right - M.left + 4)} height={rowH + 2} />
+        {/if}
         {#each MARKS as m (m.key)}
           <line class="mark" x1={x(m.ms)} x2={x(m.ms)} y1={M.top - 4} y2={H - M.bottom} />
         {/each}
@@ -196,6 +212,14 @@
   }
   rect.failed {
     stroke: var(--critical);
+    stroke-width: 1.5;
+  }
+  .dense rect.failed {
+    stroke-width: 0.75;
+  }
+  .sel-ring {
+    fill: none;
+    stroke: var(--accent);
     stroke-width: 1.5;
   }
   .mark {

@@ -50,6 +50,19 @@
   --series-7: #4a3aa7;
   --series-8: #e34948;
 
+  /* specs, in a campaign's order: no green or red, which mean passed and failed (validated all-pairs, light) */
+  --spec-1: #2a78d6;
+  --spec-2: #eb6834;
+  --spec-3: #4a3aa7;
+  --spec-4: #e87ba4;
+
+  /* host CPU by process: the load in greys, the hypervisor's own threads picked out */
+  --proc-microvm: #8f8e88;
+  --proc-hypervisor: #eda100;
+  --proc-hostd: #4a4945;
+  --proc-driver: #6c6b66;
+  --proc-unattributed: #d3d1ca;
+
   /* chart chrome */
   --grid: #eceae4;
   --axis: #c3c2b7;

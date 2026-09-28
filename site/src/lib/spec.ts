@@ -47,6 +47,20 @@ export const FIELDS: Field[] = (() => {
 
 const BY_PATH = new Map(FIELDS.map((x) => [x.path, x]));
 
+/**
+ * The method's standard SLOs: the schema's defaults for the pass criteria, read when the site is built. About states
+ * these; a campaign may choose its own (D74), and the site names any difference from these.
+ */
+export const STANDARD_CRITERIA: Spec['criteria'] = (() => {
+  const props = (schema.$defs.criteria as { properties: Record<string, { default?: number }> }).properties;
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(props)) {
+    if (typeof v.default !== 'number') throw new Error(`spec.schema.json: criteria.${k} has no default`);
+    out[k] = v.default;
+  }
+  return out as Spec['criteria'];
+})();
+
 export function field(path: string): Field {
   return BY_PATH.get(path) ?? { path, label: path, tier: 'rare', group: 'Other' };
 }

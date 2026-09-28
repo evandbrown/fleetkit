@@ -1,9 +1,8 @@
 <script lang="ts">
-  // The success criteria as one row of badges, read from a spec: the same badges on About, Results and a trial. With
+  // The success criteria as one row of badges: the standard ones on About, a spec's own on a trial. With
   // a trial's results, each badge shows what the trial measured against its limit, with a pass or fail mark when the
   // trial is judged, and none when it isn't (a warm-up or the illustration).
-  import { num } from '../lib/format';
-  import type { Spec } from '../lib/types';
+  import { sloChips, type Criteria } from '../lib/shape';
   import Mark from './Mark.svelte';
 
   let {
@@ -11,23 +10,12 @@
     results = null,
     judged = true,
   }: {
-    criteria: Spec['criteria'];
+    criteria: Criteria;
     results?: { value: string; met: boolean; note?: string }[] | null;
     judged?: boolean;
   } = $props();
 
-  /** 1000 → "1 s", 1500 → "1.5 s", 750 → "750 ms". */
-  function time(ms: number): string {
-    return ms >= 1000 ? `${num(ms / 1000, ms % 1000 === 0 ? 0 : ms % 100 === 0 ? 1 : 2)} s` : `${num(ms)} ms`;
-  }
-
-  const badges = $derived([
-    { value: `≤ ${num(criteria.ready_timeout_s)} s`, label: 'Browser ready' },
-    { value: '100%', label: 'Tasks succeed' },
-    { value: `≤ ${time(criteria.step_p50_target_ms)}`, label: 'Each step p50' },
-    { value: `≤ ${time(criteria.step_p95_target_ms)}`, label: 'Each step p95' },
-    { value: `≤ ${time(criteria.task_p95_target_ms)}`, label: 'Whole task p95' },
-  ]);
+  const badges = $derived(sloChips(criteria).map((c) => ({ value: c.value, label: c.long })));
 </script>
 
 <ul class="slos" class:results={!!results} aria-label="Success criteria">

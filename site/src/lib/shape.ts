@@ -2,10 +2,11 @@
 // the fixtures. Nothing here recomputes a result: pass, fail and the result come from the builder; these only
 // group, pick and label (and compute D60 midpoints for specs from different campaigns, by the same rule).
 import * as f from './format';
+import { makeBands, type Band } from './bands';
 import { meanMidpoint } from './derive';
-import { STOPPED_EARLY, SUBJECT_LABEL, VERDICT_SHORT } from './glossary';
+import { STOPPED_EARLY, SUBJECT_LABEL, trialLabel, VERDICT_SHORT } from './glossary';
 import { href } from './router';
-import { differing, flatten, field, hypervisorName, mib, show } from './spec';
+import { differing, flatten, field, hypervisorName, mib, show, STANDARD_CRITERIA } from './spec';
 import type {
   CampaignDoc,
   CampaignEntry,
@@ -105,10 +106,153 @@ export function differingRows(specs: SpecDoc[]): Set<CardRow> {
 }
 
 // ---- success criteria ------------------------------------------------------------------------------------
+// The SLOs a spec is judged by, as the pages show them, and how they differ from the method's standard ones (the
+// input schema's defaults, STANDARD_CRITERIA). A campaign may choose its own targets (D74): the site shows each
+// campaign's own, and wherever campaigns sit side by side it names the difference from the standard.
 
 /** Whether every spec is judged by the same criteria. */
 export function sameCriteria(specs: SpecDoc[]): boolean {
   return specs.every((s) => JSON.stringify(s.spec.criteria) === JSON.stringify(specs[0].spec.criteria));
+}
+
+export type Criteria = Spec['criteria'];
+type CriteriaKey = keyof Criteria;
+
+/** 1000 → "1 s", 1500 → "1.5 s", 750 → "750 ms". */
+export function sloTime(ms: number): string {
+  return ms >= 1000 ? `${f.num(ms / 1000, ms % 1000 === 0 ? 0 : ms % 100 === 0 ? 1 : 2)} s` : `${f.num(ms)} ms`;
+}
+
+interface Limit {
+  /** In a chip: "Step p50". */
+  short: string;
+  /** On a badge: "Each step p50". */
+  long: string;
+  /** In a sentence: "step p50". */
+  words: string;
+  text: (v: number) => string;
+}
+
+const upTo = (v: number) => `≤ ${sloTime(v)}`;
+const LIMITS: Record<CriteriaKey, Limit> = {
+  ready_timeout_s: { short: 'Ready', long: 'Browser ready', words: 'ready', text: (v) => `≤ ${f.num(v)} s` },
+  step_p50_target_ms: { short: 'Step p50', long: 'Each step p50', words: 'step p50', text: upTo },
+  step_p95_target_ms: { short: 'Step p95', long: 'Each step p95', words: 'step p95', text: upTo },
+  task_p95_target_ms: { short: 'Task p95', long: 'Whole task p95', words: 'task p95', text: upTo },
+  step_timeout_ms: { short: 'Step limit', long: 'Step time limit', words: 'step time limit', text: sloTime },
+  task_timeout_ms: { short: 'Task limit', long: 'Task time limit', words: 'task time limit', text: sloTime },
+};
+
+/** The order a difference is named in: the latency targets first, then ready, then the time limits. */
+const DIFF_ORDER: CriteriaKey[] = [
+  'step_p50_target_ms',
+  'step_p95_target_ms',
+  'task_p95_target_ms',
+  'ready_timeout_s',
+  'step_timeout_ms',
+  'task_timeout_ms',
+];
+
+export interface SloChip {
+  key: CriteriaKey | 'tasks';
+  short: string;
+  long: string;
+  value: string;
+  /** The standard value, where this one differs from it. */
+  standard: string | null;
+}
+
+const chip = (c: Criteria, key: CriteriaKey): SloChip => {
+  const l = LIMITS[key];
+  const standard = c[key] === STANDARD_CRITERIA[key] ? null : l.text(STANDARD_CRITERIA[key]);
+  return { key, short: l.short, long: l.long, value: l.text(c[key]), standard };
+};
+
+/**
+ * The five SLOs in the order every page shows them (ready, tasks, step p50, step p95, task p95); with `limits`, then
+ * each time limit that differs from the standard, the only way those show.
+ */
+export function sloChips(c: Criteria, limits = false): SloChip[] {
+  const five: SloChip[] = [
+    chip(c, 'ready_timeout_s'),
+    { key: 'tasks', short: 'Tasks', long: 'Tasks succeed', value: '100%', standard: null },
+    chip(c, 'step_p50_target_ms'),
+    chip(c, 'step_p95_target_ms'),
+    chip(c, 'task_p95_target_ms'),
+  ];
+  if (!limits) return five;
+  const other = (['step_timeout_ms', 'task_timeout_ms'] as const).filter((k) => c[k] !== STANDARD_CRITERIA[k]);
+  return [...five, ...other.map((k) => chip(c, k))];
+}
+
+export interface SloDiff {
+  key: CriteriaKey;
+  /** "step p50 ≤ 2 s", with no-break spaces so a line never breaks inside it. */
+  text: string;
+  /** Every criterion is an upper limit, so a higher one is looser. */
+  looser: boolean;
+}
+
+/** How the criteria differ from the standard, most telling first. None for the standard SLOs. */
+export function sloDiffs(c: Criteria): SloDiff[] {
+  return DIFF_ORDER.filter((k) => c[k] !== STANDARD_CRITERIA[k]).map((k) => ({
+    key: k,
+    text: `${LIMITS[k].words} ${LIMITS[k].text(c[k])}`.replaceAll(' ', '\u00a0'),
+    looser: c[k] > STANDARD_CRITERIA[k],
+  }));
+}
+
+/** The differences of several specs' criteria from the standard, each named once, in DIFF_ORDER. */
+function mergedDiffs(criteria: Criteria[]): SloDiff[] {
+  const seen = new Map<string, SloDiff>();
+  for (const c of criteria) for (const d of sloDiffs(c)) if (!seen.has(d.text)) seen.set(d.text, d);
+  return [...seen.values()].sort((a, b) => DIFF_ORDER.indexOf(a.key) - DIFF_ORDER.indexOf(b.key));
+}
+
+const kind = (ds: SloDiff[]) => (ds.every((d) => d.looser) ? 'looser' : ds.every((d) => !d.looser) ? 'stricter' : 'different');
+
+/**
+ * A short tag for a campaign (or spec) judged by other than the standard SLOs, naming the difference: "Looser SLO:
+ * step p50 ≤ 2 s", "Looser SLOs: step p50 ≤ 2 s, step p95 ≤ 3 s, ready ≤ 900 s". Null for the standard SLOs.
+ */
+export function sloTag(criteria: Criteria[]): string | null {
+  const ds = mergedDiffs(criteria);
+  if (!ds.length) return null;
+  const k = kind(ds);
+  return `${k[0].toUpperCase()}${k.slice(1)} SLO${ds.length > 1 ? 's' : ''}: ${ds.map((d) => d.text).join(', ')}`;
+}
+
+const list = (xs: string[]) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`);
+
+/**
+ * When the specs shown side by side aren't all judged by the same SLOs, who differs from the standard and how, for a
+ * line that starts "SLOs differ:": "Metal host uses step p50 ≤ 2 s, step p95 ≤ 3 s and ready ≤ 900 s; the rest use
+ * the standard." A spec is named by its campaign when every spec shown from that campaign is judged alike. Null when
+ * every spec shown has the same SLOs.
+ */
+export function sloDifferences(refs: SpecRef[]): string | null {
+  const key = (r: SpecRef) => DIFF_ORDER.map((k) => r.spec.spec.criteria[k]).join();
+  const groups = new Map<string, SpecRef[]>();
+  for (const r of refs) groups.set(key(r), [...(groups.get(key(r)) ?? []), r]);
+  if (groups.size < 2) return null;
+  const campaigns = new Set(refs.map((r) => r.campaign)).size > 1;
+  const parts: string[] = [];
+  let standard = false;
+  for (const g of groups.values()) {
+    const ds = sloDiffs(g[0].spec.spec.criteria);
+    if (!ds.length) {
+      standard = true;
+      continue;
+    }
+    const names: string[] = [];
+    for (const r of g) {
+      const whole = refs.filter((x) => x.campaign === r.campaign).every((x) => key(x) === key(r));
+      const name = whole ? r.campaignTitle : campaigns ? `${r.campaignTitle} · ${r.groupLabel}` : r.groupLabel;
+      if (!names.includes(name)) names.push(name);
+    }
+    parts.push(`${list(names)} ${names.length > 1 ? 'use' : 'uses'} ${list(ds.map((d) => d.text))}`);
+  }
+  return `${parts.join('; ')}${standard ? '; the rest use the standard' : ''}.`;
 }
 
 // ---- how it performed: a headline per spec ---------------------------------------------------------------
@@ -217,19 +361,53 @@ export function campaignHeadline(e: CampaignEntry): {
   density: string | null;
   label: string;
   perVcpu: string | null;
+  /** The spec behind the figure (its slug), or null when nothing has run. */
+  spec: string | null;
 } {
   const score = (o: CampaignEntry['outcomes'][number]) => {
     const per = o.replicas.map((r) => r.per_host_vcpu).filter((x): x is number => x !== null);
     return o.midpoint_per_host_vcpu ?? (per.length ? Math.min(...per) : -1);
   };
   const best = [...e.outcomes].sort((a, b) => score(b) - score(a))[0];
-  if (!best || !best.replicas.length) return { density: null, label: 'not run yet', perVcpu: null };
+  if (!best || !best.replicas.length) return { density: null, label: 'not run yet', perVcpu: null, spec: null };
   const passed = spread(best.replicas.map((r) => r.tested_successfully), (v) => f.num(v));
   return {
     density: passed,
     label: passed === null ? 'none passed' : passed === '1' ? 'microVM' : 'microVMs',
     perVcpu: spread(best.replicas.map((r) => r.per_host_vcpu), f.ratio),
+    spec: best.spec,
   };
+}
+
+export interface CardBar {
+  key: string;
+  label: string;
+  /** "9", "8–9", "0.56"; a label when there's no figure ("not run yet"). */
+  text: string;
+  lo: number;
+  hi: number;
+}
+
+/**
+ * The figure a campaign's card shows: with one spec, its density and density per host vCPU; with several, a small
+ * bar per spec of what the campaign compares (the density on one host size, density per host vCPU across sizes).
+ * `labels` are the specs' names as the campaign page shows them, in the entry's order.
+ */
+export function campaignFigure(
+  e: CampaignEntry,
+  labels: string[] = e.specs.map((s) => s.label),
+): { single: ReturnType<typeof campaignHeadline> | null; metric: 'Max density' | 'Per vCPU'; bars: CardBar[]; max: number } {
+  const perVcpu = new Set(e.outcomes.flatMap((o) => o.replicas.map((r) => r.host_vcpus))).size > 1;
+  const metric = perVcpu ? 'Per vCPU' : 'Max density';
+  if (e.specs.length < 2) return { single: campaignHeadline(e), metric, bars: [], max: 0 };
+  const bars = e.specs.map((s, i): CardBar => {
+    const reps = e.outcomes.find((o) => o.spec === s.name)?.replicas ?? [];
+    const vals = reps.map((r) => (perVcpu ? r.per_host_vcpu : r.tested_successfully)).filter((v): v is number => v !== null);
+    const fmt = perVcpu ? f.ratio : (v: number) => f.num(v);
+    const text = !reps.length ? 'not run yet' : !vals.length ? 'none passed' : f.range([Math.min(...vals), Math.max(...vals)], fmt);
+    return { key: s.name, label: labels[i] ?? s.label, text, lo: vals.length ? Math.min(...vals) : 0, hi: vals.length ? Math.max(...vals) : 0 };
+  });
+  return { single: null, metric, bars, max: Math.max(0, ...bars.map((b) => b.hi)) };
 }
 
 export interface CompareRow {
@@ -301,10 +479,97 @@ export function compareRows(results: SpecResult[]): CompareRow[] {
   });
 }
 
-/** The D60 comparison in one line: specs with a midpoint, highest first, then those without one. */
-export function comparisonLine(rows: CompareRow[]): CompareRow[] {
-  const withMid = rows.filter((r) => r.midpoint !== null).sort((a, b) => b.midpoint! - a.midpoint!);
-  return [...withMid, ...rows.filter((r) => r.midpoint === null)];
+/** "8–9" → [8, 9]; "9" → [9, 9]. */
+const ends = (s: string) => {
+  const n = (s.match(/\d+(\.\d+)?/g) ?? ['0']).map(Number);
+  return [Math.min(...n), Math.max(...n)];
+};
+const listed = (xs: string[]) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
+const EVERY = ['', 'it', 'both', 'all three', 'all four'];
+
+/**
+ * The answer in a line or two, from the headlines: what each spec fit (grouped where they fit the same), and what
+ * ran out. On one host size the figure is the density; across sizes, density per host vCPU.
+ */
+export function answerText(results: SpecResult[]): string {
+  if (!results.length) return '';
+  const hs = results.map(headline);
+  if (results.length === 1) {
+    const [h, r] = [hs[0], results[0]];
+    if (!r.replicas.length) return 'Not run yet.';
+    if (h.density === '0') return 'No density met every SLO.';
+    const d = h.density.startsWith('≥') ? `At least ${h.density.slice(2)}` : h.density;
+    const fit = `${d} ${d === '1' ? 'microVM' : 'microVMs'} met every SLO${h.perVcpu ? `, ${h.perVcpu} per host vCPU` : ''}.`;
+    return `${fit} ${r.limits[0] ? `${h.ranOut} ran out at ${r.limits[0].density}.` : 'Nothing ran out.'}`;
+  }
+  const perVcpu = new Set(results.flatMap((r) => r.replicas.map((x) => x.host_vcpus))).size > 1;
+  const groups = new Map<string, string[]>();
+  const missing: string[] = [];
+  results.forEach((r, i) => {
+    const v = perVcpu ? hs[i].perVcpu : hs[i].density;
+    if (!r.replicas.length || v === null || hs[i].density === '0') missing.push(r.ref.groupLabel);
+    else groups.set(v, [...(groups.get(v) ?? []), r.ref.groupLabel]);
+  });
+  const unit = perVcpu ? ' microVMs per host vCPU' : ' microVMs';
+  // Highest first: by the top of each range, then its bottom.
+  const sorted = [...groups].sort((a, b) => ends(b[0])[1] - ends(a[0])[1] || ends(b[0])[0] - ends(a[0])[0]);
+  const parts: string[] = [];
+  if (sorted.length === 1 && !missing.length) parts.push(`${EVERY[results.length] ?? `all ${results.length}`} fit ${sorted[0][0]}${unit}.`);
+  else if (sorted.length) {
+    parts.push(
+      `${sorted.map(([v, labels], i) => (i === 0 ? `${listed(labels)} ${labels.length > 1 ? 'fit' : 'fits'} ${v}${unit}` : `${listed(labels)} ${v}`)).join(', ')}.`,
+    );
+  }
+  if (missing.length) parts.push(`${listed(missing)}: none passed or not run yet.`);
+  const outs = [...new Set(results.filter((r) => r.limits.length).map((r) => VERDICT_SHORT[r.limits[0].verdict]))];
+  const failing = results.filter((r) => r.limits.length).length;
+  if (outs.length === 1) parts.push(`${outs[0]} ran out first${failing === results.length ? ` in ${EVERY[failing] ?? `all ${failing}`}` : ''}.`);
+  else if (outs.length > 1) {
+    parts.push(`Ran out: ${results.filter((r) => r.limits.length).map((r) => `${r.ref.groupLabel} ${VERDICT_SHORT[r.limits[0].verdict].toLowerCase()}`).join('; ')}.`);
+  }
+  // Two sentences at most: the fit, and what ran out.
+  return parts.slice(0, 2).join(' ');
+}
+
+export interface AnswerRun {
+  replica: number;
+  runId: string;
+  href: string | null;
+  /** The highest density that met every SLO, and the first that failed. */
+  passed: number | null;
+  failed: number | null;
+  stoppedEarly: boolean;
+  hostVcpus: number;
+}
+
+export interface AnswerRow extends CompareRow {
+  /** The spec's place in the list, for its colour. */
+  series: number;
+  runs: AnswerRun[];
+  hostVcpus: number;
+}
+
+/** The answer chart's rows: each spec's headline figures, and every run (replica) as a bar from 0 to its first failure. */
+export function answerRows(results: SpecResult[], docs: Map<string, CampaignDoc>): AnswerRow[] {
+  const base = compareRows(results);
+  return results.map((r, i) => {
+    const c = docs.get(r.ref.campaign)!;
+    const n = Math.max(c.definition.replicas, ...r.runs.map((x) => x.replica));
+    const runs: AnswerRun[] = Array.from({ length: n }, (_, k) => {
+      const run = r.runs.find((x) => x.replica === k + 1);
+      const rep = run ? r.replicas.find((x) => x.run === run.id) : undefined;
+      return {
+        replica: k + 1,
+        runId: run?.id ?? `${r.ref.spec.name}-r${k + 1}`,
+        href: run ? href({ name: 'run', campaign: c.id, run: run.id, density: null }) : null,
+        passed: rep?.tested_successfully ?? run?.result.tested_successfully ?? null,
+        failed: rep?.first_failed ?? run?.result.first_failed ?? null,
+        stoppedEarly: !!(rep?.stopped_early ?? run?.stopped_early),
+        hostVcpus: run?.host.vcpus ?? r.ref.spec.host.vcpus,
+      };
+    });
+    return { ...base[i], series: i, runs, hostVcpus: r.ref.spec.host.vcpus };
+  });
 }
 
 // ---- the result chart: one row per run, a mark per trial ------------------------------------------------
@@ -434,6 +699,194 @@ export function chartRows(refs: SpecRef[], docs: Map<string, CampaignDoc>, runDo
   return rows;
 }
 
+// ---- latency by density: the slowest step's p50 and the whole task's p95, per trial ---------------------
+
+export interface LatencyPoint {
+  key: string;
+  /** Which series (spec) the point belongs to, from 0. */
+  series: number;
+  replica: number;
+  density: number;
+  /** The density on the chart's x: the density itself on one host size, per host vCPU across sizes. */
+  x: number;
+  /** The slowest step's p50 and which step it was; null when the trial recorded no step checks. */
+  step: { ms: number; target: number; name: StepName } | null;
+  task: { ms: number; target: number } | null;
+  passed: boolean;
+  /** "Firecracker · replica 1 · trial 2 at density 10". */
+  title: string;
+  href: string;
+}
+
+export interface LatencySeries {
+  key: string;
+  label: string;
+  campaignTitle: string;
+  points: LatencyPoint[];
+}
+
+export interface Latency {
+  series: LatencySeries[];
+  /** true: x is density per host vCPU (the specs' hosts differ in size); false: x is the density. */
+  perVcpu: boolean;
+  replicas: number;
+  /** The SLO limits drawn: each distinct target across the specs. */
+  stepTargets: number[];
+  taskTargets: number[];
+  /**
+   * Whose each limit is, in the same order, when the specs' limits differ (D74): "standard", or the campaigns (or
+   * specs) that chose it. Null for each when every spec shares one limit.
+   */
+  stepTargetWho: (string | null)[];
+  taskTargetWho: (string | null)[];
+}
+
+/**
+ * Every counting trial of each spec's runs as two latencies: its slowest step's p50 and its whole task's p95, each
+ * against its SLO. Only densities that were tested have points; nothing is interpolated between them.
+ */
+export function latency(refs: SpecRef[], docs: Map<string, CampaignDoc>, runDocs: Map<string, RunDoc>): Latency {
+  const vcpus = new Set<number>();
+  const found: { ref: SpecRef; run: RunDoc }[] = [];
+  for (const ref of refs) {
+    const c = docs.get(ref.campaign)!;
+    for (const entry of c.runs.filter((r) => r.spec === ref.spec.name)) {
+      const run = runDocs.get(`${c.id}/${entry.id}`);
+      if (!run) continue;
+      found.push({ ref, run });
+      vcpus.add(run.host.vcpus);
+    }
+  }
+  const perVcpu = vcpus.size > 1;
+  const multi = refs.length > 1;
+  // Specs from several campaigns (the compare page) carry their campaign's title.
+  const campaigns = new Set(refs.map((r) => r.campaign)).size > 1;
+  const series: LatencySeries[] = refs.map((ref) => ({
+    key: `${ref.campaign}/${ref.spec.name}`,
+    label: campaigns ? `${ref.campaignTitle} · ${ref.groupLabel}` : ref.groupLabel,
+    campaignTitle: ref.campaignTitle,
+    points: [],
+  }));
+  // The replicas drawn apart: those with runs here (one, on a run's own page).
+  const present = new Set(found.map((x) => x.run.replica));
+  const replicas = present.size > 1 ? Math.max(...present) : 1;
+  for (const { ref, run } of found) {
+    const i = refs.indexOf(ref);
+    const c = docs.get(ref.campaign)!;
+    for (const t of run.trials) {
+      if (!t.counts || t.passed === null) continue;
+      const steps = t.checks.filter((ch) => ch.subject !== 'task' && ch.stat === 'p50');
+      const slow = steps.sort((a, b) => b.value_ms - a.value_ms)[0];
+      const task = t.checks.find((ch) => ch.subject === 'task' && ch.stat === 'p95');
+      if (!slow && !task) continue;
+      const who = [multi ? series[i].label : null, c.definition.replicas > 1 ? `replica ${run.replica}` : null].filter(Boolean);
+      series[i].points.push({
+        key: `${c.id}/${run.id}/${t.id}`,
+        series: i,
+        replica: run.replica,
+        density: t.density,
+        x: perVcpu ? t.density / run.host.vcpus : t.density,
+        step: slow ? { ms: slow.value_ms, target: slow.target_ms, name: slow.subject as StepName } : null,
+        task: task ? { ms: task.value_ms, target: task.target_ms } : null,
+        passed: !!t.passed,
+        title: [...who, trialLabel(t)].join(' · '),
+        href: href({ name: 'trial', campaign: c.id, run: run.id, trial: t.id, microvm: null }),
+      });
+    }
+  }
+  for (const s of series) s.points.sort((a, b) => a.x - b.x || a.replica - b.replica || a.key.localeCompare(b.key));
+  type TargetKey = 'step_p50_target_ms' | 'task_p95_target_ms';
+  const targets = (k: TargetKey) => [...new Set(refs.map((r) => r.spec.spec.criteria[k]))].sort((a, b) => a - b);
+  const who = (k: TargetKey, ts: number[]) =>
+    ts.map((t) => {
+      if (ts.length < 2) return null;
+      if (t === STANDARD_CRITERIA[k]) return 'standard';
+      const mine = refs.filter((r) => r.spec.spec.criteria[k] === t);
+      const whole = (r: SpecRef) => refs.filter((x) => x.campaign === r.campaign).every((x) => x.spec.spec.criteria[k] === t);
+      return [...new Set(mine.map((r) => (whole(r) ? r.campaignTitle : series[refs.indexOf(r)].label)))].join(', ');
+    });
+  const stepTargets = targets('step_p50_target_ms');
+  const taskTargets = targets('task_p95_target_ms');
+  return {
+    series,
+    perVcpu,
+    replicas,
+    stepTargets,
+    taskTargets,
+    stepTargetWho: who('step_p50_target_ms', stepTargets),
+    taskTargetWho: who('task_p95_target_ms', taskTargets),
+  };
+}
+
+/**
+ * The density bands the latency chart and the every-trial grid share: every density some trial tested, then the
+ * listed densities above them as one not-tested band. Per host vCPU when the hosts differ in size, as the latency.
+ */
+export function sharedBands(lat: Latency, rows: ChartRow[]): Band[] {
+  const x = (d: number, v: number) => (lat.perVcpu ? d / v : d);
+  return makeBands(
+    [...lat.series.flatMap((s) => s.points.map((p) => p.x)), ...rows.flatMap((r) => r.marks.map((m) => x(m.density, r.hostVcpus)))],
+    rows.flatMap((r) => r.notTested.map((n) => x(n.density, r.hostVcpus))),
+    lat.perVcpu,
+  );
+}
+
+// ---- at the limit: one trial at each spec's first failing density ---------------------------------------
+
+export interface LimitPick {
+  ref: SpecRef;
+  run: RunDoc;
+  trial: TrialSummary;
+  density: number;
+  /** true: the spec's first failing density; false: nothing failed, so this is the highest density that passed. */
+  failed: boolean;
+  /** What ran out there: the run's verdict at its limit, or the trial's own. */
+  ranOut: Verdict | null;
+  /** In the same run, a trial at the highest density that passed, to set beside the failure. */
+  pass: { trial: TrialSummary; density: number } | null;
+}
+
+/**
+ * The trial that shows where a spec reached its limit: of its runs, the one that failed at the lowest density (the
+ * first replica on a tie), and there the first trial that failed. With no failure, the highest density that passed.
+ */
+export function limitPick(ref: SpecRef, c: CampaignDoc, runDocs: Map<string, RunDoc>): LimitPick | null {
+  const runs = c.runs
+    .filter((r) => r.spec === ref.spec.name)
+    .map((r) => runDocs.get(`${c.id}/${r.id}`))
+    .filter((r): r is RunDoc => !!r)
+    .sort((a, b) => a.replica - b.replica);
+  const failing = runs.filter((r) => r.result.first_failed !== null);
+  const failed = failing.length > 0;
+  const run = failed
+    ? failing.reduce((best, r) => (r.result.first_failed! < best.result.first_failed! ? r : best))
+    : runs.filter((r) => r.result.tested_successfully !== null).reduce<RunDoc | null>(
+        (best, r) => (!best || r.result.tested_successfully! > best.result.tested_successfully! ? r : best),
+        null,
+      );
+  if (!run) return null;
+  const density = failed ? run.result.first_failed! : run.result.tested_successfully!;
+  const at = run.trials.filter((t) => t.counts && t.density === density).sort((a, b) => (a.number ?? 0) - (b.number ?? 0));
+  const trial = (failed ? at.find((t) => t.passed === false) : undefined) ?? at[0];
+  if (!trial) return null;
+  const ranOut = failed ? (run.result.limit?.verdicts[0] ?? trial.attribution?.verdicts[0] ?? null) : null;
+  const passAt = failed ? run.result.tested_successfully : null;
+  const passTrial =
+    passAt === null
+      ? undefined
+      : run.trials
+          .filter((t) => t.counts && t.density === passAt && t.passed)
+          .sort((a, b) => (a.number ?? 0) - (b.number ?? 0))[0];
+  return { ref, run, trial, density, failed, ranOut, pass: passTrial && passAt !== null ? { trial: passTrial, density: passAt } : null };
+}
+
+/** The rule behind a verdict at a density: the first of that verdict's rules that fired in any of its trials. */
+export function firedRule(trials: TrialSummary[], rules: RuleDef[], verdict: Verdict | null): RuleDef | null {
+  if (!verdict) return null;
+  const fired = (k: RuleKey) => trials.some((t) => t.attribution?.rules.find((r) => r.key === k)?.fired);
+  return rules.find((r) => r.verdict === verdict && fired(r.key)) ?? null;
+}
+
 /** What a run page is called: its spec as the campaign labels it, and its replica when there are several. */
 export function runTitle(c: CampaignDoc, runId: string): string {
   const run = c.runs.find((r) => r.id === runId);
@@ -449,9 +902,10 @@ const SECTION_WORDS: Record<string, string> = { 'Pass criteria': 'Success criter
 const LABEL_WORDS: Record<string, string> = {
   'Worker instance type': 'Instance type',
   'Support instance type': 'Instance type',
-  'Step median target': 'Each step p50',
-  'Step p95 target': 'Each step p95',
-  'Task p95 target': 'Whole task p95',
+  'Step median target': 'Step p50 target',
+  'Step time limit': 'Step timeout',
+  'Task time limit': 'Task timeout',
+  'Idle before each trial': 'Idle before trial',
 };
 
 /** Every input of a spec, grouped by section in the schema's order; `changed` marks paths that differ from a base. */
@@ -750,14 +1204,15 @@ const RULE_TITLE: Record<RuleKey, string> = {
  * The series behind the trial's verdict, with its rule's threshold: the first rule of that verdict that fired (host
  * CPU pressure, when it did), else the first one recorded. When no rule fired, the host CPU series.
  */
-export function limitPanels(doc: TrialDoc, summary: TrialSummary, rules: RuleDef[]): SeriesPanel[] {
+export function limitPanels(doc: TrialDoc, summary: TrialSummary, rules: RuleDef[], prefer: RuleKey | null = null): SeriesPanel[] {
   const verdict = summary.attribution?.verdicts[0] ?? doc.limit.verdicts[0] ?? 'unknown';
-  const lookFor: Verdict = verdict === 'none' || verdict === 'unknown' ? 'host_cpu' : verdict;
+  const preferred = prefer ? (rules.find((r) => r.key === prefer) ?? null) : null;
+  const lookFor: Verdict = preferred ? preferred.verdict : verdict === 'none' || verdict === 'unknown' ? 'host_cpu' : verdict;
   const fired = (k: RuleKey) => summary.attribution?.rules.find((r) => r.key === k)?.fired ?? null;
   const panels: SeriesPanel[] = [];
   const h = doc.series.host;
   const mine = rules.filter((r) => r.verdict === lookFor);
-  const first = mine.find((r) => fired(r.key)) ?? null;
+  const first = preferred ?? mine.find((r) => fired(r.key)) ?? null;
   for (const rule of first ? [first, ...mine.filter((r) => r !== first)] : mine) {
     if (panels.length) break;
     const threshold = { value: rule.threshold, op: rule.op, fired: fired(rule.key) };
@@ -784,9 +1239,21 @@ export function limitPanels(doc: TrialDoc, summary: TrialSummary, rules: RuleDef
   return panels;
 }
 
-/** Host CPU by process as stacked cores, if the run recorded per-process counters. */
-export function coresStack(doc: TrialDoc): { t: number[]; layers: { key: HostConsumer; values: number[] }[] } | null {
+/**
+ * Host CPU by process as stacked cores, if the run recorded per-process counters. The counters are cumulative, so
+ * one short sample interval can be credited with more CPU than the host has (during boot on a 192-vCPU host, several
+ * times more): a sampling artifact. With the host's vCPUs, a sample whose layers add up to more is scaled down to
+ * exactly that, each process keeping its share, so the chart never shows more CPU than the host has. Only the
+ * plotted copy changes; the published data doesn't.
+ */
+export function coresStack(doc: TrialDoc, hostVcpus: number | null = null): { t: number[]; layers: { key: HostConsumer; values: number[] }[] } | null {
   const cores = doc.series.host.cores;
   if (!cores) return null;
-  return { t: doc.series.host.t_ms, layers: HOST_CONSUMERS.map((key) => ({ key, values: cores[key] })) };
+  const layers = HOST_CONSUMERS.map((key) => ({ key, values: cores[key] }));
+  if (hostVcpus === null) return { t: doc.series.host.t_ms, layers };
+  const scale = doc.series.host.t_ms.map((_, i) => {
+    const total = layers.reduce((a, l) => a + Math.max(0, l.values[i] ?? 0), 0);
+    return total > hostVcpus ? hostVcpus / total : 1;
+  });
+  return { t: doc.series.host.t_ms, layers: layers.map((l) => ({ key: l.key, values: l.values.map((v, i) => v * scale[i]) })) };
 }

@@ -1,9 +1,10 @@
 <script lang="ts">
   // One panel of a trial's time series: lines (or stacked layers) against ms from the trial's start, with the
-  // task window shaded, the trial's marks as rules, and a rule's threshold as a reference line. A crosshair snaps
-  // to the nearest sample and its values read out beside the title; the arrow keys move it.
+  // task window shaded, the trial's marks as rules, and a rule's threshold as a reference line. A ceiling (the host's
+  // vCPUs) is a capacity: the axis stops just above it and nothing is drawn past it. A crosshair snaps to the nearest
+  // sample and its values read out beside the title; the arrow keys move it.
   import * as f from '../lib/format';
-  import { areaPath, linear, linePath, nearest, niceDomain } from '../lib/scale';
+  import { areaPath, ceilingTop, linear, linePath, nearest, niceDomain } from '../lib/scale';
   import type { Range } from '../lib/types';
 
   interface Series {
@@ -61,14 +62,17 @@
     return tops;
   });
 
-  const yMax = $derived.by(() => {
+  const yMax = $derived.by((): Range => {
     const vals = stacked ? stacked[stacked.length - 1] : series.flatMap((s) => s.values);
     const extra = [threshold?.value ?? 0, ceiling?.value ?? 0];
-    return niceDomain([...vals, ...extra], { count: 4 });
+    const [lo, hi] = niceDomain([...vals, ...extra], { count: 4 });
+    return ceiling ? [lo, Math.min(hi, ceilingTop(ceiling.value))] : [lo, hi];
   });
 
   const x = $derived(linear(domain, [M.left, Math.max(M.left + 1, w - M.right)]));
   const y = $derived(linear(yMax, [height - M.bottom, M.top]));
+  /** A value's height, never above the axis's top. */
+  const yv = (v: number) => y(Math.min(v, yMax[1]));
 
   const fmt = (v: number) => (unit === '%' ? `${f.num(v, digits)}%` : `${f.num(v, digits)}${unit ? ` ${unit}` : ''}`);
   /** A threshold as written in the spec: 20%, 0.1. */
@@ -169,7 +173,7 @@
               {@const lo = k === 0 ? tOf(0).map(() => 0) : stacked[k - 1]}
               {@const idx = base.map((p) => p.i)}
               <path
-                d={areaPath(idx.map((i) => x(tOf(0)[i])), idx.map((i) => y(lo[i])), idx.map((i) => y(stacked[k][i])))}
+                d={areaPath(idx.map((i) => x(tOf(0)[i])), idx.map((i) => yv(lo[i])), idx.map((i) => yv(stacked[k][i])))}
                 fill={s.color}
                 stroke="var(--bg)"
                 stroke-width="1"
@@ -179,7 +183,7 @@
             {#each series as s, k (s.label)}
               {@const tk = tOf(k)}
               <path
-                d={linePath(s.values.map((v, i) => ({ x: x(tk[i]), y: tk[i] < domain[0] || tk[i] > domain[1] ? null : y(v) })))}
+                d={linePath(s.values.map((v, i) => ({ x: x(tk[i]), y: tk[i] < domain[0] || tk[i] > domain[1] ? null : yv(v) })))}
                 fill="none"
                 stroke={s.color}
                 stroke-width={many ? 1.25 : 2}

@@ -1,10 +1,16 @@
 // The builder's own helpers (components/builder/draft.ts) and its labels: the facts a field shows, where densities
 // fill a host, reading pasted JSON, naming the next campaign, shorter messages, and labels short enough for the page.
 import { describe, expect, it } from 'vitest';
-import { CAMPAIGN_FIELDS, SPEC_FIELDS, TYPES, evaluate } from '../../src/lib/campaign';
+import catalog from '../../catalog.json';
+import { CAMPAIGN_FIELDS, HELP, LIMITS, SPEC_FIELDS, TYPES, evaluate } from '../../src/lib/campaign';
 import {
   DEFAULT_START,
+  REVIEW_HELP,
+  SPEC_NAME_HELP,
+  START_HELP,
   STARTS,
+  TITLES,
+  WHY_HELP,
   densityFit,
   hostFacts,
   interpret,
@@ -44,6 +50,40 @@ describe('builder labels', () => {
   });
 });
 
+describe('builder help', () => {
+  const FIELDS = [...SPEC_FIELDS, ...Object.values(CAMPAIGN_FIELDS)];
+  const sentences = (t: string) => t.split(/(?<=[.?!])\s+(?=[A-Z0-9])/).length;
+
+  it('explains every field in its own words, not the schema’s', () => {
+    for (const f of FIELDS) {
+      expect(HELP[f.path], f.path).toBeTruthy();
+      expect(f.help).toBe(HELP[f.path]);
+    }
+    const paths = new Set(FIELDS.map((f) => f.path));
+    for (const k of Object.keys(HELP)) expect(paths.has(k), `HELP has ${k}, which is no field`).toBe(true);
+  });
+
+  it('says it in one or two plain sentences', () => {
+    const all = [...FIELDS.map((f) => [f.path, f.help]), ['start', START_HELP], ['spec name', SPEC_NAME_HELP], ['why', WHY_HELP], ...Object.entries(REVIEW_HELP)];
+    for (const [k, t] of all) {
+      expect(sentences(t), `${k}: ${t}`).toBeLessThanOrEqual(2);
+      expect(t.length, k).toBeLessThanOrEqual(260);
+      expect(t, k).toMatch(/[.]$/);
+      expect(t, k).not.toMatch(/_ms\b|_s\b|_mib\b/);
+    }
+  });
+
+  it('gives the p50 target and the densities the meaning a reviewer needs', () => {
+    expect(HELP['criteria.step_p50_target_ms']).toMatch(/^In each trial, the median time of each of the five steps must be at or under this, or the trial fails\./);
+    expect(HELP.densities).toMatch(/^How many microVMs each trial starts at once; the run tests them in order and stops at the first that fails\./);
+  });
+
+  it('quotes the limits the review checks against', () => {
+    expect(REVIEW_HELP.worst).toContain(`$${LIMITS.campaign_worst_case_usd}`);
+    expect(REVIEW_HELP.vcpus).toContain(String(LIMITS.vcpu_quota));
+  });
+});
+
 describe('builder starts', () => {
   it('opens nested-sizes-1 first, campaigns before examples', () => {
     expect(DEFAULT_START.key).toBe('nested-sizes-1');
@@ -60,6 +100,14 @@ describe('builder starts', () => {
     const msg = interpret('Here it is:\n```json\n' + JSON.stringify(def) + '\n```\nThanks');
     expect(msg.def.name).toBe(def.name);
     expect(() => interpret('{"x": 1}')).toThrow(/neither/);
+  });
+
+  it('calls a published campaign what Results calls it', () => {
+    for (const c of catalog.campaigns) {
+      const start = STARTS.find((s) => s.key === c.id);
+      if (start) expect(start.title, c.id).toBe(c.title);
+    }
+    expect(Object.keys(TITLES).filter((k) => !STARTS.some((s) => s.key === k))).toEqual([]);
   });
 
   it('names the next campaign in a series', () => {

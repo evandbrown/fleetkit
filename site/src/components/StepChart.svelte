@@ -15,7 +15,6 @@
   const VAL = $derived(phone ? 112 : 120);
   /** Where the p50 column ends; the p95 column ends at the right edge. */
   const P50 = 64;
-  const HEAD = 20;
   const ROW = 30;
   const GAP = 14;
 
@@ -27,6 +26,10 @@
   const taskMax = $derived(Math.max(criteria.task_p95_target_ms * 1.12, (task?.value_ms ?? 0) * 1.04));
   const xs = $derived(linear([0, stepMax], [LABEL, Math.max(LABEL + 40, w - VAL)]));
   const xt = $derived(linear([0, taskMax], [LABEL, Math.max(LABEL + 40, w - VAL)]));
+  /** Room for the limits' labels over the rows: two lines when the two limits sit close together. */
+  const tight = $derived(w > 0 && xs(criteria.step_p95_target_ms) - xs(criteria.step_p50_target_ms) < 76);
+  const HEAD = $derived(tight ? 32 : 20);
+
   const taskTop = $derived(HEAD + steps.length * ROW + GAP + 8);
   const H = $derived(taskTop + (task ? ROW : 0) + 4);
   const sec = (ms: number) => `${f.num(ms / 1000, ms % 1000 ? 1 : 0)} s`;
@@ -37,7 +40,7 @@
   {#if w > 0}
     <svg width={w} height={H} role="img" aria-label="Each step's p50 and p95 against the limits, and the whole task's p95">
       <text class="lim" x={xs(criteria.step_p50_target_ms) - 4} y="12" text-anchor="end">p50 ≤ {sec(criteria.step_p50_target_ms)}</text>
-      <text class="lim" x={xs(criteria.step_p95_target_ms) - 4} y="12" text-anchor="end">p95 ≤ {sec(criteria.step_p95_target_ms)}</text>
+      <text class="lim" x={xs(criteria.step_p95_target_ms) - 4} y={tight ? 25 : 12} text-anchor="end">p95 ≤ {sec(criteria.step_p95_target_ms)}</text>
       <text class="vh" x={w - P50} y="12" text-anchor="end">p50 (ms)</text>
       <text class="vh" x={w - 4} y="12" text-anchor="end">p95 (ms)</text>
       {#each steps as s, i (s)}

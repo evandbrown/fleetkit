@@ -501,6 +501,8 @@ export interface Field {
   tier: 'basic' | 'advanced' | 'rare';
   schema: Schema;
   description: string;
+  /** What the builder's ⓘ beside the label says: one or two plain sentences for a reader new to the experiment. */
+  help: string;
   /** A named spec may change it: the worker host, the hypervisor, the microVM and the densities. */
   variable: boolean;
 }
@@ -519,6 +521,47 @@ const SHORT_LABEL: Record<string, string> = {
   name: 'Name',
 };
 
+/** Each field's explanation (D72): the schema's description, rewritten for a reviewer who hasn't read the method.
+ * The label stays short; this carries the meaning. One or two sentences each. */
+export const HELP: Record<string, string> = {
+  'worker_host.instance_type':
+    'The EC2 instance that runs the microVMs: the host being measured. Metal types run the hypervisor on the hardware itself; the others run it nested inside a virtual machine.',
+  'hypervisor.name': 'The software on the worker host that starts and runs each microVM: Firecracker or Cloud Hypervisor.',
+  'hypervisor.virtio_transport':
+    "How each microVM's virtual disk and network devices connect to its guest kernel. Firecracker can use mmio or pci; Cloud Hypervisor needs pci.",
+  'hypervisor.virtio_rng':
+    'Gives each microVM a virtual device that supplies random numbers from the host. Optional for Firecracker; Cloud Hypervisor always has one.',
+  'microvm.vcpus': 'Virtual CPUs given to each microVM. Each microVM runs one headless Chrome and one browser task per trial.',
+  'microvm.memory_mib':
+    "Memory given to each microVM, in MiB (1,024 MiB is 1 GiB). If the microVMs' memory adds up to more than the host's, memory runs out before CPU.",
+  densities:
+    'How many microVMs each trial starts at once; the run tests them in order and stops at the first that fails. Space them closely where you expect the limit: the result is only as precise as the gap between the last pass and the first failure.',
+  'criteria.step_p50_target_ms':
+    'In each trial, the median time of each of the five steps must be at or under this, or the trial fails. The steps are home, search, open product, add to cart and verify cart.',
+  'criteria.step_p95_target_ms':
+    'In each trial, the 95th-percentile time of each of the five steps must be at or under this, or the trial fails.',
+  'criteria.task_p95_target_ms':
+    'In each trial, the 95th-percentile time of the whole five-step task must be at or under this, or the trial fails.',
+  'criteria.ready_timeout_s': 'Every microVM must report its browser ready within this many seconds of starting, or the trial fails.',
+  'criteria.step_timeout_ms':
+    'A step still running after this long fails its task, and a failed task fails the trial. It must be above the step p95 target.',
+  'criteria.task_timeout_ms':
+    'A task still running after this long fails, and so does its trial. It must be above the task p95 target.',
+  'procedure.trials_per_density':
+    'How many trials run at each density on the way up. Each trial starts fresh microVMs, and all must pass before the run moves up.',
+  'procedure.boundary_trials':
+    'Once the run stops, extra trials at the highest density that passed and at the lowest that failed, to check the result holds.',
+  'procedure.settle_s': "Seconds the worker host sits idle before each trial, so the last trial's cleanup can't slow the next.",
+  'support_host.instance_type':
+    'The EC2 instance that serves the test shopping site and collects telemetry, one per run. It grows with the worker host so it is never what runs out.',
+  name: 'The campaign’s short name; its results are saved under results/<name>. 2–40 lowercase letters, digits or hyphens, starting with a letter.',
+  question: 'The one question this campaign’s runs answer together, in a line. It heads the campaign on Results.',
+  replicas:
+    'How many runs each spec gets, each on its own worker host. Two or more show how much a result varies from host to host.',
+  shutdown_after_minutes:
+    'Every host shuts itself down this many minutes after it boots, whatever else happens. The worst-case cost assumes every host runs this long.',
+};
+
 /** Every field of a spec, in schema order, from its x-builder annotations. */
 export const SPEC_FIELDS: Field[] = Object.keys(specSchema.properties).flatMap((section) => {
   const node = (specSchema.$defs as Record<string, Schema>)[section];
@@ -530,6 +573,7 @@ export const SPEC_FIELDS: Field[] = Object.keys(specSchema.properties).flatMap((
     tier: f['x-builder'].tier,
     schema: f,
     description: f.description,
+    help: HELP[path] ?? f.description,
     variable: VARIABLE_SECTIONS.includes(section),
   });
   return node.type === 'object'
@@ -552,6 +596,7 @@ export const CAMPAIGN_FIELDS: Record<string, Field> = Object.fromEntries(
         tier: f['x-builder'].tier,
         schema: { ...pattern, ...f },
         description: f.description,
+        help: HELP[k] ?? f.description,
         variable: false,
       },
     ];

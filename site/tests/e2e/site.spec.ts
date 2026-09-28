@@ -38,8 +38,9 @@ async function shoot(page: Page, name: string) {
 // The smoke test: every route loads against the fixtures (light is the only theme), with nothing leaving the site,
 // no script errors and no sideways scrolling. The results pages have their own smoke test (results.spec.ts).
 const ROUTES: { name: string; path: string; h1: RegExp | string; ready?: string }[] = [
-  { name: 'about', path: './#/about', h1: 'What we evaluate', ready: 'Architecture' },
-  { name: 'about-from-method', path: './#/method', h1: 'What we evaluate', ready: 'Architecture' },
+  { name: 'home', path: './', h1: 'What is Fleetkit?', ready: 'Architecture' },
+  { name: 'about-from-about', path: './#/about', h1: 'What is Fleetkit?', ready: 'Architecture' },
+  { name: 'about-from-method', path: './#/method', h1: 'What is Fleetkit?', ready: 'Architecture' },
   { name: 'not-found', path: './#/nowhere', h1: 'Not found' },
 ];
 
@@ -71,11 +72,13 @@ test('shows terms as plain words, with no popover', async ({ page }) => {
   await expect(page.locator('[aria-describedby]')).toHaveCount(0);
 });
 
-test('has three places in the navigation, no theme switch and no footer', async ({ page }) => {
-  await page.goto('./#/about');
+test('has three places in the navigation, About first, no theme switch and no footer', async ({ page }) => {
+  await page.goto('./');
   const nav = page.getByRole('navigation', { name: 'Main' });
-  await expect(nav.getByRole('link')).toHaveText(['Results', 'Builder', 'About']);
+  await expect(nav.getByRole('link')).toHaveText(['About', 'Results', 'Builder']);
   await expect(nav.getByRole('link', { name: 'About' })).toHaveAttribute('aria-current', 'page');
+  await expect(nav.getByRole('link', { name: 'About' })).toHaveAttribute('href', '#/');
+  await expect(page.getByRole('link', { name: 'Fleetkit' })).toHaveAttribute('href', '#/');
   await expect(page.getByRole('button', { name: /theme/i })).toHaveCount(0);
   await expect(page.locator('body > #app > footer, footer.page')).toHaveCount(0);
   await page.goto('./#/results/cap-baseline-1/runs/baseline-r1');
@@ -89,7 +92,8 @@ test('opens older addresses at their new ones', async ({ page }) => {
     ['./#/campaigns/cap-baseline-1/runs/baseline-r1?density=8', /#\/results\/cap-baseline-1\/runs\/baseline-r1\?density=8$/],
     ['./#/campaigns/cap-baseline-1/runs/baseline-r1/trials/d12-t1?microvm=3', /#\/results\/cap-baseline-1\/runs\/baseline-r1\/trials\/d12-t1\?microvm=3$/],
     ['./#/compare?specs=cap-baseline-1/baseline', /#\/results\/compare\?specs=cap-baseline-1\/baseline$/],
-    ['./#/method/glossary', /#\/about$/],
+    ['./#/method/glossary', /#\/$/],
+    ['./#/about', /#\/$/],
   ];
   for (const [from, to] of cases) {
     await page.goto(from);
@@ -98,18 +102,46 @@ test('opens older addresses at their new ones', async ({ page }) => {
   }
 });
 
-test('explains the setup on About, with the featured spec, its SLOs and the five steps', async ({ page }) => {
-  await page.goto('./#/about');
+test('opens on About: what Fleetkit is, how it works, and the way into the results', async ({ page }) => {
+  await page.goto('./');
+  await expect(page.locator('h1')).toHaveText('What is Fleetkit?');
+  await expect(page.locator('.hero .lead')).toContainText('benchmark framework for headless browsers');
+  await expect(page.getByRole('list', { name: 'How Fleetkit works' }).getByRole('listitem')).toHaveCount(4);
+  const featured = page.getByRole('complementary', { name: 'Featured result' });
+  await expect(featured).toContainText('Synthetic host sizes');
+  // The figure names the host it ran on.
+  await expect(featured).toContainText(/\d+\s*microVMs? on one m8i\.4xlarge/);
+  await expect(page.getByRole('link', { name: /Define your own in the Builder/ })).toHaveAttribute('href', '#/builder');
+  await expect(featured).toContainText('per host vCPU');
+  await expect(page.getByRole('link', { name: 'See the results' })).toHaveCount(1);
+  await page.getByRole('link', { name: 'See the results' }).click();
+  await expect(page).toHaveURL(/#\/results$/);
+  await expect(page.locator('h1')).toHaveText('Synthetic host sizes');
+  await page.getByRole('link', { name: 'Fleetkit' }).click();
+  await expect(page.locator('h1')).toHaveText('What is Fleetkit?');
+  await noHorizontalScroll(page);
+});
+
+test('explains the setup on About, with the featured spec, the standard SLOs and the five steps', async ({ page }) => {
+  await page.goto('./');
   await expect(page.getByRole('img', { name: /^AWS us-east-1/ })).toBeVisible();
-  await expect(page.getByRole('list', { name: 'Success criteria' }).getByRole('listitem')).toHaveCount(5);
-  await expect(page.getByRole('list', { name: 'Success criteria' })).toContainText('≤ 1 s');
+  // The method's standard SLOs (the input schema's defaults), not the featured campaign's.
+  await expect(page.getByRole('list', { name: 'Success criteria' }).getByRole('listitem')).toHaveText([
+    /^≤ 180 s\s*Browser ready$/,
+    /^100%\s*Tasks succeed$/,
+    /^≤ 1 s\s*Each step p50$/,
+    /^≤ 2 s\s*Each step p95$/,
+    /^≤ 5 s\s*Whole task p95$/,
+  ]);
+  // The featured campaign uses them, so its result carries no tag.
+  await expect(page.getByRole('complementary', { name: 'Featured result' }).locator('.slo-tag')).toHaveCount(0);
   await expect(page.locator('ol.film > li')).toHaveCount(5);
   await expect(page.locator('ol.film')).toContainText('Verify cart');
   await expect(page.locator('dl.spec .varies')).toHaveCount(4);
   await expect(page.locator('ol.parts > li')).toHaveCount(5);
   await expect(page.locator('dl.measures dt')).toHaveText(['Latency', 'Time to ready', 'Host pressure', 'Cost', 'Max density', 'Midpoint']);
-  // Nothing after What we measure: no call to action, no footer links.
-  await expect(page.getByRole('link', { name: 'See the results' })).toHaveCount(0);
+  // Nothing after What we measure: the one call to action is at the top, and there are no footer links.
+  await expect(page.locator('section').last().getByRole('link')).toHaveCount(0);
   await expect(page.locator('main')).not.toContainText(/Words we don't use|glossary/i);
   await noHorizontalScroll(page);
 });

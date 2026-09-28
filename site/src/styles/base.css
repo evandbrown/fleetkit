@@ -139,6 +139,20 @@ code {
   color: var(--accent-ink);
   text-decoration: none;
 }
+/* The one primary action on a page: filled with the accent. */
+.button.primary {
+  padding: 8px 18px;
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.95rem;
+}
+.button.primary:hover,
+.button.primary:focus-visible {
+  border-color: var(--accent-ink);
+  background: var(--accent-ink);
+  color: #fff;
+}
 
 /* Tables scroll inside their own box, never the page. */
 .table-wrap {
@@ -192,6 +206,22 @@ tbody tr:hover > th {
 details > summary {
   cursor: pointer;
   color: var(--ink-2);
+}
+
+/* A campaign judged by other than the standard SLOs, wherever campaigns sit side by side (D74). */
+.slo-tag {
+  display: inline-block;
+  max-width: 100%;
+  margin: 0;
+  padding: 1px 7px;
+  border-radius: 5px;
+  background: var(--bg);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--accent-ink);
+  font-size: 0.74rem;
+  font-weight: 600;
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
 }
 
 .status {

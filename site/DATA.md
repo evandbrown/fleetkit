@@ -324,7 +324,7 @@ The builder applies these rules, and `contract.ts` checks them on every document
 3. **A density passes** if at least one trial ran at it and every trial at it passed. It's `not_tested` if no counting trial ran at it, and `failed` otherwise.
 4. **A run's result** (`tested_successfully`) is the highest listed density that passed with every lower listed density passing too; it's never called a maximum. `first_failed` is the lowest density that failed; `gap` the integers strictly between the two; `not_tested` the listed densities no counting trial reached. A run that stopped early has a result from the densities it did test.
 5. **Cost** per 1,000 tasks = 1,000 × price per hour ÷ 3,600 × window seconds ÷ density. The **execution** window runs from release to last return, the **observed** window from the trial's start to a clean host. Cost is given only at densities that passed, at the assumed price for the instance type.
-6. **Comparing specs (D52, D60):** `per_host_vcpu` = `tested_successfully` ÷ host vCPUs. A replica's span runs from `tested_successfully` (0 if nothing passed) to `first_failed`, each ÷ host vCPUs, and its midpoint is the middle of that span; with no failure there is no midpoint, and the result reads "at least". A spec's midpoint is the mean of its replicas' midpoints, and null if any replica has none. Specs are compared by their midpoints, with every replica's span shown beside them. Where a spec's midpoint is null but some replicas have one, the pages show the mean of those replicas, labelled with how many have none ("1 replica stopped early"); the dataset's value stays null.
+6. **Comparing specs (D52, D60):** `per_host_vcpu` = `tested_successfully` ÷ host vCPUs. A replica's span runs from `tested_successfully` (0 if nothing passed) to `first_failed`, each ÷ host vCPUs, and its midpoint is the middle of that span; with no failure there is no midpoint, and the result reads "at least". A spec's midpoint is the mean of its replicas' midpoints, and null if any replica has none. Specs are compared by their midpoints, with every replica's span shown beside them: on Results and Compare, each replica is a bar to its span's end and the spec's midpoint a tick across its bars. Where a spec's midpoint is null but some replicas have one, the tick is the mean of those replicas, and its label says how many have none ("1 replica stopped early"); the dataset's value stays null.
 7. **Failures outside the experiment are never results (D63).** When a trial fails because of something the spec doesn't test (the support host overloaded, a harness error, an AWS problem), the harness sets it aside under the run's `ops/` directory, notes the cause in its operational log, and runs it again. The builder reads only the run's own trials, so a set-aside trial never appears and leaves no gap in the numbering. If no clean trial was possible at a density, that density and those above it are `not_tested`; the run isn't "stopped early". Smoke, case and fault trials test the harness and are never published either.
 8. **Consistency:** `by_density` lists exactly the spec's densities; a run document's entry equals the campaign's; `outcomes` equal the runs' results; a complete campaign has specs × replicas runs, none stopped early.
 
@@ -353,16 +353,16 @@ Hash routes, so every URL stays relative under `/fleetkit/`. `src/lib/router.ts`
 
 | Address | Route | Page |
 |---|---|---|
-| `#/`, `#/results` | `{ name: 'results', campaign: null }` | Results, on the featured campaign (D58) |
+| `#/` | `{ name: 'about' }` | About, the home page (D72) |
+| `#/results` | `{ name: 'results', campaign: null }` | Results, on the featured campaign (D58) |
 | `#/results/<campaign>` | `{ name: 'results', campaign }` | Results, on that campaign |
 | `#/results/<campaign>/runs/<run>?density=N` | `{ name: 'run', campaign, run, density }` | one run; `density` optional |
 | `#/results/<campaign>/runs/<run>/trials/<trial>?microvm=N` | `{ name: 'trial', campaign, run, trial, microvm }` | one trial; `microvm` optional |
 | `#/results/compare?specs=<campaign>/<spec>,...` | `{ name: 'compare', specs }` | Compare specs (D61); `specs` null when absent |
 | `#/builder?from=...` | `{ name: 'builder', from }` | the builder (Builder handoff, above) |
-| `#/about` | `{ name: 'about' }` | About |
 
 `compare` is reserved: `#/results/compare` is never read as a campaign, so no campaign may be named `compare`.
 
-**Links.** Build every link with `href(link)`; never write an address by hand. `area(route)` gives the navigation item a route belongs to (`results`, `builder` or `about`).
+**Links.** Build every link with `href(link)`; never write an address by hand. The home page is `href({ name: 'about' })` (`#/`), and Results on the featured campaign is `href({ name: 'results', campaign: null })` (`#/results`). `area(route)` gives the navigation item a route belongs to (`about`, `results` or `builder`); the navigation reads About | Results | Builder, and the wordmark goes home.
 
-**Older addresses.** `#/campaigns`, `#/campaigns/<campaign>` and its runs and trials, `#/compare?specs=...` and `#/method[/<anchor>]` open their new page at once, and the address bar is rewritten to the new address without a history entry (`resolve(hash)` returns the route and the address to show).
+**Older addresses.** `#/about`, `#/campaigns`, `#/campaigns/<campaign>` and its runs and trials, `#/compare?specs=...` and `#/method[/<anchor>]` open their new page at once, and the address bar is rewritten to the new address without a history entry (`resolve(hash)` returns the route and the address to show).

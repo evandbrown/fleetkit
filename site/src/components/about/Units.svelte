@@ -106,8 +106,8 @@
     <p class="h">Runs</p>
     <p class="s">a replica is the same spec on another host</p>
     <svg viewBox="0 0 150 150" aria-hidden="true">
-      {#each HOSTS as h, i (h.label)}
-        <rect class={i === 0 ? 'box on' : 'box'} x="0.5" y={h.y} width="149" height="26" rx="6" />
+      {#each HOSTS as h (h.label)}
+        <rect class="box" x="0.5" y={h.y} width="149" height="26" rx="6" />
         <text class="t-item" x="75" y={h.y + 17} text-anchor="middle">{h.label}</text>
       {/each}
     </svg>
@@ -119,9 +119,6 @@
     <svg viewBox="0 0 {FW} 150" aria-hidden="true">
       <rect class="frame" x="0.5" y="0.5" width={FW - 1} height="149" rx="10" />
       {#each layout as c (c.r.density)}
-        {#if c.r.density === focus}
-          <rect class="focus" x={c.cx - 15} y={c.top - 28} width="30" height={BASE - c.top + 46} rx="5" />
-        {/if}
         {#if c.bar}
           <rect class="sq {c.r.result === 'not_tested' ? 'off' : ''}" x={c.bar.x} y={c.bar.y} width={c.bar.w} height={c.bar.h} rx="2" />
         {:else}
@@ -212,16 +209,9 @@
     fill: var(--bg);
     stroke: var(--field-border);
   }
-  .box.on {
-    fill: var(--surface-2);
-    stroke: var(--ink-2);
-  }
   .frame {
     fill: var(--bg);
     stroke: var(--field-border);
-  }
-  .focus {
-    fill: var(--surface);
   }
   .sq {
     fill: var(--ordinal-2);

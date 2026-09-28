@@ -1,14 +1,14 @@
 // A tiny hash router. Hash routes keep every URL relative, so the site works under /fleetkit/ with no
 // server rewrites.
-//   #/  #/results                                          Results, on the featured campaign
+//   #/                                                     About, the home page (D72)
+//   #/results                                              Results, on the featured campaign
 //   #/results/:campaign                                    Results, on one campaign
 //   #/results/:campaign/runs/:run?density=8                one run, optionally its trials at one density
 //   #/results/:campaign/runs/:run/trials/:trial?microvm=3  one trial, optionally one microVM
 //   #/results/compare?specs=<campaign>/<spec>,...          specs from any campaigns, side by side
 //   #/builder?from=campaign:<c> | run:<c>/<run>            the experiment builder (DATA.md, "Builder handoff")
-//   #/about
-// Older addresses (#/campaigns/..., #/compare, #/method/...) still open their page, and the address bar is rewritten
-// to the new one (resolve, below).
+// Older addresses (#/about, #/campaigns/..., #/compare, #/method/...) still open their page, and the address bar is
+// rewritten to the new one (resolve, below).
 
 export type Route =
   | { name: 'results'; campaign: string | null }
@@ -45,7 +45,7 @@ const compare: Make = (_, q) => {
 
 // Tried in order: compare comes before a campaign id, so #/results/compare is never read as a campaign.
 const PATTERNS: [RegExp, Make][] = [
-  [/^\/?$/, () => ({ name: 'results', campaign: null })],
+  [/^\/?$/, () => ({ name: 'about' })],
   [/^\/results\/?$/, () => ({ name: 'results', campaign: null })],
   [/^\/results\/compare\/?$/, compare],
   [new RegExp(`^/results/${SEG}/?$`), (m) => ({ name: 'results', campaign: m[1] })],
@@ -58,10 +58,9 @@ const PATTERNS: [RegExp, Make][] = [
       return { name: 'builder', from: from && FROM.test(from) ? from : null };
     },
   ],
-  [/^\/about\/?$/, () => ({ name: 'about' })],
 ];
 
-// The addresses of the first version of the site. Each opens the page that replaced it.
+// Older addresses. Each opens the page that replaced it.
 const LEGACY: [RegExp, Make][] = [
   [/^\/campaigns\/?$/, () => ({ name: 'results', campaign: null })],
   [new RegExp(`^/campaigns/${SEG}/?$`), (m) => ({ name: 'results', campaign: m[1] })],
@@ -69,6 +68,7 @@ const LEGACY: [RegExp, Make][] = [
   [new RegExp(`^/campaigns/${SEG}/runs/${SEG}/trials/${SEG}/?$`), trial],
   [/^\/compare\/?$/, compare],
   [/^\/method(?:\/[a-z0-9-]+)?\/?$/, () => ({ name: 'about' })],
+  [/^\/about\/?$/, () => ({ name: 'about' })],
 ];
 
 function posInt(s: string | null): number | null {
@@ -116,7 +116,7 @@ export function href(r: Link): string {
     case 'builder':
       return r.from ? `#/builder?from=${r.from}` : '#/builder';
     case 'about':
-      return '#/about';
+      return '#/';
     case 'not_found':
       return `#${r.path}`;
   }

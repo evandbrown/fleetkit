@@ -1,5 +1,5 @@
-// Linear scales and axis ticks for the charts. Small on purpose: the charts need nothing else, and d3-scale
-// would pull colour interpolation into the bundle.
+// Linear scales and axis ticks for the charts, and the lane chart's rows. Small on purpose: the charts need nothing
+// else, and d3-scale would pull colour interpolation into the bundle.
 import { nice, ticks } from 'd3-array';
 
 export interface Linear {
@@ -34,6 +34,14 @@ export function niceDomain(values: number[], opts: { zero?: boolean; count?: num
   if (hi === lo) hi = lo + 1;
   const [a, b] = nice(lo, hi, count);
   return [a, b];
+}
+
+/**
+ * The top of an axis bounded by a capacity (a host's vCPUs): a tenth above it, so the capacity line has room for its
+ * label and the axis never reaches far past what the host has.
+ */
+export function ceilingTop(capacity: number): number {
+  return capacity * 1.1;
 }
 
 /** The index of the value in `xs` nearest to `x`. `xs` needn't be sorted. */
@@ -75,3 +83,21 @@ export function areaPath(xs: number[], lower: number[], upper: number[]): string
 }
 
 const round = (v: number) => Math.round(v * 10) / 10;
+
+/** The most height a trial's lanes take, in px: with the axis, a trial of hundreds of microVMs stays under 480 px. */
+export const LANES_MAX_PX = 440;
+
+/**
+ * How a trial's lane chart lays out `n` lanes: each row's height, which rows are labelled, and whether it is dense.
+ * Up to 64 lanes, rows by size as before; beyond that, rows no taller than fits LANES_MAX_PX (fractions of a pixel for
+ * a few hundred), labelled at 1 and every 10th lane, or every 20th when rows are thinner still.
+ */
+export function laneLayout(n: number, compact = false): { rowH: number; dense: boolean; labelled: (row: number) => boolean } {
+  const base = compact ? (n <= 16 ? 13 : n <= 32 ? 9 : n <= 64 ? 6 : 4) : n <= 16 ? 18 : n <= 32 ? 12 : n <= 64 ? 7 : 5;
+  const dense = n > 64 && n * base > LANES_MAX_PX;
+  const rowH = dense ? LANES_MAX_PX / n : base;
+  if (rowH >= 12) return { rowH, dense, labelled: () => true };
+  if (n <= 64) return { rowH, dense, labelled: (r) => r % 5 === 0 };
+  const every = rowH * 10 >= 16 ? 10 : 20;
+  return { rowH, dense, labelled: (r) => r === 0 || (r + 1) % every === 0 };
+}

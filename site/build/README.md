@@ -45,7 +45,8 @@ somewhere else; `--catalog` and `--repo` point it at another catalog and results
 
 ## Publishing a campaign
 
-Add `{ "id": "<campaign>", "title": "<a short name>" }` to the catalog's `campaigns`, with optional `notes`
-(the limits of the result, in plain sentences) and `reading` (Evan's own). The site opens on the newest complete
-campaign; set the catalog's `featured` to choose another (D58). A campaign of one from before campaigns existed
-names its run under `before_campaigns` (see cap-baseline-1).
+Add `{ "id": "<campaign>", "title": "<a short name>" }` to the catalog's `campaigns`, with optional `notes` (the limits
+of the result, in plain sentences) and `reading` (Evan's own). The title names it on Results; give the Builder's
+Start from the same one in `TITLES` ([draft.ts](../src/components/builder/draft.ts)), which a unit test checks.
+Results opens on the newest complete campaign; set the catalog's `featured` to choose another (D58). A campaign of one
+from before campaigns existed names its run under `before_campaigns` (see cap-baseline-1).

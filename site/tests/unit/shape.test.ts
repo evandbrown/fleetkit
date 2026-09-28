@@ -3,22 +3,28 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  answerRows,
+  answerText,
+  campaignFigure,
   campaignHeadline,
   campaignRefs,
   chartRows,
   closestSlo,
   compareRows,
-  comparisonLine,
   coresStack,
+  firedRule,
   densityRows,
   differingRows,
   headline,
   lanes,
+  latency,
   limitBars,
   limitPanels,
+  limitPick,
   runAttribution,
   runResult,
   sameCriteria,
+  sharedBands,
   specCard,
   specLabels,
   specResults,
@@ -26,6 +32,8 @@ import {
   trialSlos,
   type SpecRef,
 } from '../../src/lib/shape';
+import { makeBands, tickShown } from '../../src/lib/bands';
+import { laneLayout, LANES_MAX_PX } from '../../src/lib/scale';
 import { differing, FIELDS, field, flatten, mib, show } from '../../src/lib/spec';
 import type { CampaignDoc, Index, RunDoc, TrialDoc } from '../../src/lib/types';
 
@@ -62,7 +70,7 @@ describe('specs, from the input schema', () => {
   it('group every input by section, marking what a spec changed', () => {
     const groups = specSections(syn.specs[1].spec, syn.specs[1].changes);
     expect(groups.map((g) => g.group)).toEqual(['Worker host', 'Hypervisor', 'MicroVM', 'Densities', 'Success criteria', 'Procedure', 'Support host']);
-    expect(groups.find((g) => g.group === 'Success criteria')!.rows[0].label).toBe('Each step p50');
+    expect(groups.find((g) => g.group === 'Success criteria')!.rows[0].label).toBe('Step p50 target');
     const changed = groups.flatMap((g) => g.rows.filter((r) => r.base !== undefined));
     expect(changed.map((r) => [r.path, r.base, r.value])).toEqual([
       ['worker_host.instance_type', 'm8i.4xlarge', 'm8i.2xlarge'],
@@ -147,12 +155,30 @@ describe('how it performed', () => {
       ['Cloud Hypervisor', 0.5938, '1 replica stopped early', null, 'at 10 · 1 of 2 replicas'],
       ['Firecracker MMIO', 0.5313, '1 replica stopped early', null, 'at 9 · 1 of 2 replicas'],
     ]);
-    // The one-line comparison: highest first.
-    expect(comparisonLine(hvRows).map((e) => [e.label, r4(e.delta)])).toEqual([
-      ['Firecracker PCI + RNG', null],
-      ['Cloud Hypervisor', -0.0625],
-      ['Firecracker MMIO', -0.125],
+  });
+
+  it('answers in a line: what each spec fit, grouped, and what ran out (D72)', () => {
+    expect(answerText(specResults(refs(cap), docs))).toBe('8 microVMs met every SLO, 0.50 per host vCPU. Host CPU ran out at 12.');
+    // Across host sizes the figure is per host vCPU.
+    expect(answerText(specResults(refs(syn), docs))).toBe(
+      'm8i.4xlarge fits 0.50 microVMs per host vCPU, m8i.2xlarge 0.38–0.50. Host CPU ran out first in both.',
+    );
+    expect(answerText(specResults(refs(hv), docs))).toBe(
+      'Firecracker PCI + RNG fits 10 microVMs, Cloud Hypervisor 9, Firecracker MMIO 8–9. Host CPU ran out first in all three.',
+    );
+  });
+
+  it('draws each run of each spec as a bar to its first failure, with a link to the run', () => {
+    const rows = answerRows(specResults(refs(hv), docs), docs);
+    expect(rows.map((r) => [r.label, r.series, r.runs.map((x) => [x.replica, x.passed, x.failed, x.stoppedEarly])])).toEqual([
+      ['Firecracker PCI + RNG', 0, [[1, 10, 11, false], [2, 10, 11, false]]],
+      ['Cloud Hypervisor', 1, [[1, 9, 10, false], [2, 9, null, true]]],
+      ['Firecracker MMIO', 2, [[1, 8, 9, false], [2, 9, null, true]]],
     ]);
+    expect(rows[1].runs[1].href).toBe('#/results/nested-hv-synthetic/runs/cloud-hypervisor-r2');
+    const partial: CampaignDoc = { ...syn, runs: syn.runs.filter((r) => r.id !== 'm8i-2xlarge-r2') };
+    const p = answerRows(specResults(refs(partial), new Map([[syn.id, partial]])), new Map([[syn.id, partial]]));
+    expect(p[1].runs[1]).toMatchObject({ replica: 2, href: null, passed: null });
   });
 
   it('labels a spec with no interval in any replica', () => {
@@ -170,9 +196,21 @@ describe('how it performed', () => {
 
   it('chooses a campaign by its best spec', () => {
     const e = (id: string) => index.campaigns.find((c) => c.id === id)!;
-    expect(campaignHeadline(e('cap-baseline-1'))).toEqual({ density: '8', label: 'microVMs', perVcpu: '0.50' });
-    expect(campaignHeadline(e('nested-sizes-synthetic'))).toEqual({ density: '8', label: 'microVMs', perVcpu: '0.50' });
-    expect(campaignHeadline(e('nested-hv-synthetic'))).toMatchObject({ density: '10', perVcpu: '0.63' });
+    expect(campaignHeadline(e('cap-baseline-1'))).toEqual({ density: '8', label: 'microVMs', perVcpu: '0.50', spec: 'baseline' });
+    expect(campaignHeadline(e('nested-sizes-synthetic'))).toEqual({ density: '8', label: 'microVMs', perVcpu: '0.50', spec: 'm8i-4xlarge' });
+    expect(campaignHeadline(e('nested-hv-synthetic'))).toMatchObject({ density: '10', perVcpu: '0.63', spec: 'firecracker' });
+  });
+
+  it("gives each campaign's card its answer: one spec's figures, or a bar per spec (D72)", () => {
+    const e = (id: string) => index.campaigns.find((c) => c.id === id)!;
+    expect(campaignFigure(e('cap-baseline-1')).single).toMatchObject({ density: '8', perVcpu: '0.50' });
+    const sizes = campaignFigure(e('nested-sizes-synthetic'), ['m8i.4xlarge', 'm8i.2xlarge']);
+    expect(sizes.metric).toBe('Per vCPU');
+    expect(sizes.bars.map((b) => [b.label, b.text])).toEqual([['m8i.4xlarge', '0.50'], ['m8i.2xlarge', '0.38–0.50']]);
+    const hvs = campaignFigure(e('nested-hv-synthetic'));
+    expect(hvs.metric).toBe('Max density');
+    expect(hvs.bars.map((b) => [b.text, b.lo, b.hi])).toEqual([['10', 10, 10], ['9', 9, 9], ['8–9', 8, 9]]);
+    expect(hvs.max).toBe(10);
   });
 });
 
@@ -221,6 +259,113 @@ describe('the result chart', () => {
     const partial: CampaignDoc = { ...syn, runs: syn.runs.filter((r) => r.id !== 'm8i-2xlarge-r2') };
     const rows = chartRows(refs(partial), new Map([[syn.id, partial]]));
     expect(rows.at(-1)).toMatchObject({ runId: 'm8i-2xlarge-r2', runHref: null, marks: [], note: 'not run yet' });
+  });
+});
+
+describe('the shared density bands', () => {
+  it('give each density tested a band, and the listed densities above them one not-tested band', () => {
+    const capRuns = new Map([['cap-baseline-1/baseline-r1', capRun]]);
+    const bands = sharedBands(latency(refs(cap), docs, capRuns), chartRows(refs(cap), docs, capRuns));
+    expect(bands.map((b) => [b.label, b.untested])).toEqual([
+      ['1', false],
+      ['2', false],
+      ['4', false],
+      ['8', false],
+      ['12', false],
+      ['16', true],
+    ]);
+  });
+});
+
+describe('the density ticks', () => {
+  it('all show when they fit, else every other one, counted down from the highest density tested', () => {
+    const perVcpu = makeBands([1, 4, 8, 9, 10, 11].map((d) => d / 16).concat([1, 24, 48, 96, 108, 120, 132, 144, 160, 176, 192].map((d) => d / 192)), [], true);
+    expect(perVcpu.map((b) => b.label)).toEqual(['0.01', '0.06', '0.13', '0.25', '0.5', '0.56', '0.63', '0.69', '0.75', '0.83', '0.92', '1']);
+    const all = tickShown(perVcpu, 77);
+    expect(perVcpu.every((_, i) => all(i))).toBe(true);
+    // A phone: about 26 px a band, for ticks 24 px wide.
+    const phone = tickShown(perVcpu, 26);
+    expect(perVcpu.filter((_, i) => phone(i)).map((b) => b.label)).toEqual(['0.06', '0.25', '0.56', '0.69', '0.83', '1']);
+    // The not-tested band keeps its tick.
+    const withUntested = makeBands([1, 24, 48, 96, 108, 120, 132, 144, 160, 176, 184], [192], false);
+    const t = tickShown(withUntested, 20);
+    expect(withUntested.filter((_, i) => t(i)).map((b) => b.label)).toEqual(['1', '48', '108', '132', '160', '184', '192']);
+  });
+});
+
+describe('latency by density', () => {
+  const synRuns = new Map(syn.runs.map((r) => [`${syn.id}/${r.id}`, synRun(r.id)]));
+
+  it("gives every counting trial its slowest step p50 and its task p95, per spec, per host vCPU across sizes", () => {
+    const lat = latency(refs(syn), docs, synRuns);
+    expect(lat.perVcpu).toBe(true);
+    expect(lat.replicas).toBe(2);
+    expect(lat.stepTargets).toEqual([1000]);
+    expect(lat.taskTargets).toEqual([5000]);
+    expect(lat.series.map((s) => [s.label, s.points.length])).toEqual([['m8i.4xlarge', 18], ['m8i.2xlarge', 20]]);
+    const p = lat.series[1].points.find((x) => x.key === 'nested-sizes-synthetic/m8i-2xlarge-r2/d4-t3')!;
+    expect(p).toMatchObject({
+      series: 1,
+      replica: 2,
+      density: 4,
+      x: 0.5,
+      step: { ms: 1246.9796, target: 1000, name: 'home' },
+      task: { ms: 2809.2428, target: 5000 },
+      passed: false,
+      title: 'm8i.2xlarge · replica 2 · trial 3 at density 4',
+      href: '#/results/nested-sizes-synthetic/runs/m8i-2xlarge-r2/trials/d4-t3',
+    });
+    // Warm-ups and illustrations aren't judged, so they aren't drawn; points run low density to high.
+    const xs = lat.series.flatMap((s) => s.points.map((q) => q.x));
+    expect(lat.series.every((s) => s.points.every((q, i, a) => i === 0 || a[i - 1].x <= q.x))).toBe(true);
+    expect(xs.length).toBe(38);
+  });
+
+  it('uses the density itself on one host size, and names nothing a single run needs no name for', () => {
+    const lat = latency(refs(cap), docs, new Map([['cap-baseline-1/baseline-r1', capRun]]));
+    expect(lat.perVcpu).toBe(false);
+    expect(lat.replicas).toBe(1);
+    const at12 = lat.series[0].points.filter((p) => p.density === 12);
+    expect(at12.map((p) => [p.x, p.title, p.passed])).toEqual([
+      [12, 'trial 1 at density 12', false],
+      [12, 'trial 2 at density 12', false],
+      [12, 'trial 3 at density 12', false],
+    ]);
+    expect(at12[0].step).toEqual({ ms: 1279.246, target: 1000, name: 'home' });
+  });
+
+  it('draws nothing for runs whose documents are not loaded', () => {
+    expect(latency(refs(syn), docs, new Map()).series.every((s) => s.points.length === 0)).toBe(true);
+  });
+});
+
+describe('at the limit', () => {
+  const runsOf = (c: CampaignDoc) =>
+    new Map(c.runs.map((r) => [`${c.id}/${r.id}`, read<RunDoc>(c.id, 'runs', `${r.id}.json`)]));
+
+  it("picks the replica that failed lowest, and there the first trial that failed", () => {
+    const [big, small] = refs(syn);
+    const s = limitPick(small, syn, runsOf(syn))!;
+    expect([s.run.id, s.density, s.trial.id, s.failed, s.ranOut]).toEqual(['m8i-2xlarge-r2', 4, 'd4-t3', true, 'host_cpu']);
+    // Both replicas fail at 12: the first replica.
+    const b = limitPick(big, syn, runsOf(syn))!;
+    expect([b.run.id, b.density, b.trial.id]).toEqual(['m8i-4xlarge-r1', 12, 'd12-t1']);
+    const mmio = limitPick(refs(hv).find((r) => r.spec.name === 'firecracker-mmio')!, hv, runsOf(hv))!;
+    expect([mmio.run.id, mmio.density, mmio.trial.id]).toEqual(['firecracker-mmio-r1', 9, 'd9-t1']);
+    // Beside it, a passing trial at the last density that passed, in the same run.
+    expect([s.pass?.density, s.pass?.trial.passed]).toEqual([3, true]);
+    // The rule that ran out at the failure.
+    const at4 = s.run.trials.filter((t) => t.counts && t.density === 4);
+    expect(firedRule(at4, syn.rules, s.ranOut)?.key).toBe('host_cpu_util_pct');
+    expect(firedRule(at4, syn.rules, null)).toBeNull();
+  });
+
+  it('falls back to the highest density that passed when nothing failed, and to nothing with no runs loaded', () => {
+    const early: CampaignDoc = { ...hv, runs: hv.runs.filter((r) => r.id === 'cloud-hypervisor-r2') };
+    const ch = refs(early).find((r) => r.spec.name === 'cloud-hypervisor')!;
+    const p = limitPick(ch, early, runsOf(early))!;
+    expect([p.run.id, p.density, p.trial.id, p.failed, p.ranOut]).toEqual(['cloud-hypervisor-r2', 9, 'd9-t1', false, null]);
+    expect(limitPick(ch, early, new Map())).toBeNull();
   });
 });
 
@@ -324,6 +469,49 @@ describe('a trial', () => {
 
   it('stacks host CPU by process in a fixed order', () => {
     expect(coresStack(doc)!.layers.map((l) => l.key)).toEqual(['microvm_vcpus', 'hypervisor', 'hostd', 'driver', 'unattributed']);
+  });
+
+  it("never stacks host CPU past the host's vCPUs, keeping each process's share, and leaves the data alone", () => {
+    // A boot spike, as cumulative counters give on a 192-vCPU host: 1,150 vCPUs in one short interval.
+    const cores = doc.series.host.cores!;
+    const spiked: TrialDoc = {
+      ...doc,
+      series: { ...doc.series, host: { ...doc.series.host, cores: { ...cores, microvm_vcpus: cores.microvm_vcpus.map((v, i) => (i === 3 ? 1000 : v)), hypervisor: cores.hypervisor.map((v, i) => (i === 3 ? 150 : v)) } } },
+    };
+    const total = (s: ReturnType<typeof coresStack>, i: number) => s!.layers.reduce((a, l) => a + l.values[i], 0);
+    const raw = coresStack(spiked)!;
+    const clipped = coresStack(spiked, 16)!;
+    expect(total(raw, 3)).toBeGreaterThan(1150);
+    expect(total(clipped, 3)).toBeCloseTo(16, 9);
+    for (let i = 0; i < clipped.t.length; i++) expect(total(clipped, i)).toBeLessThanOrEqual(16 + 1e-9);
+    // Each process keeps its share of the sample.
+    const share = (s: ReturnType<typeof coresStack>, k: string) => s!.layers.find((l) => l.key === k)!.values[3] / total(s, 3);
+    expect(share(clipped, 'hypervisor')).toBeCloseTo(share(raw, 'hypervisor'), 9);
+    // A sample within the host is drawn as recorded; the document itself is unchanged.
+    const within = raw.t.findIndex((_, i) => total(raw, i) <= 16 && total(raw, i) > 1);
+    expect(within).toBeGreaterThanOrEqual(0);
+    expect(clipped.layers.map((l) => l.values[within])).toEqual(raw.layers.map((l) => l.values[within]));
+    expect(spiked.series.host.cores!.microvm_vcpus[3]).toBe(1000);
+  });
+
+  it('keeps a small trial\'s lanes as they were, and packs hundreds into about 480 px', () => {
+    const height = (n: number, compact = false) => n * laneLayout(n, compact).rowH;
+    // Small trials: rows by size, every lane (or every fifth) numbered.
+    expect([12, 32, 64].map((n) => laneLayout(n).rowH)).toEqual([18, 12, 7]);
+    expect([12, 32, 64].map((n) => laneLayout(n, true).rowH)).toEqual([13, 9, 6]);
+    expect(laneLayout(12).labelled(7)).toBe(true);
+    expect([0, 1, 5, 10].map((r) => laneLayout(48).labelled(r))).toEqual([true, false, true, true]);
+    expect(laneLayout(64).dense).toBe(false);
+    // 192 lanes (a metal host's full density): thin rows, the whole chart under 480 px with its axis, numbered 1, 10, 20...
+    for (const compact of [false, true]) {
+      const L = laneLayout(192, compact);
+      expect(L.dense).toBe(true);
+      expect(height(192, compact)).toBeLessThanOrEqual(LANES_MAX_PX);
+      expect(6 + height(192, compact) + 26).toBeLessThanOrEqual(480);
+      expect(Array.from({ length: 192 }, (_, r) => r).filter(L.labelled).map((r) => r + 1)).toEqual([1, ...Array.from({ length: 19 }, (_, i) => (i + 1) * 10)]);
+    }
+    // Thinner still: every 20th.
+    expect(Array.from({ length: 400 }, (_, r) => r).filter(laneLayout(400).labelled).slice(0, 3).map((r) => r + 1)).toEqual([1, 20, 40]);
   });
 
   it('draws a microVM without boot phases as one starting segment', () => {

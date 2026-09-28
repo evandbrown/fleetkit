@@ -1,7 +1,7 @@
 <script lang="ts">
   import { nav } from './lib/nav.svelte';
   import Header from './components/Header.svelte';
-  import Home from './views/Home.svelte';
+  import Featured from './views/Featured.svelte';
   import Campaign from './views/Campaign.svelte';
   import Run from './views/Run.svelte';
   import Trial from './views/Trial.svelte';
@@ -24,9 +24,12 @@
 <Header route={r} />
 
 <main class="page">
-  {#if r.name === 'results'}
+  {#if r.name === 'about'}
+    <!-- the home page (D72) -->
+    <About />
+  {:else if r.name === 'results'}
     {#if r.campaign === null}
-      <Home />
+      <Featured />
     {:else}
       {#key r.campaign}<Campaign id={r.campaign} />{/key}
     {/if}
@@ -41,8 +44,6 @@
   {:else if r.name === 'builder'}
     <!-- The builder reads its route (from) from nav.route itself: DATA.md, "Builder handoff". -->
     <Builder />
-  {:else if r.name === 'about'}
-    <About />
   {:else}
     <NotFound path={r.path} />
   {/if}

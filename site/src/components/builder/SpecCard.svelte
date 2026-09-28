@@ -15,8 +15,9 @@
     type Json,
     type Obj,
   } from '../../lib/campaign';
-  import { NAME_RULE, at, hostFacts, under, type Msg } from './draft';
+  import { ADD_HELP, NAME_RULE, SPEC_NAME_HELP, WHY_HELP, at, hostFacts, under, type Msg } from './draft';
   import Field from './Field.svelte';
+  import Help from './Help.svelte';
 
   let {
     name,
@@ -49,6 +50,7 @@
   } = $props();
 
   const slug = $derived(name.replace(/[^a-z0-9-]/g, '_'));
+  let nameHelp: Help | undefined = $state();
   const idOf = (path: string) => `s-${slug}-${path.replace(/[._]/g, '-')}`;
   const own = $derived(isObj(changes) ? flatten(changes) : {});
   const paths = $derived(Object.keys(own));
@@ -145,10 +147,11 @@
 
 <article class="card" aria-label="Spec {name}">
   <header>
+    <label class="snl" for="s-{slug}-name" onpointerenter={(e) => nameHelp?.peek(e)} onpointerleave={(e) => nameHelp?.unpeek(e)}>Spec name</label>
+    <Help bind:this={nameHelp} id="s-{slug}-name-about" label="Spec name" text={SPEC_NAME_HELP} />
     <input
       id="s-{slug}-name"
       class="specname"
-      aria-label="Spec name"
       autocomplete="off"
       spellcheck="false"
       bind:value={nameText}
@@ -158,6 +161,7 @@
         if (e.key === 'Escape') nameText = name;
       }}
       aria-invalid={!!nameNote || top.some((m) => m.error)}
+      aria-describedby="s-{slug}-name-about"
     />
     <span class="actions">
       <button type="button" class="link" onclick={onduplicate}>Duplicate</button>
@@ -203,22 +207,27 @@
   {/each}
 
   {#if addable.length}
-    <select class="add" aria-label="Change an input in {name}" onchange={add}>
-      <option value="">+ Change an input</option>
-      {#each addable as f (f.path)}<option value={f.path}>{f.label}</option>{/each}
-    </select>
+    <span class="addrow">
+      <select class="add" aria-label="Change an input in {name}" aria-describedby="s-{slug}-add-about" onchange={add}>
+        <option value="">+ Change an input</option>
+        {#each addable as f (f.path)}<option value={f.path}>{f.label}</option>{/each}
+      </select>
+      <Help id="s-{slug}-add-about" label="Change an input" text={ADD_HELP} />
+    </span>
   {/if}
 
-  <label class="why">
-    <span>Why</span>
+  <div class="why">
+    <span class="whyname"><label for="s-{slug}-why">Why</label><Help id="s-{slug}-why-about" label="Why" text={WHY_HELP} /></span>
     <textarea
+      id="s-{slug}-why"
+      aria-describedby="s-{slug}-why-about"
       rows="2"
       bind:value={whyText}
       oninput={(e) => onwhy(e.currentTarget.value)}
       placeholder="Optional. One sentence."
       aria-invalid={at(msgs, `why.${name}`).some((m) => m.error)}
     ></textarea>
-  </label>
+  </div>
   {#each at(msgs, `why.${name}`) as m, i (i)}<p class="msg" class:error={m.error} class:problem={m.error}>{m.text}</p>{/each}
 </article>
 
@@ -239,7 +248,8 @@
   }
   .specname {
     font: 600 1rem var(--mono);
-    width: min(100%, 18rem);
+    width: min(100%, 16rem);
+    margin-left: 4px;
   }
   .actions {
     margin-left: auto;
@@ -274,8 +284,16 @@
   .offer span {
     flex: 1 1 14rem;
   }
-  .add {
+  .addrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
     margin-top: 10px;
+  }
+  .snl {
+    font-size: 0.88rem;
+    color: var(--ink-2);
+    cursor: help;
   }
   .why {
     display: grid;
@@ -283,6 +301,10 @@
     margin-top: 12px;
     font-size: 0.92rem;
     color: var(--ink-2);
+  }
+  .whyname {
+    display: inline-flex;
+    align-items: center;
   }
   .why textarea {
     width: 100%;

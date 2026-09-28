@@ -5,11 +5,13 @@ import { loadCampaign } from '../../lib/data';
 import {
   CAMPAIGN_FIELDS,
   InputError,
+  LIMITS,
   TYPES,
   evaluate,
   fieldAt,
   isObj,
   parseJson,
+  usd,
   type Evaluation,
   type Obj,
   type Plan,
@@ -29,12 +31,14 @@ export interface Start {
   def: Obj;
 }
 
-/** Titles for the campaign files, which carry only a name. */
-const TITLES: Record<string, string> = {
-  'nested-sizes-1': 'Two host sizes',
-  'nested-hv-1': 'Two hypervisors',
-  'nested-mem-1': 'Half the host memory',
+/** Titles for the campaign files, which carry only a name. A published campaign's is its title on Results (site/catalog.json;
+ *  a unit test holds them equal). */
+export const TITLES: Record<string, string> = {
+  'nested-sizes-1': 'Host size',
+  'nested-hv-1': 'Hypervisor',
+  'nested-mem-1': 'Host memory',
   'hv-host-1': 'Hypervisor and host kind',
+  'hv-host-2': 'Metal host',
 };
 
 /** The campaign files in experiments/campaigns/, campaigns first, then the examples that aren't approved to run. */
@@ -228,3 +232,29 @@ export function nextName(name: string, taken: string[]): string {
   const stem = m ? m[1] : name;
   for (let k = m ? Number(m[2]) + 1 : 2; ; k++) if (!taken.includes(`${stem}-${k}`)) return `${stem}-${k}`;
 }
+
+// ------------------------------------------------------------------ help
+// What the ⓘ beside a label says (D72), for the inputs and figures that aren't schema fields; the schema fields'
+// explanations are HELP in lib/campaign.ts. One or two plain sentences each.
+const dollars = (x: number) => usd(x).replace(/\.00$/, '');
+
+export const START_HELP =
+  'A campaign to edit: one that has run, or an example that hasn’t. Your draft is kept in this browser until you start from another.';
+
+export const SPEC_NAME_HELP =
+  'The spec’s name. Its runs are named after it, one per replica: name-r1, name-r2, and so on.';
+
+export const ADD_HELP =
+  'Sets one input differently for this spec: the worker host, the hypervisor, the microVM or the densities. Every other input stays as the base spec has it.';
+export const WHY_HELP = 'Optional: one sentence on why this spec is in the campaign, shown beside the spec.';
+
+export const REVIEW_HELP = {
+  runs: 'One run for each spec and replica. Each run gets its own worker host and support host and tests every density in its spec.',
+  time: 'About how long from launching the hosts until every run has uploaded its results. Runs start together when they fit the vCPU quota, otherwise in waves.',
+  expected: 'What the hosts cost at on-demand prices for as long as each run is expected to take.',
+  worst: `What the hosts cost if every one runs until its shutdown timer. A campaign must stay under the ${dollars(LIMITS.campaign_worst_case_usd)} limit.`,
+  vcpus: `The most vCPUs running at once, worker and support hosts together, against the account’s quota of ${LIMITS.vcpu_quota}. Runs that don’t fit wait for a later wave.`,
+  cost: `The worst case against the ${dollars(LIMITS.campaign_worst_case_usd)} limit for one campaign.`,
+  changes: 'The inputs that differ between the specs. Everything not listed is the same in every spec.',
+  hosts: 'One box per worker host: a row for each spec, a box for each replica.',
+} as const;

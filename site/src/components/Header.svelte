@@ -4,16 +4,18 @@
   let { route }: { route: Route } = $props();
   const current = $derived(area(route));
 
+  // About is the home page (D72): first in the navigation, and where the wordmark goes.
+  const HOME = href({ name: 'about' });
   const LINKS = [
+    { area: 'about', href: HOME, label: 'About' },
     { area: 'results', href: href({ name: 'results', campaign: null }), label: 'Results' },
     { area: 'builder', href: href({ name: 'builder', from: null }), label: 'Builder' },
-    { area: 'about', href: href({ name: 'about' }), label: 'About' },
   ] as const;
 </script>
 
 <header>
   <div class="bar">
-    <a class="brand" href="#/"><span class="mark" aria-hidden="true"></span>Fleetkit</a>
+    <a class="brand" href={HOME}><span class="mark" aria-hidden="true"></span>Fleetkit</a>
     <nav aria-label="Main">
       {#each LINKS as l (l.area)}
         <a href={l.href} aria-current={current === l.area ? 'page' : undefined}>{l.label}</a>

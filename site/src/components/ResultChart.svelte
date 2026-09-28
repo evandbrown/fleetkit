@@ -1,46 +1,62 @@
 <script lang="ts">
-  // Every trial of every run, across densities: one row per run, replicas together under their spec. Each trial is
-  // a mark (passed, failed) placed at how close it came to failing, its closest SLO as a share of the limit, so the
-  // chart shows the headroom and the climb past the dashed line. The shaded band runs from the last density that
-  // passed to the first that failed (D60's interval). A dashed ring is a listed density not tested. On one host size
-  // the axis is the density; across host sizes it is density per host vCPU (D52), with one axis for every row. Each
-  // mark opens its trial.
+  // Every trial, as a grid: a row per run (replicas together under their spec), a column per density tested, and in
+  // each cell a mark per trial there, passed or failed. The shaded span runs from the last density that passed to the
+  // first that failed (D60's interval); a dashed cell is a listed density the run didn't reach. The columns are the
+  // latency chart's bands (bands.ts), so the two read together. Each mark opens its trial; each replica label, its run.
   import * as f from '../lib/format';
-  import { linear } from '../lib/scale';
-  import { RATIO_CAP, type ChartRow } from '../lib/shape';
+  import { specColor } from '../lib/colors';
+  import { bandIndex, bandLayout, makeBands, tickShown, type Band } from '../lib/bands';
+  import type { ChartRow } from '../lib/shape';
   import MarkShape from './MarkShape.svelte';
 
-  let { rows, caption }: { rows: ChartRow[]; caption: string } = $props();
+  let {
+    rows,
+    caption,
+    bands: given = null,
+    perVcpu: forced = null,
+  }: { rows: ChartRow[]; caption: string; bands?: Band[] | null; perVcpu?: boolean | null } = $props();
 
   let width = $state(0);
+  /** The trial pointed at, read out above the grid. */
+  let hover: string | null = $state(null);
   const phone = $derived(width > 0 && width < 560);
+  const touch = typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches;
 
   const groups = $derived(new Set(rows.map((r) => r.group)).size);
   const multiCampaign = $derived(new Set(rows.map((r) => r.campaign)).size > 1);
   const replicas = $derived(rows.length > groups);
-  const headroom = $derived(rows.some((r) => r.marks.some((m) => m.ratio !== null)));
-  const single = $derived(rows.length === 1);
+  const perVcpu = $derived(forced ?? new Set(rows.map((r) => r.hostVcpus)).size > 1);
+  const xOf = (r: ChartRow, density: number) => (perVcpu ? density / r.hostVcpus : density);
+  const bands = $derived(
+    given ??
+      makeBands(
+        rows.flatMap((r) => r.marks.map((m) => xOf(r, m.density))),
+        rows.flatMap((r) => r.notTested.map((n) => xOf(r, n.density))),
+        perVcpu,
+      ),
+  );
 
-  const LABEL = $derived(replicas ? (phone ? 28 : 74) : 0);
-  const YAX = $derived(headroom ? (phone && !single ? 34 : 40) : 8);
-  const LEFT = $derived(LABEL + YAX);
-  const HEAD = 24;
-  const TOP = $derived(headroom ? 22 : 4);
-  const AXIS_H = 44;
-  const ROW_H = $derived(headroom ? (single ? 200 : phone ? 76 : 84) : 40);
-  const PAD_T = 10;
-  const PAD_B = $derived(headroom ? 16 : 8);
-  const SIZE = $derived(phone ? (single ? 12 : 9) : 14);
-  /** How far apart the trials at one density sit: tight on a phone, where neighbouring densities are close. */
-  const JITTER = $derived(phone ? (single ? 0.5 : 0.3) : 0.6);
+  const ROW = $derived(phone ? 24 : 26);
+  const HEAD = 22;
+  const TOP = 2;
+  const AXIS_H = 38;
+  const SIZE = $derived(phone ? 9 : 10);
 
-  const vcpus = $derived([...new Set(rows.map((r) => r.hostVcpus))]);
-  const oneHost = $derived(vcpus.length === 1 ? vcpus[0] : null);
-  /** On one host size, x is the density itself; otherwise density per host vCPU. */
-  const k = $derived(oneHost ?? 1);
-  const maxX = $derived(Math.max(0.1, ...rows.flatMap((r) => [...r.marks.map((m) => m.x), ...r.notTested.map((m) => m.x)])) * k);
-  const x = $derived(linear([0, maxX * 1.04], [LEFT + 10, Math.max(LEFT + 60, width - 14)]));
-
+  const specIndex = $derived([...new Set(rows.map((r) => r.group))]);
+  const L = $derived(bandLayout(bands.length, width, phone));
+  const shown = $derived(tickShown(bands, L.bw));
+  /** The run's untested gap between its last pass and first failure: the shaded span, and its label ("9–11 not tested"). */
+  function gapOf(r: ChartRow) {
+    if (!r.band) return null;
+    const a = bandIndex(bands, perVcpu ? r.band.from : r.band.from * r.hostVcpus);
+    const b = bandIndex(bands, perVcpu ? r.band.to : r.band.to * r.hostVcpus);
+    if (a < 0 || b < 0) return null;
+    const x = L.center(a);
+    const w = L.center(b) - x;
+    const text = r.band.gap ? `${f.range(r.band.gap)} not tested` : null;
+    // The label sits in the span when it fits, else on its own line under the row.
+    return { x, w, text, inside: !!text && text.length * 6.2 + 40 < w };
+  }
   const layout = $derived.by(() => {
     let y = TOP;
     let campaign: string | null = null;
@@ -51,168 +67,139 @@
         y += HEAD;
       }
       campaign = r.campaign;
-      const head = groups > 1 && r.first ? y : null;
+      const head = (groups > 1 || replicas) && r.first ? y : null;
       if (head !== null) y += HEAD;
       const top = y;
-      y += ROW_H;
-      const bottom = top + ROW_H - PAD_B;
-      const ry = linear([0, RATIO_CAP], [bottom, top + PAD_T]);
-      return { row: r, camp, head, top, bottom, mid: (top + bottom) / 2, ry };
+      const gap = gapOf(r);
+      y += ROW + (gap?.text && !gap.inside ? 14 : 0);
+      return { row: r, camp, head, top, mid: top + ROW / 2, gap };
     });
   });
-  const plotBottom = $derived(layout.length ? layout[layout.length - 1].top + ROW_H : TOP);
+  const plotBottom = $derived.by(() => {
+    const last = layout.at(-1);
+    return last ? last.top + ROW + (last.gap?.text && !last.gap.inside ? 14 : 0) : TOP;
+  });
   const height = $derived(plotBottom + AXIS_H);
 
-  /** Ticks: every density tested on one host size; round steps of density per host vCPU otherwise. */
-  const ticks = $derived.by(() => {
-    if (oneHost) {
-      const ds = [...new Set(rows.flatMap((r) => [...r.marks.map((m) => m.density), ...r.notTested.map((m) => m.density)]))].sort((a, b) => a - b);
-      const out: number[] = [];
-      for (const d of ds) if (!out.length || x(d) - x(out[out.length - 1]) >= 18) out.push(d);
-      return out;
-    }
-    const top = x.domain[1];
-    const step = [0.05, 0.1, 0.25, 0.5, 1, 2, 5].find((s) => top / s + 1 <= (phone ? 5 : 8)) ?? 10;
-    return Array.from({ length: Math.floor(top / step + 1e-9) + 1 }, (_, i) => Math.round(i * step * 100) / 100);
-  });
-  const tickText = (v: number) => (oneHost ? f.num(v) : v === 0 ? '0' : f.num(v, 2).replace(/0$/, '').replace(/\.0$/, ''));
-  const yTicks = $derived(single ? [0, 0.5, 1, 1.5, 2] : [1]);
-
-  /** Where a mark sits: trials at one density spread sideways a little, so none hides another. */
-  function place(r: ChartRow, m: ChartRow['marks'][number], L: (typeof layout)[number]) {
-    const n = r.marks.filter((o) => o.density === m.density).length;
-    const cx = x(m.x * k) + (m.k - (n - 1) / 2) * (m.ratio !== null ? SIZE * JITTER : 0);
-    const cy = m.ratio !== null ? L.ry(m.ratio) : L.mid + (m.k - (n - 1) / 2) * (SIZE + 1);
-    return { cx, cy };
-  }
-  const fit = (s: string, room: number) => (s.length * 7.5 <= room ? s : `${s.slice(0, Math.max(4, Math.floor(room / 7.5) - 1))}…`);
+  /** "Cloud Hypervisor · replica 2 · trial 1 at density 10: failed, home p50 at 101% of its limit". */
+  const readout = (r: ChartRow, title: string) =>
+    [multiCampaign ? r.campaignTitle : null, groups > 1 ? r.groupLabel : null, replicas ? `replica ${r.replica}` : null, title]
+      .filter(Boolean)
+      .join(' · ');
+  const fit = (s: string, room: number) => (s.length * 7.2 <= room ? s : `${s.slice(0, Math.max(4, Math.floor(room / 7.2) - 1))}…`);
 </script>
 
 <figure class="chart" bind:clientWidth={width}>
+  <p class="hint" class:reading={hover !== null}>
+    {#if hover}
+      <span aria-hidden="true">{hover}</span>
+    {:else}
+      {touch ? 'Tap' : 'Click'} a mark to open its trial
+    {/if}
+  </p>
   {#if width > 0}
     <svg {width} {height} role="group" aria-label={caption}>
-      {#if headroom}
-        <text class="ytitle" x={LABEL} y="12">% of SLO limit</text>
-      {/if}
-      {#each ticks as t (t)}
-        <line class="grid" x1={x(t)} x2={x(t)} y1={TOP} y2={plotBottom} />
-        <text class="tick" x={x(t)} y={plotBottom + 16} text-anchor="middle">{tickText(t)}</text>
+      {#each bands as b, i (b.label)}
+        {#if b.untested}
+          <rect class="untested" x={L.start(i) + 2} y={TOP} width={L.bw - 4} height={plotBottom - TOP} rx="4" />
+        {:else if i > 0}
+          <line class="sep" x1={L.start(i)} x2={L.start(i)} y1={TOP} y2={plotBottom} />
+        {/if}
+        {#if shown(i)}<text class="tick" class:off={b.untested} x={L.center(i)} y={plotBottom + 15} text-anchor="middle">{b.label}</text>{/if}
       {/each}
-      <text class="axis" x={x(0)} y={height - 6}>{oneHost ? 'Density (microVMs)' : 'Density per host vCPU'}</text>
+      <text class="axis" x={L.left} y={height - 4}>{perVcpu ? 'Density per host vCPU' : 'Density (microVMs)'}</text>
 
-      {#each layout as L (L.row.key)}
-        {@const row = L.row}
-        {#if L.camp !== null}
-          <text class="campaign" x="0" y={L.camp + 16}>{fit(row.campaignTitle, width)}</text>
+      {#each layout as R (R.row.key)}
+        {@const row = R.row}
+        {#if R.camp !== null}
+          <text class="campaign" x="0" y={R.camp + 15}>{fit(row.campaignTitle, width)}</text>
         {/if}
-        {#if L.head !== null}
-          <text class="group" x="0" y={L.head + 16}>{fit(row.groupLabel, width)}</text>
+        {#if R.head !== null}
+          <circle cx="5" cy={R.head + 11} r="4.5" fill={specColor(specIndex.indexOf(row.group))} />
+          <text class="group" x="15" y={R.head + 15}>{fit(row.groupLabel, width - 15)}</text>
         {/if}
+        <line class="track" x1={L.left} x2={L.right} y1={R.top + ROW + (R.gap?.text && !R.gap.inside ? 14 : 0)} y2={R.top + ROW + (R.gap?.text && !R.gap.inside ? 14 : 0)} />
 
-        {#if row.band}
-          <rect class="band" x={x(row.band.from * k)} y={L.top + 2} width={Math.max(2, x(row.band.to * k) - x(row.band.from * k))} height={L.bottom - L.top - 2} rx="3" />
-          {#if single && row.band.gap}
-            <text class="band-label" x={(x(row.band.from * k) + x(row.band.to * k)) / 2} y={L.ry(RATIO_CAP) + 18} text-anchor="middle">
-              {f.range(row.band.gap)} not tested
-            </text>
+        {#if R.gap}
+          <rect class="gap" x={R.gap.x} y={R.top + 3} width={Math.max(2, R.gap.w)} height={ROW - 6} rx="3" />
+          {#if R.gap.text}
+            <text class="gap-label" x={R.gap.x + R.gap.w / 2} y={R.gap.inside ? R.mid + 4 : R.top + ROW + 9} text-anchor="middle">{R.gap.text}</text>
           {/if}
         {/if}
 
-        {#if headroom}
-          {#each yTicks as v (v)}
-            <line class={v === 1 ? 'slo' : 'hgrid'} x1={LEFT} x2={x.range[1]} y1={L.ry(v)} y2={L.ry(v)} />
-            {#if single || L === layout[0]}
-              <text class="ytick" x={LEFT - 6} y={L.ry(v) + 4} text-anchor="end">{f.num(v * 100)}%</text>
-            {/if}
-          {/each}
-          {#if L === layout[0]}
-            <text class="slo-label" x={x.range[1]} y={L.ry(1) - 5} text-anchor="end">SLO limit</text>
-          {/if}
-        {/if}
-        <line class="track" x1={LEFT} x2={x.range[1]} y1={headroom ? L.bottom : L.mid} y2={headroom ? L.bottom : L.mid} />
-
-        {#if replicas}
-          {#if row.runHref}
-            <a href={row.runHref} aria-label="Run {row.runId}">
-              <text class="label" x="0" y={L.mid + 4}>{phone ? `r${row.replica}` : `replica ${row.replica}`}</text>
-            </a>
-          {:else}
-            <text class="label off" x="0" y={L.mid + 4}>{phone ? `r${row.replica}` : `replica ${row.replica}`}</text>
-          {/if}
+        {#if row.runHref}
+          <a class="run" href={row.runHref} aria-label="Run {row.runId}">
+            <text class="label" x="0" y={R.mid + 4}>{replicas ? (phone ? `r${row.replica}` : `replica ${row.replica}`) : 'run'}</text>
+          </a>
+        {:else}
+          <text class="label off" x="0" y={R.mid + 4}>{replicas ? (phone ? `r${row.replica}` : `replica ${row.replica}`) : 'run'}</text>
         {/if}
 
         {#each row.notTested as n (n.density)}
-          <MarkShape kind="untested" cx={x(n.x * k)} cy={headroom ? L.bottom : L.mid} size={10} />
+          {@const i = bandIndex(bands, xOf(row, n.density))}
+          {#if i >= 0 && !bands[i].untested}
+            <rect class="cell-off" x={L.center(i) - Math.min(18, L.bw * 0.3)} y={R.top + 6} width={Math.min(36, L.bw * 0.6)} height={ROW - 12} rx="3" />
+          {/if}
         {/each}
         {#each row.marks as m (`${m.density}-${m.k}`)}
-          {@const p = place(row, m, L)}
-          <a class="mark" href={m.href} aria-label={m.title}>
-            <rect class="hit" x={p.cx - 9} y={p.cy - 9} width="18" height="18" />
-            <MarkShape kind={m.passed ? 'pass' : 'fail'} cx={p.cx} cy={p.cy} size={m.passed ? SIZE : SIZE - 1} />
+          {@const i = bandIndex(bands, xOf(row, m.density))}
+          {@const n = row.marks.filter((o) => o.density === m.density).length}
+          {@const step = Math.min(SIZE + 3, (L.bw * 0.8) / Math.max(1, n))}
+          {@const cx = L.center(i) + (m.k - (n - 1) / 2) * step}
+          <a
+            class="mark"
+            href={m.href}
+            aria-label={m.title}
+            onpointerenter={() => (hover = readout(row, m.title))}
+            onpointerleave={() => (hover = null)}
+            onfocus={() => (hover = readout(row, m.title))}
+            onblur={() => (hover = null)}
+          >
+            <rect class="hit" x={cx - step / 2} y={R.top} width={step} height={ROW} />
+            <circle class="halo" {cx} cy={R.mid} r={SIZE / 2 + 4} />
+            <g class="shape"><MarkShape kind={m.passed ? 'pass' : 'fail'} {cx} cy={R.mid} size={m.passed ? SIZE : SIZE - 1} /></g>
           </a>
         {/each}
-        {#if single && row.band && headroom}
-          {@const best = row.marks.filter((m) => m.x === row.band!.from && m.ratio !== null)}
-          {#if best.length}
-            <text class="callout" x={x(row.band.from * k)} y={Math.max(...best.map((m) => place(row, m, L).cy)) + 24} text-anchor="middle">
-              {best[0].density} passed
-            </text>
-          {/if}
-        {/if}
         {#if row.note}
-          <text class="note" x={x.range[1]} y={headroom ? L.ry(1) - 6 : L.mid - 10} text-anchor="end">{row.note}</text>
+          <text class="note" x={L.right - 4} y={R.mid + 4} text-anchor="end">{row.note}</text>
         {/if}
       {/each}
     </svg>
   {/if}
   <figcaption>
-    <span class="key"><svg width="14" height="14" aria-hidden="true"><MarkShape kind="pass" cx={7} cy={7} size={12} /></svg>passed</span>
-    <span class="key"><svg width="14" height="14" aria-hidden="true"><MarkShape kind="fail" cx={7} cy={7} size={11} /></svg>failed</span>
-    {#if rows.some((r) => r.notTested.length)}
-      <span class="key"><svg width="14" height="14" aria-hidden="true"><MarkShape kind="untested" cx={7} cy={7} size={10} /></svg>not tested</span>
-    {/if}
-    {#if rows.some((r) => r.band)}<span class="key"><i class="sw band-sw"></i>last pass to first failure</span>{/if}
+    <span class="key"><svg width="14" height="14" aria-hidden="true"><MarkShape kind="pass" cx={7} cy={7} size={11} /></svg>passed</span>
+    <span class="key"><svg width="14" height="14" aria-hidden="true"><MarkShape kind="fail" cx={7} cy={7} size={10} /></svg>failed</span>
+    {#if rows.some((r) => r.band)}<span class="key"><i class="sw gap-sw"></i>last pass to first failure</span>{/if}
+    {#if bands.some((b) => b.untested) || rows.some((r) => r.notTested.length)}<span class="key"><i class="sw off-sw"></i>not tested</span>{/if}
   </figcaption>
 </figure>
 
 <style>
   .chart {
-    margin: 16px 0 0;
+    margin: 8px 0 0;
     min-width: 0;
   }
   svg {
     display: block;
     overflow: visible;
   }
-  .grid {
+  .sep {
     stroke: var(--grid);
-  }
-  .hgrid {
-    stroke: var(--grid);
+    stroke-dasharray: 2 3;
   }
   .track {
-    stroke: var(--axis);
+    stroke: var(--grid);
   }
-  .slo {
-    stroke: var(--ink-2);
-    stroke-dasharray: 5 4;
+  .untested,
+  .cell-off {
+    fill: var(--surface);
+    stroke: var(--rule);
+    stroke-dasharray: 3 3;
   }
-  .slo-label,
-  .ytick,
-  .ytitle {
-    fill: var(--ink-2);
-    font-size: 11px;
-    font-variant-numeric: tabular-nums;
-  }
-  .ytitle {
-    font-size: 12px;
-    fill: var(--muted);
-  }
-  .band {
+  .gap {
     fill: var(--surface-2);
-    opacity: 0.8;
   }
-  .band-label {
+  .gap-label {
     fill: var(--ink-2);
     font-size: 11px;
   }
@@ -220,6 +207,9 @@
     fill: var(--ink-2);
     font-size: 11px;
     font-variant-numeric: tabular-nums;
+  }
+  .tick.off {
+    fill: var(--muted);
   }
   .axis {
     fill: var(--muted);
@@ -235,38 +225,80 @@
     font-size: 13px;
     font-weight: 650;
   }
+  /* Each replica label is a link to its run, and looks like one. */
   .label {
-    fill: var(--ink-2);
-    font-size: 12px;
-  }
-  a:hover .label {
     fill: var(--accent-ink);
+    font-size: 12px;
+    text-decoration: underline;
+    text-decoration-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+  .run:hover .label,
+  .run:focus-visible .label {
+    fill: var(--accent);
   }
   .label.off {
     fill: var(--muted);
+    text-decoration: none;
   }
   .note {
     fill: var(--ink-2);
     font-size: 11.5px;
+    paint-order: stroke;
+    stroke: var(--bg);
+    stroke-width: 4px;
   }
-  .callout {
-    fill: var(--good);
-    font-size: 12px;
-    font-weight: 650;
+  .mark {
+    cursor: pointer;
   }
   .hit {
     fill: transparent;
   }
-  .mark:hover :global(.m-pass),
-  .mark:focus-visible :global(.m-pass) {
-    stroke: var(--ink);
+  .halo {
+    fill: var(--highlight);
+    stroke: var(--accent);
+    stroke-width: 1.5;
+    opacity: 0;
+    transition: opacity 0.12s;
   }
-  .mark:hover :global(.m-fail),
-  .mark:focus-visible :global(.m-fail) {
-    stroke: var(--ink);
+  .shape {
+    transform-box: fill-box;
+    transform-origin: center;
+    transition: transform 0.12s;
+  }
+  .mark:hover .halo,
+  .mark:focus-visible .halo {
+    opacity: 1;
+  }
+  .mark:hover .shape,
+  .mark:focus-visible .shape {
+    transform: scale(1.25);
   }
   a:focus-visible {
+    outline: none;
+  }
+  a.run:focus-visible .label {
     outline: 2px solid var(--accent);
+  }
+  /* One line, always: a readout that wrapped would move the marks under the pointer. */
+  .hint {
+    height: 1.5em;
+    display: flex;
+    align-items: center;
+    white-space: nowrap;
+    overflow: hidden;
+    margin: 0 0 4px;
+    font-size: 0.85rem;
+    color: var(--muted);
+    max-width: none;
+  }
+  .hint.reading span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .hint.reading {
+    color: var(--ink-2);
+    font-variant-numeric: tabular-nums;
   }
   figcaption {
     display: flex;
@@ -289,7 +321,11 @@
     height: 10px;
     border-radius: 2px;
   }
-  .band-sw {
+  .gap-sw {
     background: var(--surface-2);
+  }
+  .off-sw {
+    background: var(--surface);
+    border: 1px dashed var(--axis);
   }
 </style>

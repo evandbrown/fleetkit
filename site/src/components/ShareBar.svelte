@@ -3,8 +3,8 @@
   // read from colour or hover alone. Colours follow the parts' fixed order.
   import * as f from '../lib/format';
 
-  let { title, parts }: { title: string; parts: { label: string; share: number; detail?: string }[] } = $props();
-  const shown = $derived(parts.map((p, i) => ({ ...p, color: `var(--series-${(i % 8) + 1})` })));
+  let { title, parts }: { title: string; parts: { label: string; share: number; detail?: string; color?: string }[] } = $props();
+  const shown = $derived(parts.map((p, i) => ({ ...p, color: p.color ?? `var(--series-${(i % 8) + 1})` })));
 </script>
 
 <figure class="share">

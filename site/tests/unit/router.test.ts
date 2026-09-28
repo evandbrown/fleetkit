@@ -22,8 +22,12 @@ describe('router', () => {
     for (const r of ROUTES) expect(resolve(href(r))).toEqual({ route: r, redirect: null });
   });
 
-  it('opens Results on the featured campaign from an empty hash, #/ and #/results', () => {
-    for (const h of ['', '#', '#/', '#/results', '#/results/']) {
+  it('opens About, the home page, from an empty hash and #/ (D72)', () => {
+    for (const h of ['', '#', '#/']) expect(resolve(h)).toEqual({ route: { name: 'about' }, redirect: null });
+  });
+
+  it('opens Results on the featured campaign from #/results', () => {
+    for (const h of ['#/results', '#/results/']) {
       expect(resolve(h)).toEqual({ route: { name: 'results', campaign: null }, redirect: null });
     }
   });
@@ -35,7 +39,8 @@ describe('router', () => {
       '#/results/c/runs/r/trials/d8-t2?microvm=3',
     );
     expect(href({ name: 'compare', specs: ['a/b', 'c/d'] })).toBe('#/results/compare?specs=a/b,c/d');
-    expect(href({ name: 'about' })).toBe('#/about');
+    expect(href({ name: 'about' })).toBe('#/');
+    expect(href({ name: 'results', campaign: null })).toBe('#/results');
   });
 
   it('reads #/results/compare as the compare page, never as a campaign', () => {
@@ -55,8 +60,10 @@ describe('router', () => {
       ['#/compare', '#/results/compare'],
       ['#/compare?specs=a/b,c/d', '#/results/compare?specs=a/b,c/d'],
       ['#/compare?specs=', '#/results/compare?specs='],
-      ['#/method', '#/about'],
-      ['#/method/glossary', '#/about'],
+      ['#/method', '#/'],
+      ['#/method/glossary', '#/'],
+      ['#/about', '#/'],
+      ['#/about/', '#/'],
     ];
     for (const [from, to] of cases) {
       const { route, redirect } = resolve(from);
@@ -84,8 +91,9 @@ describe('router', () => {
     expect(parse('#/builder?from=spec:x')).toEqual({ name: 'builder', from: null });
   });
 
-  it('puts every data page under Results in the navigation', () => {
-    expect(area(parse('#/'))).toBe('results');
+  it('puts every data page under Results in the navigation, and the home page under About', () => {
+    expect(area(parse('#/'))).toBe('about');
+    expect(area(parse('#/results'))).toBe('results');
     expect(area(parse('#/results/c/runs/r/trials/d1-t1'))).toBe('results');
     expect(area(parse('#/results/compare?specs=a/b'))).toBe('results');
     expect(area(parse('#/builder'))).toBe('builder');

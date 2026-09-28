@@ -1,14 +1,20 @@
 <script lang="ts">
-  // What we evaluate, how, and what we measure. Mostly pictures; the spec and SLOs come from the featured campaign,
-  // the filmstrip from its illustration trial. The diagrams are illustrations.
+  // The home page (D72): what Fleetkit is, how it works, and a way into the results; then the setup, the task, the
+  // SLOs, how we test and what we measure. Mostly pictures; the SLOs are the method's standard ones (the input schema's
+  // defaults), the spec comes from the featured campaign and the filmstrip from its illustration trial, and the
+  // featured result names any SLO of its own (D74). The diagrams are illustrations.
   import { imgUrl, loadCampaign, loadIndex, loadTrial } from '../lib/data';
   import { num } from '../lib/format';
-  import { STEP_NAMES, type CampaignDoc, type StepName, type TrialDoc } from '../lib/types';
+  import { href } from '../lib/router';
+  import { campaignHeadline, sloTag } from '../lib/shape';
+  import { STANDARD_CRITERIA } from '../lib/spec';
+  import { STEP_NAMES, type CampaignDoc, type CampaignEntry, type StepName, type TrialDoc } from '../lib/types';
   import Architecture from '../components/about/Architecture.svelte';
   import Units from '../components/about/Units.svelte';
   import SloBadges from '../components/SloBadges.svelte';
   import Mark from '../components/Mark.svelte';
 
+  let entry = $state<CampaignEntry | null>(null);
   let campaign = $state<CampaignDoc | null>(null);
   let film = $state<NonNullable<TrialDoc['filmstrip']> | null>(null);
   let broken = $state<Partial<Record<StepName, boolean>>>({});
@@ -18,6 +24,7 @@
       const index = await loadIndex();
       const id = index.featured ?? index.campaigns[0]?.id;
       if (!id) return;
+      entry = index.campaigns.find((e) => e.id === id) ?? null;
       const c = await loadCampaign(id);
       campaign = c;
       for (const r of c.runs.slice(0, 3)) {
@@ -69,6 +76,22 @@
       : [],
   );
 
+  // The featured campaign's headline, as its card on Results shows it, with the host it ran on and, if that spec
+  // wasn't judged by the standard SLOs, how its differ.
+  const featured = $derived.by(() => {
+    if (!entry) return null;
+    const h = campaignHeadline(entry);
+    const s = campaign?.specs.find((x) => x.name === h.spec) ?? null;
+    return { title: entry.title, ...h, host: s?.host.instance_type ?? null, slo: s ? sloTag([s.spec.criteria]) : null };
+  });
+
+  const FLOW = [
+    { name: 'Define', text: 'A campaign: the specs to compare, and replicas of each', link: { href: href({ name: 'builder', from: null }), text: 'Define your own in the Builder' } },
+    { name: 'Launch', text: 'Real EC2 hosts, headless Chrome in a microVM per browser' },
+    { name: 'Measure', text: 'A real five-step shopping task, at rising density' },
+    { name: 'Publish', text: 'The highest density that met every SLO, and its cost' },
+  ];
+
   const MEASURES = [
     { name: 'Latency', text: 'p50 and p95, each step and the whole task' },
     { name: 'Time to ready', text: 'start to browser ready, every microVM' },
@@ -81,12 +104,46 @@
 
 <article class="about">
   <header class="hero">
-    <h1>What we evaluate</h1>
-    <p class="lead">
-      How many headless Chrome browsers, each in its own microVM, can one cloud host run while every browser task stays
-      fast, and what does each task cost?
-    </p>
+    <div class="intro">
+      <h1>What is Fleetkit?</h1>
+      <p class="lead">
+        A benchmark framework for headless browsers at scale: many browsers per cloud host, each driven by an AI agent
+        with no person watching.
+      </p>
+      <p class="lead-2">
+        It finds how many browsers one host can run while every task stays inside its SLOs, and what each task costs.
+      </p>
+    </div>
+    <aside class="featured" aria-label="Featured result">
+      {#if featured}
+        <p class="label">Featured result · {featured.title}</p>
+        <p class="figure">
+          {#if featured.density !== null}<strong>{featured.density}</strong>{/if}
+          <span
+            >{featured.label}{#if featured.density !== null}{' on one '}<span class="host">{featured.host ?? 'host'}</span>{/if}</span
+          >
+        </p>
+        {#if featured.density !== null}
+          <p class="note">
+            every SLO met{#if featured.perVcpu !== null}{' · '}<strong>{featured.perVcpu}</strong> per host vCPU{/if}
+          </p>
+        {/if}
+        {#if featured.slo}<p class="slo-tag">{featured.slo}</p>{/if}
+      {/if}
+      <a class="button primary" href={href({ name: 'results', campaign: null })}>See the results <span aria-hidden="true">→</span></a>
+    </aside>
   </header>
+
+  <ol class="flow" aria-label="How Fleetkit works">
+    {#each FLOW as step, i (step.name)}
+      <li>
+        <span class="n" aria-hidden="true">{i + 1}</span>
+        <strong>{step.name}</strong>
+        <span class="t">{step.text}</span>
+        {#if 'link' in step && step.link}<a class="t more" href={step.link.href}>{step.link.text} <span aria-hidden="true">→</span></a>{/if}
+      </li>
+    {/each}
+  </ol>
 
   <section aria-labelledby="architecture">
     <h2 id="architecture">Architecture</h2>
@@ -128,10 +185,8 @@
 
   <section aria-labelledby="slos">
     <h2 id="slos">SLOs</h2>
-    <p class="sub">Every trial must meet all five.</p>
-    {#if spec}
-      <SloBadges criteria={spec.spec.criteria} />
-    {/if}
+    <p class="sub">The standard five. Every trial must meet all of them.</p>
+    <SloBadges criteria={STANDARD_CRITERIA} />
   </section>
 
   <section aria-labelledby="testing">
@@ -193,14 +248,159 @@
   .about {
     padding-bottom: 24px;
   }
+  /* what Fleetkit is, and the way into the results */
   .hero {
     padding: 8px 0 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 300px;
+    align-items: center;
+    gap: 24px 48px;
   }
-  .hero h1 {
-    max-width: 30ch;
+  @media (max-width: 820px) {
+    .hero {
+      grid-template-columns: minmax(0, 1fr);
+    }
   }
   .hero .lead {
     margin: 0;
+    max-width: 58ch;
+  }
+  .lead-2 {
+    margin: 10px 0 0;
+    max-width: 58ch;
+    color: var(--ink-2);
+  }
+  .flow a.more {
+    grid-column: 2;
+    margin-top: 4px;
+    font-weight: 600;
+    color: var(--accent-ink);
+  }
+  .featured {
+    min-height: 168px;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    align-items: flex-start;
+    gap: 4px;
+    padding: 16px 18px 18px;
+    border: 1px solid var(--rule);
+    border-top: 3px solid var(--accent);
+    border-radius: var(--radius);
+    background: var(--highlight);
+  }
+  .featured p {
+    margin: 0;
+  }
+  .featured .label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--ink-2);
+  }
+  .featured .figure {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    font-weight: 600;
+  }
+  .featured .figure strong {
+    font-size: 2.75rem;
+    line-height: 1.05;
+    font-weight: 750;
+    letter-spacing: -0.03em;
+    color: var(--accent-ink);
+    font-variant-numeric: tabular-nums;
+  }
+  /* An instance type never breaks at its hyphen (m8i.metal-48xl). */
+  .featured .figure .host {
+    white-space: nowrap;
+  }
+  .featured .note {
+    font-size: 0.88rem;
+    color: var(--ink-2);
+  }
+  .featured .note strong {
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+  }
+  .featured .button {
+    margin-top: 10px;
+  }
+  .featured .slo-tag {
+    margin-top: 4px;
+  }
+
+  /* how it works: four steps, left to right */
+  .flow {
+    list-style: none;
+    margin: 32px 0 0;
+    padding: 0;
+    max-width: none;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 20px;
+  }
+  .flow li {
+    position: relative;
+    display: grid;
+    grid-template-columns: 22px minmax(0, 1fr);
+    align-content: start;
+    gap: 2px 10px;
+    padding: 14px 16px;
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    background: var(--surface);
+    font-size: 0.9rem;
+    line-height: 1.45;
+  }
+  .flow li:not(:last-child)::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    right: -15px;
+    width: 8px;
+    height: 8px;
+    border-top: 2px solid var(--axis);
+    border-right: 2px solid var(--axis);
+    transform: translateY(-50%) rotate(45deg);
+  }
+  .flow .n {
+    grid-row: span 2;
+    display: inline-grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    margin-top: 1px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #fff;
+    font-size: 0.75rem;
+    font-weight: 700;
+  }
+  .flow strong {
+    font-size: 1rem;
+    font-weight: 650;
+  }
+  .flow .t {
+    color: var(--ink-2);
+  }
+  @media (max-width: 820px) {
+    .flow {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .flow li:not(:last-child)::after {
+      display: none;
+    }
+  }
+  @media (max-width: 420px) {
+    .flow {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 8px;
+    }
+    .flow li {
+      padding: 10px 14px;
+    }
   }
   .sub {
     margin: -4px 0 16px;
