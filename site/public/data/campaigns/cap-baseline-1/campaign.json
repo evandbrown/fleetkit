@@ -1,7 +1,7 @@
 {
   "schema": "fleetkit-site-data/2",
   "id": "cap-baseline-1",
-  "title": "Baseline",
+  "title": "baseline",
   "question": "How many microVMs fit on one m8i.4xlarge?",
   "started": "2026-09-27T17:09Z",
   "ended": "2026-09-27T17:12Z",
@@ -13,6 +13,7 @@
     "commit": "652f26d88c"
   },
   "definition_path": "docs/capacity-experiment.md",
+  "answer": "One m8i.4xlarge (16 vCPUs) held 8 microVMs of 2 vCPU / 2 GiB, 0.50 microVMs per host vCPU; 12 failed. Host CPU ran out first; 9–11 were not tried.",
   "definition": {
     "name": "cap-baseline-1",
     "question": "How many microVMs fit on one m8i.4xlarge?",
@@ -69,6 +70,8 @@
     {
       "name": "baseline",
       "label": "m8i.4xlarge, Firecracker, 2 vCPU / 2 GiB",
+      "short": "m8i.4xlarge",
+      "why": "The starting point for every later campaign",
       "changes": [],
       "spec": {
         "worker_host": {

@@ -50,7 +50,8 @@ def test_index_lists_the_catalog_and_features_the_newest_complete_campaign(data)
     assert "cap-baseline-1" in ids
     complete = [c for c in index["campaigns"] if c.get("status") == "complete"]
     newest = max(complete, key=lambda c: c.get("started") or "")["id"]
-    assert index["featured"] == newest          # no "featured" in the catalog: the newest complete (D58)
+    # D58: the catalog's "featured" when it sets one, else the newest complete campaign.
+    assert index["featured"] == (read(SITE, "catalog.json").get("featured") or newest)
     assert not any(c.get("synthetic") for c in index["campaigns"])
 
 
@@ -356,7 +357,8 @@ def _campaign_repo(tmp: Path) -> Path:
         shutil.copytree(RUN, cdir / f"baseline-r{k}", ignore=BIG)
     set_aside(cdir / "baseline-r2", "t010-firecracker-n12-r3")
     (repo / "catalog.json").write_text(json.dumps({"format": "fleetkit-catalog/2", "campaigns": [
-        {"id": "copies-test", "title": "Two copies", "notes": ["A test campaign."]}]}))
+        {"id": "copies-test", "title": "two_copies", "notes": ["A test campaign."],
+         "whys": {"baseline": "The same run, read twice"}}]}))
     return repo
 
 
@@ -369,7 +371,8 @@ def test_a_campaign_in_the_new_layout(tmp_path):
     index = read(out, "index.json")
     assert index["featured"] == "copies-test" and index["campaigns"][0]["status"] == "complete"
     c = read(out, "campaigns/copies-test/campaign.json")
-    assert c["definition"]["name"] == "copies-test" and c["specs"][0]["why"].startswith("The spec cap-baseline-1")
+    assert c["definition"]["name"] == "copies-test" and c["definition"]["why"]["baseline"].startswith("The spec cap-baseline-1")
+    assert c["specs"][0]["why"] == "The same run, read twice"     # the catalog's why replaces the definition's
     assert c["definition_path"] is None           # D73: its file is only in this copy, not on GitHub's main branch
     assert [r["harness_commit"] for r in c["runs"]] == [CAP_SHORT, CAP_SHORT]
     assert [r["id"] for r in c["runs"]] == ["baseline-r1", "baseline-r2"]
@@ -411,6 +414,41 @@ def test_the_builder_names_retired_words_only_in_marked_blocks():
 def test_the_catalog_refuses_an_id_the_site_routes_use(tmp_path):
     import catalog as C
     cat = tmp_path / "catalog.json"
-    cat.write_text(json.dumps({"format": C.FORMAT, "campaigns": [{"id": "compare", "title": "Compare"}]}))
+    cat.write_text(json.dumps({"format": C.FORMAT, "campaigns": [{"id": "compare", "title": "compare"}]}))
     with pytest.raises(C.CatalogError, match="reserved"):
         C.load(cat, REPO)
+
+
+@pytest.mark.skipif(not (REPO / "results/nested-sizes-1/campaign.json").exists(), reason="results/nested-sizes-1 isn't downloaded here")
+def test_the_catalog_checks_the_words_the_site_shows(tmp_path):
+    """D93: a snake_case title of at most four words, unique; an answer of one or two sentences; a one-line question;
+    a short name of at most four words and a why of at most twelve for each spec the definition has."""
+    import catalog as C
+    cat = tmp_path / "catalog.json"
+
+    def load(*campaigns, **fields):
+        first = {"id": "nested-sizes-1", "title": "m8i_host_size", **fields}
+        cat.write_text(json.dumps({"format": C.FORMAT, "campaigns": [first, *campaigns]}))
+        return C.load(cat, REPO)
+
+    ok = load(answer="Close: both held 0.5 microVMs per host vCPU. Host CPU ran out first.",
+              question="Is density per host vCPU the same on 8 and 16 vCPU hosts?",
+              labels={"m8i-4xlarge": "m8i.4xlarge", "m8i-2xlarge": "1 vCPU / 1 GiB tuned"},
+              whys={"m8i-4xlarge": "The same host as the baseline campaign, with 64 GiB", "m8i-2xlarge": ""})
+    assert ok["campaigns"][0]["labels"]["m8i-2xlarge"] == "1 vCPU / 1 GiB tuned"   # three words: numbers and "/" aren't
+    assert ok["campaigns"][0]["whys"]["m8i-2xlarge"] == ""                        # an empty why removes the definition's
+    assert C.sentences("One m8i.4xlarge held 8 microVMs, 0.50 per host vCPU. Host CPU ran out first.") == 2
+    for bad, why in [({"title": "Host size"}, "snake_case"), ({"title": "a_b_c_d_e"}, "snake_case"),
+                     ({"answer": "One. Two. Three."}, "one or two"), ({"answer": "No full stop"}, "one or two"),
+                     ({"question": "Not a question."}, "question mark"),
+                     ({"labels": {"m8i-9xlarge": "x"}}, "doesn't have"),
+                     ({"labels": {"m8i-4xlarge": "one two three four five"}}, "four words"),
+                     ({"labels": {"m8i-4xlarge": "same", "m8i-2xlarge": "same"}}, "share"),
+                     ({"whys": {"m8i-9xlarge": "x"}}, "doesn't have"),
+                     ({"whys": {"m8i-4xlarge": "one two three four five six seven eight nine ten 11 12 13"}}, "twelve words"),
+                     ({"whys": {"m8i-4xlarge": "A trailing space "}}, "whitespace"),
+                     ({"whys": ["m8i-4xlarge"]}, "map each spec")]:
+        with pytest.raises(C.CatalogError, match=why):
+            load(**bad)
+    with pytest.raises(C.CatalogError, match="already used"):
+        load({"id": "nested-hv-1", "title": "m8i_host_size"})

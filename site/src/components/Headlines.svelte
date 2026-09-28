@@ -40,7 +40,7 @@
     gap: 16px 20px;
     padding: 14px 18px;
     border: 1px solid var(--rule);
-    border-radius: 10px;
+    border-radius: var(--radius);
   }
   @media (max-width: 640px) {
     .stats {

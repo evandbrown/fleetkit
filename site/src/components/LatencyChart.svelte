@@ -2,7 +2,8 @@
   // Latency by density: each trial's slowest step p50, full width, against its SLO; under it, smaller, each trial's
   // whole-task p95 against its own. One band per density tested (bands.ts), shared with the every-trial grid below, so
   // the densities near the limit get as much room as the rest. In a band, each spec and replica has its own slot and
-  // each trial its own place: a dot passed, a cross failed, in the spec's colour, hollow for a second replica. The area
+  // each trial its own place: a dot passed, a cross failed, in the spec's colour, hollow for every replica after the
+  // first. The area
   // over a limit is tinted; when the specs' limits differ, each limit names whose it is (D74). Pointing at a trial
   // reads it out; each mark opens its trial.
   import * as f from '../lib/format';
@@ -158,7 +159,8 @@
     {/if}
     {#if apart}
       <li><svg width="12" height="12" aria-hidden="true"><circle cx="6" cy="6" r="5" fill="var(--ink-2)" /></svg>replica 1</li>
-      <li><svg width="12" height="12" aria-hidden="true"><circle cx="6" cy="6" r="4.2" fill="var(--bg)" stroke="var(--ink-2)" stroke-width="1.6" /></svg>replica 2</li>
+      <!-- Every replica after the first is hollow, so the key counts them: "replica 2", or "replicas 2–5". -->
+      <li><svg width="12" height="12" aria-hidden="true"><circle cx="6" cy="6" r="4.2" fill="var(--bg)" stroke="var(--ink-2)" stroke-width="1.6" /></svg>{data.replicas === 2 ? 'replica 2' : `replicas 2–${data.replicas}`}</li>
     {/if}
     <li><svg width="12" height="12" aria-hidden="true"><path d={X(6, 6, 4)} stroke="var(--ink-2)" stroke-width="2.2" stroke-linecap="round" /></svg>failed</li>
     <li><i class="sw over-sw"></i>over the SLO</li>

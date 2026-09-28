@@ -1,8 +1,10 @@
 <script lang="ts">
-  // Every trial, as a grid: a row per run (replicas together under their spec), a column per density tested, and in
-  // each cell a mark per trial there, passed or failed. The shaded span runs from the last density that passed to the
-  // first that failed (D60's interval); a dashed cell is a listed density the run didn't reach. The columns are the
-  // latency chart's bands (bands.ts), so the two read together. Each mark opens its trial; each replica label, its run.
+  // Every trial, as a grid: a row per run (replicas together under their spec, which is named once above them with
+  // its colour dot), a column per density tested, and in each cell a mark per trial there, passed or failed. The
+  // shaded span runs from the last density that passed to the first that failed (D60's interval); a dashed cell is a
+  // listed density the run didn't reach. The columns are the latency chart's bands (bands.ts), so the two read
+  // together. Each mark opens its trial; each replica label ("replica 2"; "r2" on a phone, where the key says what r
+  // is), its run.
   import * as f from '../lib/format';
   import { specColor } from '../lib/colors';
   import { bandIndex, bandLayout, makeBands, tickShown, type Band } from '../lib/bands';
@@ -67,7 +69,7 @@
         y += HEAD;
       }
       campaign = r.campaign;
-      const head = (groups > 1 || replicas) && r.first ? y : null;
+      const head = r.first ? y : null;
       if (head !== null) y += HEAD;
       const top = y;
       const gap = gapOf(r);
@@ -87,6 +89,8 @@
       .filter(Boolean)
       .join(' · ');
   const fit = (s: string, room: number) => (s.length * 7.2 <= room ? s : `${s.slice(0, Math.max(4, Math.floor(room / 7.2) - 1))}…`);
+  /** A row's label: its replica, even with one, so every row names what it is. */
+  const rowLabel = (r: ChartRow) => (phone ? `r${r.replica}` : `replica ${r.replica}`);
 </script>
 
 <figure class="chart" bind:clientWidth={width}>
@@ -129,10 +133,10 @@
 
         {#if row.runHref}
           <a class="run" href={row.runHref} aria-label="Run {row.runId}">
-            <text class="label" x="0" y={R.mid + 4}>{replicas ? (phone ? `r${row.replica}` : `replica ${row.replica}`) : 'run'}</text>
+            <text class="label" x="0" y={R.mid + 4}>{rowLabel(row)}</text>
           </a>
         {:else}
-          <text class="label off" x="0" y={R.mid + 4}>{replicas ? (phone ? `r${row.replica}` : `replica ${row.replica}`) : 'run'}</text>
+          <text class="label off" x="0" y={R.mid + 4}>{rowLabel(row)}</text>
         {/if}
 
         {#each row.notTested as n (n.density)}
@@ -171,6 +175,7 @@
     <span class="key"><svg width="14" height="14" aria-hidden="true"><MarkShape kind="fail" cx={7} cy={7} size={10} /></svg>failed</span>
     {#if rows.some((r) => r.band)}<span class="key"><i class="sw gap-sw"></i>last pass to first failure</span>{/if}
     {#if bands.some((b) => b.untested) || rows.some((r) => r.notTested.length)}<span class="key"><i class="sw off-sw"></i>not tested</span>{/if}
+    {#if phone}<span class="key">r = replica</span>{/if}
   </figcaption>
 </figure>
 

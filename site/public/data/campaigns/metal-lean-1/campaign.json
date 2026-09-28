@@ -1,12 +1,13 @@
 {
   "schema": "fleetkit-site-data/2",
   "id": "metal-lean-1",
-  "title": "Metal, lean Chromium",
-  "question": "Does lean headless Chromium fit more microVMs on a metal host?",
+  "title": "metal_chromium_no_preload",
+  "question": "Does headless Chromium without its omnibox preload fit more microVMs on a metal host?",
   "started": "2026-09-28T09:37Z",
   "ended": "2026-09-28T09:41Z",
   "status": "complete",
   "definition_path": "experiments/campaigns/metal-lean-1.json",
+  "answer": "Yes: without the preload one m8i.metal-48xl (192 vCPUs) held at least 200 microVMs (the harness's cap), 1.04 microVMs per host vCPU. With it the same spec held 140 (metal_host_standard_slo), and cost fell from $0.072–0.075 to $0.055–0.057 per 1,000 tasks.",
   "definition": {
     "name": "metal-lean-1",
     "question": "Does lean headless Chromium fit more microVMs on a metal host?",
@@ -83,7 +84,8 @@
     {
       "name": "firecracker-metal-nopre",
       "label": "m8i.metal-48xl, Firecracker, 2 vCPU / 2 GiB",
-      "why": "Metal as hv-host-3 ran it, minus the hidden omnibox pages.",
+      "short": "m8i.metal-48xl",
+      "why": "The metal host again, with the omnibox preload turned off",
       "changes": [
         {
           "path": "worker_host.instance_type",

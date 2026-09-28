@@ -31,25 +31,25 @@ export interface Start {
   def: Obj;
 }
 
-/** Titles for the campaign files, which carry only a name. A published campaign's is its title on Results (site/catalog.json;
- *  a unit test holds them equal). */
+/** Titles for the campaign files, which carry only a name: snake_case, named for what the campaign varies (D93). A
+ *  published campaign's is its title on Results (site/catalog.json; a unit test holds them equal). */
 export const TITLES: Record<string, string> = {
-  'nested-sizes-1': 'Host size',
-  'nested-hv-1': 'Hypervisor',
-  'nested-mem-1': 'Host memory',
-  'hv-host-1': 'Hypervisor and host kind',
-  'hv-host-2': 'Metal host',
-  'c8i-sizes-1': 'Smaller c8i hosts',
-  'shape-cold-1': 'MicroVM shape, cold start',
-  'shape-warm-1': 'MicroVM shape, warm start',
-  'slo-frontier-1': 'SLO frontier',
-  'metal-lean-1': 'Metal, lean Chromium',
-  'hv-host-3': 'Metal, nested SLO',
-  'browser-lean-1': 'Leaner headless Chromium',
-  'guest-cold-1': 'Guest boot levers, cold start',
-  'stack-warm-1': 'Full stack, warm start',
-  'host16-stack-1': 'Full stack, host size',
-  'metal-stack-1': 'Full stack on metal',
+  'nested-sizes-1': 'm8i_host_size',
+  'nested-hv-1': 'hypervisor',
+  'nested-mem-1': 'host_memory',
+  'hv-host-1': 'hypervisor_host_kind',
+  'hv-host-2': 'metal_host',
+  'c8i-sizes-1': 'small_c8i_hosts',
+  'shape-cold-1': 'microvm_size_cold',
+  'shape-warm-1': 'microvm_size_warm',
+  'slo-frontier-1': 'slo_targets',
+  'metal-lean-1': 'metal_chromium_no_preload',
+  'hv-host-3': 'metal_host_standard_slo',
+  'browser-lean-1': 'chromium_no_preload',
+  'guest-cold-1': 'guest_boot_tuning',
+  'stack-warm-1': 'tuned_guest_warm_start',
+  'host16-stack-1': 'tuned_guest_host_size',
+  'metal-stack-1': 'tuned_guest_metal',
 };
 
 /** The campaign files in experiments/campaigns/, campaigns first, then the examples that aren't approved to run. */

@@ -109,6 +109,14 @@ def test_the_guest_console_and_memory_pages_label_a_spec_and_left_out_are_verbos
         SP.resolve({**d, "specs": {"aa": {}, "bb": {"microvm": {"console": "verbose", "memory_pages": "4k"}}}})
 
 
+def test_a_spec_document_carries_the_catalogs_short_name_only_when_given():
+    d = load("nested-sizes-1")
+    spec = dict(SP.resolve(d))["m8i-2xlarge"]
+    doc = SP.spec_doc("m8i-2xlarge", "m8i.2xlarge", None, d["base"], spec, "small host")
+    assert list(doc)[:3] == ["name", "label", "short"] and doc["short"] == "small host"
+    assert "short" not in SP.spec_doc("m8i-2xlarge", "m8i.2xlarge", None, d["base"], spec)
+
+
 def test_host_facts_follow_from_the_instance_type():
     assert SP.host_of("m8i.2xlarge") == {"instance_type": "m8i.2xlarge", "host_kind": "nested", "vcpus": 8,
                                          "memory_gib": 32, "price_usd_per_hour": 0.42336, "price_estimated": True}

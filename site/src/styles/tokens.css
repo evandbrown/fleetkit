@@ -50,11 +50,17 @@
   --series-7: #4a3aa7;
   --series-8: #e34948;
 
-  /* specs, in a campaign's order: no green or red, which mean passed and failed (validated all-pairs, light) */
+  /* specs, in a campaign's order: no green or red, which mean passed and failed. Eight, so a campaign of seven specs
+     gives each its own. Checked all pairs on white: every pair at least ΔE 12 apart to normal vision and 6.8 under
+     colour-blindness simulation (the first four alone reach 12.9 and 12.5); the chart marks also name their spec. */
   --spec-1: #2a78d6;
   --spec-2: #eb6834;
   --spec-3: #4a3aa7;
   --spec-4: #e87ba4;
+  --spec-5: #7b410e;
+  --spec-6: #0a658e;
+  --spec-7: #a184e4;
+  --spec-8: #b542b5;
 
   /* host CPU by process: the load in greys, the hypervisor's own threads picked out */
   --proc-microvm: #8f8e88;
@@ -77,7 +83,7 @@
   --gutter: 16px;
   --measure: 68ch;
   --page: 1080px;
-  --radius: 8px;
+  --radius: 10px; /* cards and tables; small controls use 6px, a single-line button 999px */
   --shadow: 0 1px 2px rgb(27 26 24 / 0.04), 0 4px 16px rgb(27 26 24 / 0.05);
 }
 

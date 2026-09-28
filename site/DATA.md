@@ -86,13 +86,16 @@ interface Index {
 
 interface CampaignEntry {
   id: string;
-  title: string;                   // a short name, from the catalog: "Two host sizes"
-  question: string;
+  title: string;                   // the catalog's snake_case name ("small_c8i_hosts", D93)
+  question: string;                // the definition's, or the catalog's rewording of it (D93)
   started: string;                 // its first run's start
   status: 'complete' | 'partial';  // partial: fewer runs than specs × replicas, or a run stopped early
   synthetic?: true;                // test fixtures only
   before_campaigns?: true;         // one run published before campaigns existed (the site shows it like any other)
   replicas: number;
+  answer?: string;                 // from the catalog: the campaign's answer in one or two plain sentences (D93)
+  featured_spec?: string;          // from the catalog: the spec About's featured card leads with, by name (one of
+                                   // specs[].name); without it the card leads with the best spec by midpoint
   specs: { name: string; label: string }[];
   runs: number;                    // runs published
   outcomes: SpecOutcome[];         // one per spec, in spec order
@@ -123,7 +126,8 @@ interface CostRanges { execution: Range; observed: Range }   // USD per 1,000 ta
 ```ts
 interface CampaignDoc {
   schema: 'fleetkit-site-data/2';
-  id: string; title: string; question: string;
+  id: string; title: string; question: string;   // title: the catalog's snake_case name ("small_c8i_hosts", D93);
+                                   // question: the definition's, or the catalog's rewording of it (D93)
   started: string; ended: string;
   status: 'complete' | 'partial';
   synthetic?: true;
@@ -134,6 +138,7 @@ interface CampaignDoc {
   definition_path: string | null;  // D73: the definition's file, experiments/campaigns/<campaign>.json, when GitHub's main
                                    // branch has it and it equals the definition as launched; for a reconstructed
                                    // definition, its pre-registration's path; else null (always null when synthetic)
+  answer?: string;                 // as in the index entry (D93)
   definition: CampaignDefinition;  // as launched
   specs: SpecDoc[];                // in definition order
   runs: RunEntry[];                // spec order, then replica order
@@ -156,7 +161,9 @@ interface SpecDoc {
   name: string;
   label: string;                   // what sets it apart from the campaign's other specs ("m8i.2xlarge"),
                                    // or, for a campaign's only spec, a summary ("m8i.4xlarge, Firecracker, 2 vCPU / 2 GiB")
-  why?: string;                    // the definition's reason for it
+  short?: string;                  // from the catalog: its short name, at most four words ("Cloud Hypervisor"; D93)
+  why?: string;                    // why it is in the campaign: the definition's reason, or the catalog's rewording
+                                   // of it (at most twelve words; D93); absent when the catalog removes it
   changes: SpecChange[];           // every leaf where it differs from the base, in the schema's order
   spec: Spec;                      // resolved: the base merged with its changes
   host: {                          // follows from the instance type (instance-types.json); never an input (D56)

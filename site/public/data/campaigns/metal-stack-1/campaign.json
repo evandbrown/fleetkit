@@ -1,12 +1,13 @@
 {
   "schema": "fleetkit-site-data/2",
   "id": "metal-stack-1",
-  "title": "Full stack on metal",
-  "question": "Is the full stack cheaper per task on a metal host than on c8i.xlarge?",
+  "title": "tuned_guest_metal",
+  "question": "Is the tuned guest (1 vCPU / 1 GiB, no omnibox preload, a quiet console, huge pages) cheaper per task on a metal host than on c8i.xlarge?",
   "started": "2026-09-28T13:15Z",
   "ended": "2026-09-28T13:47Z",
   "status": "complete",
   "definition_path": "experiments/campaigns/metal-stack-1.json",
+  "answer": "No: on m8i.metal-48xl the tuned guest held at least 200 microVMs, 1.04 microVMs per host vCPU, at $0.052–0.054 per 1,000 tasks against $0.019–0.027 on c8i.xlarge. With 4 KiB pages it held 192 at $0.063–0.064, host CPU running out at 200; the harness caps a host at 200.",
   "definition": {
     "name": "metal-stack-1",
     "question": "Is the full stack cheaper per task on a metal host than on c8i.xlarge?",
@@ -74,7 +75,8 @@
     {
       "name": "metal-stack",
       "label": "transparent huge pages",
-      "why": "The nested frontier's guest on a 192-vCPU metal host: predicted about 40% dearer per task (steady state).",
+      "short": "huge pages",
+      "why": "The tuned guest on a whole metal host",
       "changes": [],
       "spec": {
         "worker_host": {
@@ -133,7 +135,8 @@
     {
       "name": "metal-stack-4k",
       "label": "4 KiB pages",
-      "why": "The same with 4 KiB pages: THP predicted to save about 13% on metal, against 41-49% nested.",
+      "short": "4 KiB pages",
+      "why": "The same guest without huge pages, for comparison",
       "changes": [
         {
           "path": "microvm.memory_pages",

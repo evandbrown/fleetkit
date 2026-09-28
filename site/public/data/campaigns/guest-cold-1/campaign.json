@@ -1,12 +1,13 @@
 {
   "schema": "fleetkit-site-data/2",
   "id": "guest-cold-1",
-  "title": "Guest boot levers, cold start",
-  "question": "Do a quiet guest console and huge pages cut CPU per task on lean Chromium?",
+  "title": "guest_boot_tuning",
+  "question": "Do a quiet guest console and huge pages cut CPU per task on headless Chromium without its omnibox preload?",
   "started": "2026-09-28T10:33Z",
   "ended": "2026-09-28T10:41Z",
   "status": "complete",
   "definition_path": "experiments/campaigns/guest-cold-1.json",
+  "answer": "Huge pages moved c8i.xlarge from 3 microVMs to 5–6, cutting cost from $0.033–0.035 to $0.022–0.031 per 1,000 tasks; a quiet console changed nothing. With both, the 1 vCPU / 1 GiB guest held 6 at $0.019–0.027 (host CPU ran out); m8i.4xlarge rose from 13 to at least 18.",
   "definition": {
     "name": "guest-cold-1",
     "question": "Do a quiet guest console and huge pages cut CPU per task on lean Chromium?",
@@ -145,7 +146,8 @@
     {
       "name": "c8i-xlarge-lean",
       "label": "c8i.xlarge, 2 vCPUs, 2 GiB, verbose console, 4 KiB pages",
-      "why": "Control: browser-lean-1's lean c8i.xlarge spec, unchanged, so it pools.",
+      "short": "default guest",
+      "why": "The guest unchanged, for comparison",
       "changes": [],
       "spec": {
         "worker_host": {
@@ -202,7 +204,8 @@
     {
       "name": "c8i-xlarge-quiet",
       "label": "c8i.xlarge, 2 vCPUs, 2 GiB, quiet console, no keyboard probe, 4 KiB pages",
-      "why": "Quiet console, no keyboard probe: predicted -10% CPU per task.",
+      "short": "quiet console",
+      "why": "The guest boots without console output or a keyboard probe",
       "changes": [
         {
           "path": "microvm.console",
@@ -266,7 +269,8 @@
     {
       "name": "c8i-xlarge-thp",
       "label": "c8i.xlarge, 2 vCPUs, 2 GiB, verbose console, transparent huge pages",
-      "why": "Guest memory on huge pages: predicted -7% CPU per task.",
+      "short": "huge pages",
+      "why": "Guest memory on huge pages",
       "changes": [
         {
           "path": "microvm.memory_pages",
@@ -330,7 +334,8 @@
     {
       "name": "c8i-xlarge-quiet-thp",
       "label": "c8i.xlarge, 2 vCPUs, 2 GiB, quiet console, no keyboard probe, transparent huge pages",
-      "why": "Both guest levers: predicted -17%, the sum of the two.",
+      "short": "quiet + huge pages",
+      "why": "Both changes together",
       "changes": [
         {
           "path": "microvm.console",
@@ -400,7 +405,8 @@
     {
       "name": "c8i-xlarge-stack",
       "label": "c8i.xlarge, 1 vCPU, 1 GiB, quiet console, no keyboard probe, transparent huge pages",
-      "why": "The warm campaign's full stack, cold: does it need the wait?",
+      "short": "1 vCPU / 1 GiB tuned",
+      "why": "Both changes together on a smaller microVM",
       "changes": [
         {
           "path": "microvm.vcpus",
@@ -503,7 +509,8 @@
     {
       "name": "m8i-4xlarge-lean",
       "label": "m8i.4xlarge, 2 vCPUs, 2 GiB, verbose console, 4 KiB pages",
-      "why": "Standing control, lean: browser-lean-1's spec, unchanged, so it pools.",
+      "short": "m8i.4xlarge default guest",
+      "why": "The larger host, guest unchanged, for comparison",
       "changes": [
         {
           "path": "worker_host.instance_type",
@@ -595,7 +602,8 @@
     {
       "name": "m8i-4xlarge-thp",
       "label": "m8i.4xlarge, 2 vCPUs, 2 GiB, verbose console, transparent huge pages",
-      "why": "Huge pages alone on the 16-vCPU host, the quietest replicas: predicted -7%.",
+      "short": "m8i.4xlarge huge pages",
+      "why": "Huge pages alone on the larger host",
       "changes": [
         {
           "path": "worker_host.instance_type",

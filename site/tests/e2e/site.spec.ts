@@ -105,7 +105,10 @@ test('opens older addresses at their new ones', async ({ page }) => {
 test('opens on About: what Fleetkit is, how it works, and the way into the results', async ({ page }) => {
   await page.goto('./');
   await expect(page.locator('h1')).toHaveText('What is Fleetkit?');
-  await expect(page.locator('.hero .lead')).toContainText('benchmark framework for headless browsers');
+  // The intro says what drives the browsers: a test harness, not an agent (D92).
+  await expect(page.locator('.hero .lead')).toContainText('benchmark framework for the browser fleet');
+  await expect(page.locator('.hero .lead')).toContainText('driven by a test harness');
+  await expect(page.locator('.hero')).not.toContainText(/AI agent/);
   await expect(page.getByRole('list', { name: 'How Fleetkit works' }).getByRole('listitem')).toHaveCount(4);
   const featured = page.getByRole('complementary', { name: 'Featured result' });
   await expect(featured).toContainText('Synthetic host sizes');
@@ -113,6 +116,9 @@ test('opens on About: what Fleetkit is, how it works, and the way into the resul
   await expect(featured).toContainText(/\d+\s*microVMs? on one m8i\.4xlarge/);
   await expect(page.getByRole('link', { name: /Define your own in the Builder/ })).toHaveAttribute('href', '#/builder');
   await expect(featured).toContainText('per host vCPU');
+  // No question on the card (the answer carries its context), and a check before "SLOs" that reads as "every SLO met".
+  await expect(featured.locator('.q')).toHaveCount(0);
+  await expect(featured.locator('.slos')).toHaveText(/^\s*every SLO met\s*SLOs\s*$/);
   await expect(page.getByRole('link', { name: 'See the results' })).toHaveCount(1);
   await page.getByRole('link', { name: 'See the results' }).click();
   await expect(page).toHaveURL(/#\/results$/);
@@ -137,7 +143,9 @@ test('explains the setup on About, with the featured spec, the standard SLOs and
   await expect(page.getByRole('complementary', { name: 'Featured result' }).locator('.slo-tag')).toHaveCount(0);
   await expect(page.locator('ol.film > li')).toHaveCount(5);
   await expect(page.locator('ol.film')).toContainText('Verify cart');
-  await expect(page.locator('dl.spec .varies')).toHaveCount(4);
+  // The spec is the same table Results shows, for the featured campaign's first spec, with the support host last.
+  await expect(page.locator('.how table.tested tbody th')).toHaveText(['Host', 'Hypervisor', 'MicroVM', 'Densities', 'Replicas', 'SLOs', 'Support host']);
+  await expect(page.locator('.how table.tested thead')).toHaveCount(0);
   await expect(page.locator('ol.parts > li')).toHaveCount(5);
   await expect(page.locator('dl.measures dt')).toHaveText(['Latency', 'Time to ready', 'Host pressure', 'Cost', 'Max density', 'Midpoint']);
   // Nothing after What we measure: the one call to action is at the top, and there are no footer links.

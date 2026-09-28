@@ -1,12 +1,13 @@
 {
   "schema": "fleetkit-site-data/2",
   "id": "host16-stack-1",
-  "title": "Full stack, host size",
-  "question": "Is the full stack cheaper per task on a 4-vCPU or a 16-vCPU c8i host?",
+  "title": "tuned_guest_host_size",
+  "question": "Is the tuned guest (1 vCPU / 1 GiB, no omnibox preload, a quiet console, huge pages) cheaper per task on a 4-vCPU or a 16-vCPU c8i host?",
   "started": "2026-09-28T11:58Z",
   "ended": "2026-09-28T12:07Z",
   "status": "complete",
   "definition_path": "experiments/campaigns/host16-stack-1.json",
+  "answer": "The 4-vCPU host is cheaper: c8i.xlarge held 6–7 microVMs at $0.019–0.027 per 1,000 tasks, c8i.4xlarge 25–28 at $0.025–0.030. Host CPU ran out first on both.",
   "definition": {
     "name": "host16-stack-1",
     "question": "Is the full stack cheaper per task on a 4-vCPU or a 16-vCPU c8i host?",
@@ -131,7 +132,8 @@
     {
       "name": "c8i-xlarge-stack",
       "label": "c8i.xlarge, 1 vCPU, 1 GiB, quiet console, no keyboard probe, transparent huge pages",
-      "why": "Control: guest-cold-1's cheapest spec, unchanged, so it pools.",
+      "short": "c8i.xlarge",
+      "why": "The tuned guest on the 4-vCPU host",
       "changes": [
         {
           "path": "microvm.vcpus",
@@ -234,7 +236,8 @@
     {
       "name": "c8i-4xlarge-stack",
       "label": "c8i.4xlarge, 1 vCPU, 1 GiB, quiet console, no keyboard probe, transparent huge pages",
-      "why": "The same stack on a 16-vCPU host: predicted 27 microVMs, about 7% dearer.",
+      "short": "c8i.4xlarge",
+      "why": "The same tuned guest on a 16-vCPU host",
       "changes": [
         {
           "path": "worker_host.instance_type",
@@ -356,7 +359,8 @@
     {
       "name": "m8i-4xlarge-lean",
       "label": "m8i.4xlarge, 2 vCPUs, 2 GiB, verbose console, 4 KiB pages",
-      "why": "Standing control, lean: guest-cold-1's spec, unchanged, so it pools.",
+      "short": "m8i.4xlarge not tuned",
+      "why": "The 16-vCPU host from earlier campaigns, for comparison",
       "changes": [
         {
           "path": "worker_host.instance_type",

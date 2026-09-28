@@ -196,8 +196,11 @@ def build_campaign(c: dict, images: Images, repo: Path) -> tuple[dict, dict, lis
         resolved = SP.resolve(definition)
     base = definition["base"]
     labels = SP.labels(resolved)
-    why = definition.get("why") or {}
-    specs = [SP.spec_doc(name, labels[name], why.get(name), base, spec) for name, spec in resolved]
+    short = c.get("labels") or {}         # the catalog's short names (D93); a spec without one has no "short"
+    # The catalog's why for a spec replaces the definition's, and an empty one removes it (spec_doc leaves out a
+    # why that's empty); a spec the catalog doesn't name keeps the definition's.
+    whys = {**(definition.get("why") or {}), **(c.get("whys") or {})}
+    specs = [SP.spec_doc(name, labels[name], whys.get(name), base, spec, short.get(name)) for name, spec in resolved]
     by_name = {s["name"]: s for s in specs}
     unknown = sorted({name for name, _ in sources} - set(by_name))
     if unknown:
@@ -232,7 +235,11 @@ def build_campaign(c: dict, images: Images, repo: Path) -> tuple[dict, dict, lis
     complete = len(entries) == len(specs) * definition["replicas"] and not any(e["stopped_early"] for e in entries)
     status = "complete" if complete else "partial"
 
-    doc = {"schema": A.SCHEMA, "id": cid, "title": c["title"], "question": definition["question"],
+    # The site shows the catalog's question where it gives one (a rewording without jargon, D93) and its answer;
+    # the definition inside the document keeps its own question.
+    question = c.get("question") or definition["question"]
+    answer = c.get("answer")
+    doc = {"schema": A.SCHEMA, "id": cid, "title": c["title"], "question": question,
            "started": A.minute(min(starts)), "ended": A.minute(max(ends)), "status": status}
     if old:
         doc["before_campaigns"] = True
@@ -244,14 +251,20 @@ def build_campaign(c: dict, images: Images, repo: Path) -> tuple[dict, dict, lis
         else:
             log(f"  note: no commit found for {c['preregistration']}; preregistration left out")
     doc["definition_path"] = definition_path(c, definition, doc.get("preregistration"), REPO)
+    if answer:
+        doc["answer"] = answer
     doc.update({"definition": definition, "specs": specs, "runs": entries, "outcomes": outcomes, "rules": rules})
     if c.get("notes"):
         doc["notes"] = list(c["notes"])
-    entry = {"id": cid, "title": c["title"], "question": definition["question"], "started": doc["started"],
-             "status": status}
+    entry = {"id": cid, "title": c["title"], "question": question, "started": doc["started"], "status": status}
     if old:
         entry["before_campaigns"] = True
-    entry.update({"replicas": definition["replicas"], "specs": [{"name": s["name"], "label": s["label"]} for s in specs],
+    entry["replicas"] = definition["replicas"]
+    if answer:
+        entry["answer"] = answer
+    if c.get("featured_spec"):
+        entry["featured_spec"] = c["featured_spec"]      # the spec About's card leads with (catalog.py checks it)
+    entry.update({"specs": [{"name": s["name"], "label": s["label"]} for s in specs],
                   "runs": len(entries), "outcomes": outcomes})
     return doc, entry, built
 

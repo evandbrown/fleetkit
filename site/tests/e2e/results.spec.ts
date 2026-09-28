@@ -105,54 +105,107 @@ test('opens on the featured campaign, selected among the results', async ({ page
   await page.goto(at({ name: 'results', campaign: null }));
   await expect(page.locator('h1')).toHaveText('Synthetic host sizes');
   await expect(page.getByRole('note')).toContainText('Synthetic data');
-  // The campaigns as labelled tabs, counted; the selected one controls the results below.
-  await expect(page.locator('#campaigns-label')).toHaveText(/^Campaigns\s*3$/);
-  const chooser = page.getByRole('tablist', { name: /^Campaigns/ });
-  await expect(chooser.getByRole('tab')).toHaveCount(3);
-  await expect(chooser.getByRole('tab', { selected: true })).toContainText('Synthetic host sizes');
-  await expect(page.locator('#campaign-panel')).toHaveAttribute('aria-labelledby', 'campaign-tab-nested-sizes-synthetic');
-  await expect(chooser.getByRole('tab', { name: /^Capacity baseline/ })).toContainText('8 microVMs · 0.50 per vCPU');
+  // The campaign picker: a labelled select-style button naming the selected campaign, with its question and its
+  // best spec's headline figure; the results below are what it controls.
+  await expect(page.locator('#campaign-label')).toHaveText('Campaign');
+  const picker = page.getByRole('button', { name: /^Campaign/ });
+  await expect(picker).toContainText('Synthetic host sizes');
+  await expect(picker).toContainText('8 microVMs on m8i.4xlarge · 2 specs');
+  await expect(picker).toHaveAttribute('aria-expanded', 'false');
+  await expect(picker).toHaveAttribute('aria-controls', 'campaign-panel');
+  // Opening it lists every campaign as a card, newest first, the selected one marked.
+  await picker.click();
+  const list = page.getByRole('listbox', { name: 'Campaign' });
+  await expect(list.getByRole('option')).toHaveCount(3);
+  await expect(list.getByRole('option').first()).toContainText('Synthetic hypervisors');
+  await expect(list.getByRole('option', { selected: true })).toContainText('Synthetic host sizes');
+  await expect(list.getByRole('option', { name: /^Capacity baseline/ })).toContainText('8 microVMs · 0.50 microVMs per host vCPU');
   // Each card carries the question its campaign answers.
-  await expect(chooser.getByRole('tab', { name: /^Capacity baseline/ })).toContainText('How many 2 vCPU / 2 GiB Firecracker microVMs');
-  // A campaign of several specs shows a bar per spec, of what it compares.
-  await expect(chooser.getByRole('tab', { name: /^Synthetic hypervisors/ }).locator('.bv')).toHaveText(['10', '9', '8–9']);
-  await expect(chooser.getByRole('tab', { name: /^Synthetic host sizes/ })).toContainText('Per vCPU');
-  // The page leads with the answer, not the question again.
+  await expect(list.getByRole('option', { name: /^Capacity baseline/ })).toContainText('How many 2 vCPU / 2 GiB Firecracker microVMs');
+  // A campaign of several specs shows a bar per spec, of what it compares, under the metric's name; each figure says
+  // what it counts.
+  await expect(list.getByRole('option', { name: /^Synthetic hypervisors/ }).locator('.bv')).toHaveText(['10 microVMs', '9 microVMs', '8–9 microVMs']);
+  await expect(list.getByRole('option', { name: /^Synthetic hypervisors/ })).toContainText('Max density');
+  await expect(list.getByRole('option', { name: /^Synthetic host sizes/ })).toContainText('microVMs per host vCPU');
+  await expect(list.getByRole('option', { name: /^Synthetic host sizes/ }).locator('.bv')).toHaveText(['0.50 / vCPU', '0.38–0.50 / vCPU']);
+  // Escape closes it and puts focus back on the button.
+  await page.keyboard.press('Escape');
+  await expect(list).toHaveCount(0);
+  await expect(picker).toBeFocused();
+  await expect(picker).toHaveAttribute('aria-expanded', 'false');
+  // The page's header: the question the campaign answers, then its answer.
+  await expect(page.locator('.top .question')).toHaveText(/^Does density per host vCPU stay the same when the worker host doubles/);
   await expect(page.locator('.top .lead')).toHaveText('m8i.4xlarge fits 0.50 microVMs per host vCPU, m8i.2xlarge 0.38–0.50. Host CPU ran out first in both.');
-  await chooser.getByRole('tab', { name: /^Capacity baseline/ }).click();
+  // Choosing by keyboard: ArrowDown opens on the selected campaign, ArrowDown again moves to the next, Enter opens it.
+  await page.keyboard.press('ArrowDown');
+  await expect(list).toBeVisible();
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
   await expect(page).toHaveURL(/#\/results\/cap-baseline-1$/);
   await expect(page.locator('h1')).toHaveText('Capacity baseline');
-  await expect(chooser.getByRole('tab', { selected: true })).toContainText('Capacity baseline');
-  await expect(chooser.getByRole('tab', { selected: true })).toBeFocused();
+  await expect(page.getByRole('button', { name: /^Campaign/ })).toContainText('Capacity baseline');
+  await expect(page.getByRole('button', { name: /^Campaign/ })).toContainText('8 microVMs on m8i.4xlarge');
+  await expect(page.getByRole('button', { name: /^Campaign/ })).toBeFocused();
+  // And by a click on a card.
+  await page.getByRole('button', { name: /^Campaign/ }).click();
+  await page.getByRole('option', { name: /^Synthetic hypervisors/ }).click();
+  await expect(page).toHaveURL(/#\/results\/nested-hv-synthetic$/);
+  await expect(page.locator('h1')).toHaveText('Synthetic hypervisors');
+  await expect(page.getByRole('button', { name: /^Campaign/ })).toContainText('10 microVMs on m8i.4xlarge · 3 specs');
+  await expect(page.getByRole('listbox')).toHaveCount(0);
 });
 
-test('shows what we tested: a column per spec, inputs that match written once, inputs that differ highlighted', async ({ page }) => {
+test('shows what we tested: a column per spec, inputs that match written once, inputs that differ per column', async ({ page }) => {
   await page.goto(at({ name: 'results', campaign: S }));
-  const m = page.locator('.matrix');
-  await expect(m.locator('.head')).toHaveText([/^m8i\.4xlarge/, /^m8i\.2xlarge\s*Half the vCPUs of the same family/]);
-  // A column named for its host doesn't name it again in the host row.
-  await expect(m.locator('.cell.diff')).toHaveText([/^16 vCPU/, /^8 vCPU/, /^1\s*2\s*4\s*8\s*12\s*16$/, /^1\s*2\s*3\s*4\s*6\s*8$/]);
-  await expect(m.locator('.cell.same')).toHaveText([/^Firecracker$/, /^2 vCPU · 2 GiB\s*$/]);
-  await expect(page.getByRole('list', { name: 'Success criteria' }).getByRole('listitem')).toHaveCount(5);
-  // Specs are named by what sets them apart, never by their slugs.
+  const t = page.locator('table.tested');
+  // One table under "What we tested": a column per spec, headed by its name, its why under it.
+  await expect(t.locator('thead th[scope="col"]')).toHaveText(['m8i.4xlarge', 'm8i.2xlarge']);
+  await expect(t.locator('thead .why')).toHaveText([/^The host the baseline ran on/, /^Half the vCPUs of the same family/]);
+  await expect(t.locator('tbody th')).toHaveText(['Host', 'Hypervisor', 'MicroVM', 'Densities', 'Replicas', 'SLOs']);
+  // The host and the densities differ: a cell per spec, in the specs' order; a run of densities as a range. A number
+  // and its unit are joined by a no-break space (\s here), so "16 vCPU" never breaks in a narrow column.
+  await expect(t.locator('td.diff')).toHaveText([
+    /^m8i\.4xlarge\s*16\svCPU · 64\sGiB · nested$/,
+    /^m8i\.2xlarge\s*8\svCPU · 32\sGiB · nested$/,
+    '1, 2, 4, 8, 12, 16',
+    '1–4, 6, 8',
+  ]);
+  // The rest match: written once, across every spec column.
+  await expect(t.locator('td.same')).toHaveText(['Firecracker', '2 vCPU · 2 GiB', '2 hosts per spec', 'ready ≤ 180 s · tasks 100% · step p50 ≤ 1 s · step p95 ≤ 2 s · task p95 ≤ 5 s']);
+  await expect(t.locator('td.same').first()).toHaveAttribute('colspan', '2');
+  // Specs are named by what sets them apart, never by their slugs; the devices are a row only where they differ.
   await page.goto(at({ name: 'results', campaign: HV }));
-  await expect(page.locator('.matrix .head strong')).toHaveText(['Firecracker PCI + RNG', 'Cloud Hypervisor', 'Firecracker MMIO']);
+  await expect(t.locator('thead th[scope="col"]')).toHaveText(['Firecracker PCI + RNG', 'Cloud Hypervisor', 'Firecracker MMIO']);
   // Each spec's why, whole.
-  await expect(page.locator('.matrix .head .why').first()).toHaveText(/so the two differ only in the hypervisor\.$/);
+  await expect(t.locator('thead .why').first()).toHaveText(/so the two differ only in the hypervisor\.$/);
+  await expect(t.locator('tbody th')).toHaveText(['Host', 'Hypervisor', 'Devices', 'MicroVM', 'Densities', 'Replicas', 'SLOs']);
+  await expect(t.locator('td.diff')).toHaveText(['Firecracker', 'Cloud Hypervisor', 'Firecracker', 'PCI, RNG device', 'PCI, RNG device', 'MMIO, no RNG device']);
   await expect(page.locator('main')).not.toContainText('firecracker-mmio');
+  // One spec: two columns, label and value, no header.
+  await page.goto(at({ name: 'results', campaign: CAP }));
+  await expect(page.getByRole('heading', { name: 'What we tested' })).toBeVisible();
+  await expect(t.locator('thead')).toHaveCount(0);
+  await expect(t.locator('td.diff')).toHaveCount(0);
+  await expect(t.locator('tbody tr').first()).toHaveText(/^Host\s*m8i\.4xlarge\s*16\svCPU · 64\sGiB · nested$/);
 });
 
 test('shows how it performed: a bar per run beside each spec\'s figures, and every trial on one chart', async ({ page }) => {
   await page.goto(at({ name: 'results', campaign: S }));
-  // The SLOs as one row of chips under the answer, not a block of their own; the standard ones, so none is marked.
-  await expect(page.getByRole('list', { name: 'Success criteria' }).getByRole('listitem')).toHaveCount(5);
-  await expect(page.locator('dl.strip .slos li.on')).toHaveCount(0);
-  await expect(page.locator('.chooser .slo-tag')).toHaveCount(0);
+  // The SLOs as the last row of what we tested, not a block of their own; the standard ones, so no standard is named.
+  const slos = page.locator('table.tested tbody tr', { has: page.locator('th', { hasText: /^SLOs$/ }) });
+  await expect(slos.locator('td')).toHaveText('ready ≤ 180 s · tasks 100% · step p50 ≤ 1 s · step p95 ≤ 2 s · task p95 ≤ 5 s');
+  await expect(slos).not.toContainText('standard');
+  // Nor does its card in the campaign picker carry an SLO tag.
+  await page.getByRole('button', { name: /^Campaign/ }).click();
+  await expect(page.getByRole('listbox').locator('.slo-tag')).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('listbox')).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'Success criteria' })).toHaveCount(0);
   const specs = page.locator('.answer li.spec');
   await expect(specs).toHaveCount(2);
   await expect(specs.nth(0).locator('.figs')).toHaveText(/^Max density\s*8\s*Per vCPU\s*0\.50\s*\$ \/ 1k tasks\s*\$0\.081–0\.086\s*Ran out\s*Host CPU\s*at 12$/);
-  await expect(specs.nth(1).locator('.figs')).toHaveText(/^Max density\s*3–4\s*Per vCPU\s*0\.38–0\.50\s*\$ \/ 1k tasks\s*\$0\.085–0\.090\s*Ran out\s*Host CPU\s*at 4$/);
+  // Its replicas ran out at 6 and at 4, so the note names both ends.
+  await expect(specs.nth(1).locator('.figs')).toHaveText(/^Max density\s*3–4\s*Per vCPU\s*0\.38–0\.50\s*\$ \/ 1k tasks\s*\$0\.085–0\.090\s*Ran out\s*Host CPU\s*at 4–6$/);
   // Each run a bar that opens it, labelled with its replica; a tick at the spec's midpoint.
   await expect(specs.nth(1).getByRole('link')).toHaveText([/^replica 1\s*4\s*$/, /^replica 2\s*3\s*$/]);
   await expect(specs.nth(1).locator('.pass b')).toHaveText(['4', '3']);
@@ -173,12 +226,20 @@ test('shows how it performed: a bar per run beside each spec\'s figures, and eve
   const lat = page.locator('.lat');
   await expect(lat.locator('svg a.mark')).toHaveCount(76);
   await expect(lat.locator('text.axis-title')).toHaveText(['Density per host vCPU', 'Density per host vCPU']);
-  // At the limit: each spec's first failing trial, chosen by labelled tabs.
+  // At the limit: each spec's first failing trial, chosen from a dropdown labelled Spec. Its button names the spec
+  // shown and where it stopped passing; open, it lists every spec the same way, the shown one selected.
   const limit = page.locator('.atlimit');
   await limit.scrollIntoViewIfNeeded();
-  const tabs = limit.getByRole('tablist', { name: 'Spec' });
-  await expect(tabs.getByRole('tab')).toHaveText([/^\s*m8i\.4xlarge\s*fails at 12$/, /^\s*m8i\.2xlarge\s*fails at 4$/]);
-  await tabs.getByRole('tab', { name: /^m8i\.2xlarge/ }).click();
+  const spec = limit.getByRole('button', { name: /^Spec/ });
+  await expect(spec).toHaveText(/^\s*m8i\.4xlarge\s*fails at 12\s*$/);
+  await expect(spec).toHaveAttribute('aria-expanded', 'false');
+  await spec.click();
+  const list = page.getByRole('listbox', { name: 'Spec' });
+  await expect(list.getByRole('option')).toHaveText([/^\s*m8i\.4xlarge\s*fails at 12\s*$/, /^\s*m8i\.2xlarge\s*fails at 4\s*$/]);
+  await expect(list.getByRole('option', { selected: true })).toContainText('m8i.4xlarge');
+  await list.getByRole('option', { name: /^m8i\.2xlarge/ }).click();
+  await expect(list).toHaveCount(0);
+  await expect(spec).toHaveText(/^\s*m8i\.2xlarge\s*fails at 4\s*$/);
   await expect(limit.locator('.title')).toHaveText(/^Density 4\s*trial 3 · replica 2$/);
   await expect(limit.locator('.lanes svg a')).toHaveCount(4);
   // The rule that ran out, named; a switch sets the last density that passed beside the failure, in the same run.
@@ -217,10 +278,12 @@ test('compares specs from different campaigns, in the URL', async ({ page }) => 
   await page.goto(at({ name: 'compare', specs: [`${S}/m8i-2xlarge`] }));
   await page.getByRole('checkbox', { name: 'm8i.4xlarge · Firecracker' }).check();
   await expect(page).toHaveURL(/specs=nested-sizes-synthetic\/m8i-2xlarge,cap-baseline-1\/baseline$/);
-  // Grouped by campaign: each campaign's name once, over its specs.
-  await expect(page.locator('.matrix .campaign')).toHaveText(['Synthetic host sizes', 'Capacity baseline']);
-  await expect(page.locator('.matrix .head')).toHaveCount(2);
-  await expect(page.locator('.matrix .cell.diff')).toHaveCount(4);
+  // Grouped by campaign: each campaign's name once, over its specs; the host, densities and replicas differ.
+  const t = page.locator('table.tested');
+  await expect(t.locator('thead th[scope="colgroup"]')).toHaveText(['Synthetic host sizes', 'Capacity baseline']);
+  await expect(t.locator('thead th[scope="col"]')).toHaveText(['m8i.2xlarge', 'm8i.4xlarge · Firecracker']);
+  await expect(t.locator('td.diff')).toHaveCount(6);
+  await expect(t.locator('tbody tr', { has: page.locator('th', { hasText: /^Replicas$/ }) }).locator('td')).toHaveText(['2 hosts per spec', '1 host per spec']);
   // The picker says what its rows and chips are.
   await expect(page.locator('.picker legend')).toHaveText('Pick specs to compare');
   await expect(page.locator('.answer ol')).toHaveText(

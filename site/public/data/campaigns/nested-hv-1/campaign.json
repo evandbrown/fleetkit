@@ -1,12 +1,13 @@
 {
   "schema": "fleetkit-site-data/2",
   "id": "nested-hv-1",
-  "title": "Hypervisor",
+  "title": "hypervisor",
   "question": "Does Cloud Hypervisor fit as many microVMs as Firecracker?",
   "started": "2026-09-28T01:13Z",
   "ended": "2026-09-28T01:36Z",
   "status": "complete",
   "definition_path": "experiments/campaigns/nested-hv-1.json",
+  "answer": "Yes: Cloud Hypervisor and Firecracker each held 9 microVMs on both m8i.4xlarge replicas; Firecracker with MMIO devices and no random-number device held 8 and 9. Host CPU ran out first every time.",
   "definition": {
     "name": "nested-hv-1",
     "question": "Does Cloud Hypervisor fit as many microVMs as Firecracker?",
@@ -77,7 +78,8 @@
     {
       "name": "firecracker",
       "label": "Firecracker, pci, random-number device",
-      "why": "Same devices as Cloud Hypervisor: PCI and RNG.",
+      "short": "Firecracker",
+      "why": "Firecracker set up with the same devices as Cloud Hypervisor",
       "changes": [],
       "spec": {
         "worker_host": {
@@ -132,7 +134,8 @@
     {
       "name": "cloud-hypervisor",
       "label": "Cloud Hypervisor, pci, random-number device",
-      "why": "The alternative hypervisor.",
+      "short": "Cloud Hypervisor",
+      "why": "Cloud Hypervisor instead of Firecracker",
       "changes": [
         {
           "path": "hypervisor.name",
@@ -193,7 +196,8 @@
     {
       "name": "firecracker-mmio",
       "label": "Firecracker, mmio, no random-number device",
-      "why": "Firecracker as the baseline ran it: MMIO.",
+      "short": "Firecracker with MMIO",
+      "why": "Firecracker with the baseline's MMIO devices",
       "changes": [
         {
           "path": "hypervisor.virtio_transport",

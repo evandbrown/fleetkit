@@ -8,7 +8,7 @@ const KB = 1024;
 const BUDGET = {
   code: 70 * KB,        // the JS and CSS every page loads first (what index.html references)
   lazy: 40 * KB,        // each chunk loaded only when needed (the experiment builder)
-  index: 5 * KB,        // data/index.json
+  index: 8 * KB,        // data/index.json: every campaign's entry, its answer included (D93)
   doc: 80 * KB,         // each campaign, run or trial document; a metal trial of 192 microVMs is about 70 KB
   data: 16 * 1024 * KB, // the whole dataset, images included; pages load it lazily, one document at a time
 };

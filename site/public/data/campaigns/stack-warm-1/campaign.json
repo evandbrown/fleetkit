@@ -1,12 +1,13 @@
 {
   "schema": "fleetkit-site-data/2",
   "id": "stack-warm-1",
-  "title": "Full stack, warm start",
-  "question": "With a 5 s warm start, does the full stack cost less per task than lean 2-vCPU microVMs?",
+  "title": "tuned_guest_warm_start",
+  "question": "With a 5 s warm start, is the tuned guest (1 vCPU / 1 GiB, no omnibox preload, a quiet console, huge pages) cheaper per task than a 2 vCPU / 2 GiB microVM?",
   "started": "2026-09-28T10:33Z",
   "ended": "2026-09-28T10:42Z",
   "status": "complete",
   "definition_path": "experiments/campaigns/stack-warm-1.json",
+  "answer": "Yes: warm, the tuned guest held 6 microVMs on c8i.xlarge at $0.020–0.027 per 1,000 tasks, against 4 at $0.034–0.036 for 2 vCPU / 2 GiB. Plain 1 vCPU / 1 GiB microVMs held 4–5 at $0.029–0.031; host CPU ran out first, and cold the tuned guest also held 6.",
   "definition": {
     "name": "stack-warm-1",
     "question": "With a 5 s warm start, does the full stack cost less per task than lean 2-vCPU microVMs?",
@@ -123,7 +124,8 @@
     {
       "name": "c8i-xlarge-lean",
       "label": "c8i.xlarge, 2 vCPUs, 2 GiB, verbose console, 4 KiB pages",
-      "why": "Lean 2-vCPU microVMs, warm: the spec the stack must beat.",
+      "short": "2 vCPU / 2 GiB",
+      "why": "The spec the tuned guest has to beat",
       "changes": [],
       "spec": {
         "worker_host": {
@@ -181,7 +183,8 @@
     {
       "name": "c8i-xlarge-1vcpu-1gib-lean",
       "label": "c8i.xlarge, 1 vCPU, 1 GiB, verbose console, 4 KiB pages",
-      "why": "1 vCPU / 1 GiB, lean, no guest levers: splits the stack's saving.",
+      "short": "1 vCPU / 1 GiB",
+      "why": "The smaller microVM alone, without the guest tuning",
       "changes": [
         {
           "path": "microvm.vcpus",
@@ -273,7 +276,8 @@
     {
       "name": "c8i-xlarge-stack",
       "label": "c8i.xlarge, 1 vCPU, 1 GiB, quiet console, no keyboard probe, transparent huge pages",
-      "why": "Full stack: lean, 1 vCPU / 1 GiB, quiet console, huge pages: predicted -32%.",
+      "short": "1 vCPU / 1 GiB tuned",
+      "why": "The smaller microVM with a quiet console and huge pages",
       "changes": [
         {
           "path": "microvm.vcpus",
@@ -377,7 +381,8 @@
     {
       "name": "m8i-4xlarge-lean",
       "label": "m8i.4xlarge, 2 vCPUs, 2 GiB, verbose console, 4 KiB pages",
-      "why": "Standing control, lean, warm: shape-warm-1's spec plus the lean flags.",
+      "short": "m8i.4xlarge",
+      "why": "The larger host from earlier campaigns, for comparison",
       "changes": [
         {
           "path": "worker_host.instance_type",

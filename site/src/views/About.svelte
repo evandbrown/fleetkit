@@ -2,16 +2,18 @@
   // The home page (D72): what Fleetkit is, how it works, and a way into the results; then the setup, the task, the
   // SLOs, how we test and what we measure. Mostly pictures; the SLOs are the method's standard ones (the input schema's
   // defaults), the spec comes from the featured campaign and the filmstrip from its illustration trial, and the
-  // featured result names any SLO of its own (D74). The diagrams are illustrations.
+  // featured result names any SLO of its own (D74). The diagrams are illustrations. The intro's wording is D92,
+  // pending Evan's approval; the featured card and "What we measure" follow site-brief-v3 (D93). The spec is the
+  // same table Results shows (SpecTable), for the featured campaign's first spec.
   import { imgUrl, loadCampaign, loadIndex, loadTrial } from '../lib/data';
-  import { num } from '../lib/format';
   import { href } from '../lib/router';
-  import { campaignHeadline, sloTag } from '../lib/shape';
+  import { campaignHeadline, campaignRefs, sloTag } from '../lib/shape';
   import { STANDARD_CRITERIA } from '../lib/spec';
   import { STEP_NAMES, type CampaignDoc, type CampaignEntry, type StepName, type TrialDoc } from '../lib/types';
   import Architecture from '../components/about/Architecture.svelte';
   import Units from '../components/about/Units.svelte';
   import SloBadges from '../components/SloBadges.svelte';
+  import SpecTable from '../components/SpecTable.svelte';
   import Mark from '../components/Mark.svelte';
 
   let entry = $state<CampaignEntry | null>(null);
@@ -53,38 +55,32 @@
   };
   const frames = $derived(STEP_NAMES.map((step) => ({ step, img: film?.frames.find((f) => f.step === step)?.img ?? null })));
 
-  const HYPERVISOR: Record<string, string> = { firecracker: 'Firecracker', 'cloud-hypervisor': 'Cloud Hypervisor' };
-  const gib = (mib: number) => `${new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(mib / 1024)} GiB`;
   const chromium = $derived(run?.host.chromium_version.split('.')[0] ?? null);
 
-  const specRows = $derived(
-    spec
-      ? [
-          {
-            key: 'Worker host',
-            value: spec.host.instance_type,
-            note: `${num(spec.host.vcpus)} vCPU · ${num(spec.host.memory_gib)} GiB · ${spec.host.host_kind}`,
-            varies: true,
-          },
-          { key: 'Hypervisor', value: HYPERVISOR[spec.spec.hypervisor.name] ?? spec.spec.hypervisor.name, varies: true },
-          {
-            key: 'MicroVM',
-            value: `${num(spec.spec.microvm.vcpus)} vCPU · ${gib(spec.spec.microvm.memory_mib)}`,
-            varies: true,
-          },
-          { key: 'Densities', value: spec.spec.densities.map((d) => num(d)).join(' · '), varies: true },
-          { key: 'Support host', value: spec.spec.support_host.instance_type, varies: false },
-        ]
-      : [],
-  );
+  /** The first sentence of an answer: a full stop, then a space, then a capital ("$0.019" and "1,000" hold none). */
+  const firstSentence = (text: string) => text.split(/(?<=[.!?])\s+(?=[A-Z])/)[0];
 
-  // The featured campaign's headline, as its card on Results shows it, with the host it ran on and, if that spec
-  // wasn't judged by the standard SLOs, how its differ.
+  // The featured campaign's result: the spec the catalog names (else its best by midpoint) and its density ("≥" when
+  // no replica reached a failure), density per host vCPU, the host it ran on, how its SLOs differ from the standard if
+  // they do, and the first sentence of the catalog's answer, which carries the context; the campaign's question is
+  // not on the card. Null until something has run and passed; the card then shows only its label and the button.
   const featured = $derived.by(() => {
     if (!entry) return null;
-    const h = campaignHeadline(entry);
+    const h = campaignHeadline(entry, entry.featured_spec ?? null);
+    if (h.density === null) return null;
+    const reps = entry.outcomes.find((o) => o.spec === h.spec)?.replicas ?? [];
+    const noFailure = reps.length > 0 && reps.every((r) => r.first_failed === null);
+    const density = noFailure && !h.density.startsWith('≥') ? `≥ ${h.density}` : h.density;
     const s = campaign?.specs.find((x) => x.name === h.spec) ?? null;
-    return { title: entry.title, ...h, host: s?.host.instance_type ?? null, slo: s ? sloTag([s.spec.criteria]) : null };
+    return {
+      title: entry.title,
+      density,
+      label: h.label,
+      perVcpu: h.perVcpu,
+      host: s?.host.instance_type ?? null,
+      slo: s ? sloTag([s.spec.criteria]) : null,
+      answer: entry.answer ? firstSentence(entry.answer) : null,
+    };
   });
 
   const FLOW = [
@@ -94,13 +90,14 @@
     { name: 'Publish', text: 'The highest density that met every SLO, and its cost' },
   ];
 
+  // The six measures, worded as in site-brief-v3.
   const MEASURES = [
-    { name: 'Latency', text: 'p50 and p95, each step and the whole task' },
-    { name: 'Time to ready', text: 'start to browser ready, every microVM' },
-    { name: 'Host pressure', text: 'CPU, memory and IO, 5 times a second, and what ran out' },
-    { name: 'Cost', text: 'per 1,000 tasks, at on-demand prices' },
-    { name: 'Max density', text: 'most microVMs at once with every SLO met, also per host vCPU' },
-    { name: 'Midpoint', text: 'halfway from last pass to first failure, per host vCPU; specs compare by it' },
+    { name: 'Latency', text: 'How long each step and the whole task took: the median (p50) and the slowest 5% (p95).' },
+    { name: 'Time to ready', text: 'From starting a microVM to its browser answering, for every microVM.' },
+    { name: 'Host pressure', text: 'CPU, memory and IO on the host, sampled 5 times a second, and which ran out first.' },
+    { name: 'Cost', text: 'Dollars per 1,000 tasks at on-demand prices, from the host\'s hourly price and how long the tasks took.' },
+    { name: 'Max density', text: 'The most microVMs that ran at once with every SLO met. Also per host vCPU, so hosts of different sizes compare.' },
+    { name: 'Midpoint', text: 'The middle of the gap between the last density that passed and the first that failed, per host vCPU. Specs are ranked by it.' },
   ];
 </script>
 
@@ -108,29 +105,33 @@
   <header class="hero">
     <div class="intro">
       <h1>What is Fleetkit?</h1>
+      <!-- The intro's wording is D92, pending Evan's approval. -->
       <p class="lead">
-        A benchmark framework for headless browsers at scale: many browsers per cloud host, each driven by an AI agent
-        with no person watching.
+        A benchmark framework for the browser fleet behind an agentic product: many headless Chrome browsers per cloud
+        host, each in its own microVM, each driven by a test harness through the same five-step task.
       </p>
       <p class="lead-2">
         It finds how many browsers one host can run while every task stays inside its SLOs, and what each task costs.
       </p>
     </div>
     <aside class="featured" aria-label="Featured result">
+      <p class="label">Featured result</p>
       {#if featured}
-        <p class="label">Featured result · {featured.title}</p>
+        <p class="title">{featured.title}</p>
         <p class="figure">
-          {#if featured.density !== null}<strong>{featured.density}</strong>{/if}
-          <span
-            >{featured.label}{#if featured.density !== null}{' on one '}<span class="host">{featured.host ?? 'host'}</span>{/if}</span
-          >
+          <strong>{featured.density}</strong>
+          <span>{featured.label}{' on one '}<span class="host">{featured.host ?? 'host'}</span></span>
         </p>
-        {#if featured.density !== null}
-          <p class="note">
-            every SLO met{#if featured.perVcpu !== null}{' · '}<strong>{featured.perVcpu}</strong> per host vCPU{/if}
-          </p>
-        {/if}
-        {#if featured.slo}<p class="slo-tag">{featured.slo}</p>{/if}
+        {#if featured.perVcpu !== null}<p class="per">{featured.perVcpu} microVMs per host vCPU</p>{/if}
+        <!-- A green check before "SLOs" (read aloud as "every SLO met"): the charts' filled circle would read as a bullet here. -->
+        <p class="slos">
+          <svg class="tick" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14">
+            <path d="M3 8.5l3.2 3.2L13 5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+          <span class="vh">every SLO met</span><span aria-hidden="true">SLOs</span>
+          {#if featured.slo}<span class="slo-tag">{featured.slo}</span>{/if}
+        </p>
+        {#if featured.answer}<p class="answer">{featured.answer}</p>{/if}
       {/if}
       <a class="button primary" href={href({ name: 'results', campaign: null })}>See the results <span aria-hidden="true">→</span></a>
     </aside>
@@ -211,19 +212,9 @@
     <div class="how">
       <div>
         <h3>The spec</h3>
-        <p class="sub">Everything fixed about one run; <span class="hl">highlighted</span> is what a campaign varies.</p>
-        {#if spec}
-          <dl class="spec">
-            {#each specRows as row (row.key)}
-              <div class:varies={row.varies}>
-                <dt>{row.key}</dt>
-                <dd>
-                  <span class="v">{row.value}</span>
-                  {#if row.note}<span class="note">{row.note}</span>{/if}
-                </dd>
-              </div>
-            {/each}
-          </dl>
+        <p class="sub">Everything fixed about one run. A campaign's specs differ in one or two of these rows.</p>
+        {#if campaign && spec}
+          <SpecTable refs={campaignRefs(campaign).slice(0, 1)} replicas={campaign.definition.replicas} support />
         {/if}
       </div>
       <div>
@@ -256,12 +247,16 @@
     padding-bottom: 24px;
   }
   /* what Fleetkit is, and the way into the results */
+  /* The heading lines up with the card's top, whatever the card's height. */
   .hero {
     padding: 8px 0 0;
     display: grid;
     grid-template-columns: minmax(0, 1fr) 300px;
-    align-items: center;
+    align-items: start;
     gap: 24px 48px;
+  }
+  .intro {
+    padding-top: 8px;
   }
   @media (max-width: 820px) {
     .hero {
@@ -304,12 +299,16 @@
     font-weight: 600;
     color: var(--ink-2);
   }
+  /* The unit stays beside the number where it fits ("6 microVMs on one c8i.xlarge") and takes its own line under it
+     where it doesn't, never a hanging second line under the first word. */
   .featured .figure {
     display: flex;
+    flex-wrap: wrap;
     align-items: baseline;
-    gap: 8px;
+    gap: 0 8px;
     font-weight: 600;
   }
+  /* "≥ 200" and "6–7" stay on one line */
   .featured .figure strong {
     font-size: 2.75rem;
     line-height: 1.05;
@@ -317,24 +316,51 @@
     letter-spacing: -0.03em;
     color: var(--accent-ink);
     font-variant-numeric: tabular-nums;
+    white-space: nowrap;
   }
   /* An instance type never breaks at its hyphen (m8i.metal-48xl). */
   .featured .figure .host {
     white-space: nowrap;
   }
-  .featured .note {
+  .featured .title {
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+  .featured .per {
     font-size: 0.88rem;
     color: var(--ink-2);
-  }
-  .featured .note strong {
-    color: var(--ink);
     font-variant-numeric: tabular-nums;
+  }
+  /* the pass mark, then "SLOs" (read aloud as "every SLO met"), then the tag when the SLOs aren't standard */
+  .featured .slos {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 6px;
+    font-size: 0.88rem;
+    font-weight: 600;
+  }
+  .tick {
+    flex: none;
+    color: var(--good);
+  }
+  .featured .answer {
+    margin-top: 6px;
+    font-size: 0.95rem;
+    line-height: 1.45;
+    color: var(--ink);
   }
   .featured .button {
     margin-top: 10px;
   }
-  .featured .slo-tag {
-    margin-top: 4px;
+  /* read by screen readers, not shown */
+  .vh {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
 
   /* how it works: four steps, left to right */
@@ -565,58 +591,6 @@
   }
   .how h3 {
     margin-top: 16px;
-  }
-  .spec {
-    margin: 0;
-    border: 1px solid var(--rule);
-    border-radius: var(--radius);
-    overflow: hidden;
-  }
-  .spec div {
-    display: grid;
-    grid-template-columns: 10rem minmax(0, 1fr);
-    gap: 12px;
-    padding: 9px 14px;
-    border-top: 1px solid var(--rule);
-    font-size: 0.92rem;
-  }
-  .spec div:first-child {
-    border-top: 0;
-  }
-  .spec div.varies {
-    background: var(--highlight);
-  }
-  .spec dt {
-    color: var(--ink-2);
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
-  }
-  .hl {
-    background: var(--highlight);
-    border-radius: 3px;
-    padding: 0 4px;
-  }
-  .spec dd {
-    margin: 0;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0 10px;
-    align-items: baseline;
-  }
-  .spec .v {
-    font-weight: 600;
-    font-variant-numeric: tabular-nums;
-  }
-  .spec .note {
-    color: var(--ink-2);
-    font-size: 0.85rem;
-  }
-  @media (max-width: 420px) {
-    .spec div {
-      grid-template-columns: minmax(0, 1fr);
-      gap: 0;
-    }
   }
   .steps {
     list-style: none;

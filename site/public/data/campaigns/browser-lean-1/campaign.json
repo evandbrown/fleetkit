@@ -1,12 +1,13 @@
 {
   "schema": "fleetkit-site-data/2",
   "id": "browser-lean-1",
-  "title": "Leaner headless Chromium",
+  "title": "chromium_no_preload",
   "question": "Does turning off headless Chromium's hidden omnibox preload lower CPU per task?",
   "started": "2026-09-28T09:18Z",
   "ended": "2026-09-28T09:24Z",
   "status": "complete",
   "definition_path": "experiments/campaigns/browser-lean-1.json",
+  "answer": "Yes: without the preload c8i.xlarge held 3–4 microVMs instead of 2, at $0.035–0.037 instead of $0.050–0.055 per 1,000 tasks. On m8i.4xlarge it held 13 instead of 9, at $0.047 instead of $0.062–0.069; host CPU ran out first everywhere.",
   "definition": {
     "name": "browser-lean-1",
     "question": "Does turning off headless Chromium's hidden omnibox preload lower CPU per task?",
@@ -116,7 +117,8 @@
     {
       "name": "c8i-xlarge",
       "label": "c8i.xlarge, no extra Chromium flags",
-      "why": "The frontier spec, unchanged; pools with rounds 1 and 2.",
+      "short": "c8i.xlarge",
+      "why": "2 vCPU / 2 GiB on c8i.xlarge, for comparison",
       "changes": [],
       "spec": {
         "worker_host": {
@@ -166,7 +168,8 @@
     {
       "name": "c8i-xlarge-nopre",
       "label": "c8i.xlarge, --disable-features=PreloadTopChromeWebUI,WebUIOmniboxPopup,WebUIOmniboxAimPopup,WebUIOmniboxFullPopup",
-      "why": "The frontier spec without the hidden omnibox pages.",
+      "short": "c8i.xlarge without preload",
+      "why": "The same spec with the omnibox preload turned off",
       "changes": [
         {
           "path": "densities",
@@ -248,7 +251,8 @@
     {
       "name": "m8i-4xlarge",
       "label": "m8i.4xlarge, no extra Chromium flags",
-      "why": "The standing control, unchanged.",
+      "short": "m8i.4xlarge",
+      "why": "The larger host from earlier campaigns, for comparison",
       "changes": [
         {
           "path": "worker_host.instance_type",
@@ -329,7 +333,8 @@
     {
       "name": "m8i-4xlarge-nopre",
       "label": "m8i.4xlarge, --disable-features=PreloadTopChromeWebUI,WebUIOmniboxPopup,WebUIOmniboxAimPopup,WebUIOmniboxFullPopup",
-      "why": "The control without the hidden omnibox pages.",
+      "short": "m8i.4xlarge without preload",
+      "why": "The larger host with the omnibox preload turned off",
       "changes": [
         {
           "path": "worker_host.instance_type",

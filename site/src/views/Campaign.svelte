@@ -1,8 +1,8 @@
 <script lang="ts">
-  // Results, with one campaign selected. The campaigns to choose from; then the campaign's answer in a line, what it
-  // tested and its SLOs in one strip, and the charts: how each spec did, latency by density with every trial under
-  // it on the same columns, and one trial at the limit. The spec-by-spec table of what we tested, then its links
-  // (a new campaign from this; its Source on GitHub, D73) close the page.
+  // Results, with one campaign selected. The campaign picker; then the campaign's question and its answer in a line,
+  // what it tested as one table (a column per spec, its SLOs the last row), and the charts: how each spec did, latency by
+  // density with every trial under it on the same columns, and one trial at the limit. Its links (a new campaign
+  // from this; its Source on GitHub, D73) close the page.
   // The landing page is this view on the featured campaign (D58).
   import { loadCampaign, loadIndex, loadRun } from '../lib/data';
   import { campaignSource } from '../lib/repo';
@@ -11,9 +11,8 @@
   import type { RunDoc } from '../lib/types';
   import Failed from '../components/Failed.svelte';
   import SyntheticBanner from '../components/SyntheticBanner.svelte';
-  import Chooser from '../components/Chooser.svelte';
-  import SpecMatrix from '../components/SpecMatrix.svelte';
-  import TestedStrip from '../components/TestedStrip.svelte';
+  import CampaignPicker from '../components/CampaignPicker.svelte';
+  import SpecTable from '../components/SpecTable.svelte';
   import AnswerChart from '../components/AnswerChart.svelte';
   import LatencyChart from '../components/LatencyChart.svelte';
   import ResultChart from '../components/ResultChart.svelte';
@@ -34,10 +33,11 @@
 </script>
 
 {#await index then i}
-  <Chooser index={i} selected={id} panel={PANEL} />
+  <CampaignPicker index={i} selected={id} panel={PANEL} />
 {/await}
 
-<div class="panel-body" id={PANEL} role="tabpanel" aria-labelledby="campaign-tab-{id}">
+<!-- The picker's button names this panel through aria-controls. -->
+<div class="panel-body" id={PANEL}>
   {#await data}
     <p class="status">Loading…</p>
   {:then { c, runs }}
@@ -51,9 +51,13 @@
 
     <header class="top">
       <h1>{c.title}</h1>
-      <p class="lead">{answerText(results)}</p>
+      <p class="question">{c.question}</p>
+      <p class="lead">{c.answer ?? answerText(results)}</p>
     </header>
-    <TestedStrip {refs} replicas={c.definition.replicas} />
+    <section>
+      <h2>What we tested</h2>
+      <SpecTable {refs} replicas={c.definition.replicas} />
+    </section>
 
     <section>
       <h2>How it performed</h2>
@@ -77,11 +81,6 @@
       {/await}
     </section>
 
-    <section>
-      <h2>What we tested</h2>
-      <SpecMatrix items={refs.map((r) => ({ key: r.spec.name, title: r.groupLabel, why: r.spec.why, spec: r.spec }))} />
-    </section>
-
     <div class="next">
       <a class="quiet" href={href({ name: 'builder', from: `campaign:${c.id}` })}>New campaign from this</a>
       <SourceLinks links={campaignSource(c)} />
@@ -95,6 +94,12 @@
   .top h1 {
     margin-top: 20px;
     margin-bottom: 4px;
+  }
+  /* The question the campaign answers, over its answer. */
+  .question {
+    margin: 0 0 6px;
+    max-width: none;
+    color: var(--ink-2);
   }
   .lead {
     margin: 0;

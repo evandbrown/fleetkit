@@ -1,12 +1,13 @@
 {
   "schema": "fleetkit-site-data/2",
   "id": "hv-host-3",
-  "title": "Metal, nested SLO",
-  "question": "At the nested campaigns' SLO, how many microVMs fit on a metal host?",
+  "title": "metal_host_standard_slo",
+  "question": "At the standard step SLO (p50 within 1 s, p95 within 2 s), how many microVMs fit on a metal host?",
   "started": "2026-09-28T03:58Z",
   "ended": "2026-09-28T04:03Z",
   "status": "complete",
   "definition_path": "experiments/campaigns/hv-host-3.json",
+  "answer": "One m8i.metal-48xl (192 vCPUs) held 140 microVMs at $0.072–0.075 per 1,000 tasks, 0.73 microVMs per host vCPU against 0.56 on a nested m8i.4xlarge. Host CPU ran out first at 144.",
   "definition": {
     "name": "hv-host-3",
     "question": "At the nested campaigns' SLO, how many microVMs fit on a metal host?",
@@ -79,7 +80,8 @@
     {
       "name": "firecracker-metal",
       "label": "m8i.metal-48xl, Firecracker, 2 vCPU / 2 GiB",
-      "why": "Metal at the nested campaigns' SLO, around where hv-host-2 would have crossed it.",
+      "short": "m8i.metal-48xl",
+      "why": "The metal host again, held to the standard step SLOs",
       "changes": [
         {
           "path": "worker_host.instance_type",

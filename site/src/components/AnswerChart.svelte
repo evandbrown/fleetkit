@@ -96,6 +96,8 @@
     <span><Mark kind="fail" size={10} />first failure</span>
     <span><i class="sw mid-sw"></i>midpoint</span>
     {#if rows.some((r) => r.runs.some((x) => x.failed === null && x.stoppedEarly))}<span><Mark kind="untested" size={10} />stopped early</span>{/if}
+    <!-- On a phone the row labels shorten to r1, r2…; the key says what r is. -->
+    {#if replicas}<span class="rkey">r = replica</span>{/if}
   </p>
 </div>
 
@@ -147,7 +149,7 @@
   }
   .name {
     margin: 0;
-    font-weight: 650;
+    font-weight: 600;
     display: flex;
     align-items: baseline;
     gap: 8px;
@@ -343,6 +345,9 @@
     background: var(--ink);
     border-radius: 0;
   }
+  .rkey {
+    display: none;
+  }
 
   /* Narrower: the figures move under the bars, one line of labelled numbers. */
   @media (max-width: 760px) {
@@ -394,6 +399,9 @@
     .rl::before {
       content: 'r' attr(data-r);
       font-size: 0.8rem;
+    }
+    .rkey {
+      display: inline-flex;
     }
   }
 </style>

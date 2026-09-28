@@ -81,6 +81,10 @@ export interface CampaignEntry {
   synthetic?: true;
   before_campaigns?: true;
   replicas: number;
+  /** One or two plain sentences from the catalog: the campaign's answer, with its figures (D93). */
+  answer?: string;
+  /** From the catalog: the spec (by name) About's featured card leads with; else its best spec by midpoint. */
+  featured_spec?: string;
   specs: { name: string; label: string }[];
   runs: number;
   outcomes: SpecOutcome[];
@@ -126,6 +130,8 @@ export interface CampaignDoc {
   /** D73: the definition's path in the repository, experiments/campaigns/<campaign>.json; for a reconstructed
    *  definition, its pre-registration's; null when neither is public. */
   definition_path: string | null;
+  /** The catalog's answer, as on the index entry (D93). */
+  answer?: string;
   definition: CampaignDefinition;
   specs: SpecDoc[];
   runs: RunEntry[];
@@ -147,6 +153,9 @@ export interface CampaignDefinition {
 export interface SpecDoc {
   name: string;
   label: string;
+  /** The catalog's short name for the spec, at most four words ("Cloud Hypervisor", "quiet console"; D93). */
+  short?: string;
+  /** Why it is in the campaign: the definition's reason, or the catalog's rewording of it (D93). */
   why?: string;
   changes: SpecChange[];
   spec: Spec;

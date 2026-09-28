@@ -2,8 +2,9 @@
 // (tokens.css --spec-*), the steps theirs (--step-*), and host CPU by process is greys with the hypervisor picked out.
 import type { HostConsumer } from './types';
 
-/** A spec's colour, by its place in the campaign (or the compare page's list). */
-export const specColor = (i: number) => `var(--spec-${(i % 4) + 1})`;
+/** A spec's colour, by its place in the campaign (or the compare page's list): eight hues, so a campaign of seven specs
+ * (guest_boot_tuning) gives each its own. */
+export const specColor = (i: number) => `var(--spec-${(i % 8) + 1})`;
 
 export const HOST_CONSUMER_COLOR: Record<HostConsumer, string> = {
   microvm_vcpus: 'var(--proc-microvm)',

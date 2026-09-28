@@ -47,14 +47,21 @@ somewhere else; `--catalog` and `--repo` point it at another catalog and results
      URLs, availability zones, or image metadata in any published byte (a legitimate match needs a
      `gate_allow` entry in the catalog, with its reason);
    - no retired word in any key or value;
-   - the size budget ([sizes.py](sizes.py)): index 5 KB, each document 80 KB, each thumbnail 10 KB, each
+   - the size budget ([sizes.py](sizes.py)): index 8 KB, each document 80 KB, each thumbnail 10 KB, each
      full-size image 60 KB, the dataset 16 MB, all gzipped;
    - the site's own contract ([contract.test.ts](contract.test.ts) runs `src/lib/contract.ts` through vitest).
 
 ## Publishing a campaign
 
-Add `{ "id": "<campaign>", "title": "<a short name>" }` to the catalog's `campaigns`, with optional `notes` (the limits
-of the result, in plain sentences) and `reading` (Evan's own). The title names it on Results; give the Builder's
-Start from the same one in `TITLES` ([draft.ts](../src/components/builder/draft.ts)), which a unit test checks.
+Add the campaign to the catalog's `campaigns` with the words the site shows for it (D93): `"id"`; `"title"`, a
+snake_case name of at most four words (`small_c8i_hosts`), which the Builder's Start list also uses (`TITLES` in
+[draft.ts](../src/components/builder/draft.ts); a unit test holds them equal); `"answer"`, one or two plain
+sentences with the figures that matter, checked against the dataset; `"labels"`, a short name of at most four words
+for each spec, keyed by its name in the definition; `"whys"`, why each spec is in the campaign in at most twelve
+words, keyed the same way, which replaces the definition's why for that spec (an empty string removes it, and a spec
+left out keeps the definition's); and `"question"` only where the definition's wording has jargon (the definition
+file is never edited); and, on the featured campaign, `"featured_spec"`, the name of the spec About's card leads
+with (without it, the card leads with the best spec by midpoint). Optional `notes` are the limits of the result, in
+plain sentences.
 Results opens on the newest complete campaign; set the catalog's `featured` to choose another (D58). A campaign of one
 from before campaigns existed names its run under `before_campaigns` (see cap-baseline-1).

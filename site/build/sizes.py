@@ -6,7 +6,13 @@ import gzip
 from pathlib import Path
 
 KB = 1024
-BUDGET = {"index": 5 * KB, "doc": 80 * KB, "thumb": 10 * KB, "full": 60 * KB, "data": 16384 * KB}  # the whole committed dataset; pages load it lazily, one document at a time
+BUDGET = {
+    "index": 8 * KB,      # index.json carries every campaign's answer (D93), which is what took it past 5 KB
+    "doc": 80 * KB,
+    "thumb": 10 * KB,
+    "full": 60 * KB,
+    "data": 16384 * KB,   # the whole committed dataset; pages load it lazily, one document at a time
+}
 
 
 def gz(data: bytes) -> int:

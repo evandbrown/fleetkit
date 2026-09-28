@@ -137,8 +137,13 @@ def resolve(definition: dict, whole: bool = True) -> list[tuple[str, dict]]:
     return out
 
 
-def spec_doc(name: str, label: str, why: str | None, base: dict, spec: dict) -> dict:
+def spec_doc(name: str, label: str, why: str | None, base: dict, spec: dict, short: str | None = None) -> dict:
+    """The published spec (DATA.md, SpecDoc): the builder's label, the catalog's short name when it gives one
+    (D93), the reason it's in the campaign (the definition's, or the catalog's rewording of it; none when empty),
+    where it differs from the base, the resolved spec and the host facts."""
     doc = {"name": name, "label": label}
+    if short:
+        doc["short"] = short
     if why:
         doc["why"] = why
     doc.update({"changes": changes(base, spec), "spec": spec, "host": host_of(spec["worker_host"]["instance_type"])})

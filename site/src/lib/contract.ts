@@ -31,6 +31,11 @@ function canon(v: unknown): unknown {
   return v;
 }
 const same = (a: unknown, b: unknown) => JSON.stringify(canon(a)) === JSON.stringify(canon(b));
+/** Words in a spec's short name: the tokens with a letter in them, so "1 vCPU / 1 GiB tuned" is three (catalog.py
+ * counts the same way). */
+const wordCount = (text: string) => text.split(/\s+/).filter((t) => /[A-Za-z]/.test(t)).length;
+/** Sentences in an answer: a full stop before a space ends one; "0.50 microVMs" and "c8i.xlarge" hold none. */
+const sentences = (text: string) => (text.match(/[.?!](?=\s)/g)?.length ?? 0) + 1;
 
 /** Deep merge as expand.py does it: objects key by key, lists and values replace. */
 function merge(base: object, changes: object): object {
@@ -87,6 +92,9 @@ export function checkIndex(index: Index): string[] {
     if (!WHEN.test(c.started)) p.push(`${w}: started ${c.started} is not ISO UTC to the minute`);
     syntheticMarks(p, w, c);
     if (!same(c.outcomes.map((o) => o.spec), c.specs.map((s) => s.name))) p.push(`${w}: one outcome per spec, in spec order`);
+    if (c.featured_spec !== undefined && !c.specs.some((s) => s.name === c.featured_spec)) {
+      p.push(`${w}: featured_spec ${c.featured_spec} is not one of its specs`);
+    }
   }
   p.push(...retiredWordsInJson(index).map((h) => `index: retired word at ${h}`));
   return p;
@@ -99,7 +107,7 @@ export function checkCampaign(doc: CampaignDoc, entry?: Index['campaigns'][numbe
   syntheticMarks(p, w, doc);
   if (!WHEN.test(doc.started) || !WHEN.test(doc.ended)) p.push(`${w}: started/ended not ISO UTC to the minute`);
   if (entry) {
-    for (const k of ['id', 'title', 'question', 'started', 'status', 'synthetic', 'before_campaigns', 'outcomes'] as const) {
+    for (const k of ['id', 'title', 'question', 'answer', 'started', 'status', 'synthetic', 'before_campaigns', 'outcomes'] as const) {
       if (!same(entry[k], doc[k])) p.push(`${w}: ${k} differs from the index entry`);
     }
     if (entry.replicas !== doc.definition.replicas) p.push(`${w}: replicas differ from the index entry`);
@@ -107,7 +115,12 @@ export function checkCampaign(doc: CampaignDoc, entry?: Index['campaigns'][numbe
     if (!same(entry.specs, doc.specs.map((s) => ({ name: s.name, label: s.label })))) p.push(`${w}: specs differ from the index entry`);
   }
   const def = doc.definition;
-  if (def.name !== doc.id || def.question !== doc.question) p.push(`${w}: the definition's name or question differs`);
+  // The document's question is the definition's or the catalog's rewording of it (D93), so only the name must match.
+  if (def.name !== doc.id) p.push(`${w}: the definition's name differs`);
+  if (typeof doc.question !== 'string' || !doc.question.trim()) p.push(`${w}: the question is empty`);
+  if (doc.answer !== undefined && (typeof doc.answer !== 'string' || !/\.$/.test(doc.answer.trim()) || sentences(doc.answer.trim()) > 2)) {
+    p.push(`${w}: the answer is one or two plain sentences ending in a full stop`);
+  }
   if (doc.before_campaigns && (doc.specs.length !== 1 || def.replicas !== 1)) p.push(`${w}: a campaign of one has one spec and one replica`);
   if (def.shutdown_after_minutes === undefined && !doc.reconstructed) p.push(`${w}: only a reconstructed definition lacks shutdown_after_minutes`);
 
@@ -145,7 +158,11 @@ export function checkCampaign(doc: CampaignDoc, entry?: Index['campaigns'][numbe
     for (const c of s.changes) {
       if (!same(c.base, baseFlat[c.path]) || !same(c.value, flat[c.path])) p.push(`${ws}: change ${c.path} has the wrong values`);
     }
-    if ((def.why?.[s.name] ?? undefined) !== s.why) p.push(`${ws}: why differs from the definition's`);
+    // The why is the definition's or the catalog's rewording of it (D93), so only its shape is checked here.
+    if (s.why !== undefined && (typeof s.why !== 'string' || !s.why.trim())) p.push(`${ws}: why is a phrase or absent`);
+    if (s.short !== undefined && (typeof s.short !== 'string' || !s.short.trim() || wordCount(s.short) > 4)) {
+      p.push(`${ws}: short is a name of at most four words`);
+    }
     if (s.host.instance_type !== s.spec.worker_host.instance_type) p.push(`${ws}: host isn't the spec's instance type`);
     if (s.host.host_kind !== hostKindOf(s.host.instance_type)) p.push(`${ws}: host kind doesn't follow from the instance type`);
     if (s.spec.densities.some((d, i) => !Number.isInteger(d) || d < 1 || (i > 0 && d <= s.spec.densities[i - 1]))) {

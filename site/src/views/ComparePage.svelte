@@ -1,15 +1,14 @@
 <script lang="ts">
   // Compare specs (D61): any published specs, from any campaigns, on one scale (density per host vCPU across host
-  // sizes, D52): what they tested in a strip, then the charts, then the spec-by-spec table. Specs are grouped under
-  // their campaign. When their SLOs differ, one line above the charts says how (D74). The choice lives in the URL.
+  // sizes, D52): what they tested in one table, each campaign named over its specs, then the charts. Specs are grouped
+  // under their campaign. When their SLOs differ, one line above the charts says how (D74). The choice lives in the URL.
   import { loadCampaign, loadIndex, loadRun } from '../lib/data';
   import { href } from '../lib/router';
   import { answerRows, campaignRefs, chartRows, latency, sharedBands, sloDifferences, specResults, type SpecRef } from '../lib/shape';
   import type { CampaignDoc, RunDoc } from '../lib/types';
   import Failed from '../components/Failed.svelte';
   import SyntheticBanner from '../components/SyntheticBanner.svelte';
-  import SpecMatrix from '../components/SpecMatrix.svelte';
-  import TestedStrip from '../components/TestedStrip.svelte';
+  import SpecTable from '../components/SpecTable.svelte';
   import AnswerChart from '../components/AnswerChart.svelte';
   import LatencyChart from '../components/LatencyChart.svelte';
   import ResultChart from '../components/ResultChart.svelte';
@@ -89,7 +88,10 @@
   {#if refs.length === 0}
     <p class="muted">Pick one or more specs.</p>
   {:else}
-    <TestedStrip {refs} replicas={0} />
+    <section>
+      <h2>What we tested</h2>
+      <SpecTable {refs} replicas={new Map([...docs.values()].map((d) => [d.id, d.definition.replicas]))} {campaigns} />
+    </section>
     <section>
       <h2>How it performed</h2>
       {#if sloDiff}<p class="slo-diff" role="note"><strong>SLOs differ:</strong> {sloDiff}</p>{/if}
@@ -105,14 +107,6 @@
         <h3>Every trial</h3>
         <ResultChart {rows} {bands} perVcpu={lat.perVcpu} caption="Every trial of the chosen specs' runs, by density" />
       {/await}
-    </section>
-
-    <section>
-      <h2>What we tested</h2>
-      <SpecMatrix
-        items={refs.map((r) => ({ key: key(r.campaign, r.spec.name), title: r.groupLabel, spec: r.spec, campaignTitle: r.campaignTitle }))}
-        {campaigns}
-      />
     </section>
   {/if}
 {:catch e}
@@ -162,8 +156,16 @@
     font-size: 0.75rem;
   }
   @media (max-width: 560px) {
-    .cols {
+    /* Both classes, so this outranks the `.campaign { display: flex }` rule below; the header row has nothing to head
+       once the campaigns stack. */
+    .campaign.cols {
       display: none;
+    }
+    /* A campaign's name over its specs, so the rows don't wrap unevenly. */
+    .campaign {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 4px;
     }
   }
   .campaign {
@@ -188,7 +190,7 @@
     gap: 6px;
     font-size: 0.88rem;
     border: 1px solid var(--rule);
-    border-radius: 999px;
+    border-radius: 6px; /* a small control: a name can wrap, so no fully rounded ends */
     padding: 3px 12px 3px 8px;
     cursor: pointer;
     background: var(--bg);

@@ -134,26 +134,38 @@ test.describe('the published cap-baseline-1', () => {
   test('opens Results on the featured campaign, selected, with no synthetic banner', async ({ page }) => {
     await page.goto(`./${href({ name: 'results', campaign: null })}`);
     await expect(page.locator('h1')).toHaveText(featured.title);
-    // The campaigns, labelled and counted, as tabs; the selected one controls the results below.
-    await expect(page.locator('#campaigns-label')).toHaveText(new RegExp(`^Campaigns\\s*${index.campaigns.length}$`));
-    const chooser = page.getByRole('tablist', { name: /^Campaigns/ });
-    await expect(chooser.getByRole('tab')).toHaveCount(index.campaigns.length);
-    const selected = chooser.getByRole('tab', { selected: true });
-    await expect(selected).toHaveCount(1);
-    await expect(selected).toContainText(featured.title);
-    await expect(page.locator('#campaign-panel')).toHaveAttribute('role', 'tabpanel');
-    await expect(page.locator('#campaign-panel')).toHaveAttribute('aria-labelledby', `campaign-tab-${featured.id}`);
+    // The campaign picker: a labelled select-style button naming the selected campaign, which controls the results
+    // below; open, one option per campaign, the selected one marked.
+    await expect(page.locator('#campaign-label')).toHaveText('Campaign');
+    const picker = page.getByRole('button', { name: /^Campaign/ });
+    await expect(picker).toContainText(featured.title);
+    await expect(picker).toHaveAttribute('aria-controls', 'campaign-panel');
+    await picker.click();
+    const list = page.getByRole('listbox', { name: 'Campaign' });
+    await expect(list.getByRole('option')).toHaveCount(index.campaigns.length);
+    await expect(list.getByRole('option', { selected: true })).toHaveCount(1);
+    await expect(list.getByRole('option', { selected: true })).toContainText(featured.title);
+    await page.keyboard.press('Escape');
+    await expect(list).toHaveCount(0);
+    await expect(picker).toBeFocused();
     await expect(page.getByText('Synthetic data')).toHaveCount(0);
   });
 
   test('shows what was tested, the criteria and how it performed', async ({ page }) => {
     await page.goto(`./${href({ name: 'results', campaign: CAP })}`);
-    await expect(page.locator('.single .in').first()).toContainText('m8i.4xlarge');
-    await expect(page.locator('.single')).toContainText('16 vCPU · 64 GiB · nested');
-    await expect(page.getByRole('list', { name: 'Success criteria' }).getByRole('listitem')).toHaveCount(5);
-    // The standard SLOs: no chip is marked as differing from them.
-    await expect(page.locator('dl.strip .slos li.on')).toHaveCount(0);
-    await expect(page.locator('.top .lead')).toHaveText('8 microVMs met every SLO, 0.50 per host vCPU. Host CPU ran out at 12.');
+    // What we tested, one spec: a two-column table, label and value, with no header row.
+    const tested = page.locator('table.tested');
+    await expect(tested.locator('thead')).toHaveCount(0);
+    // A number and its unit are joined by a no-break space (\s here), so "16 vCPU" never breaks in a narrow column.
+    await expect(tested.locator('tbody tr').first()).toHaveText(/^Host\s*m8i\.4xlarge\s*16\svCPU · 64\sGiB · nested$/);
+    // The SLOs are its last row: the standard ones, so none carries a standard beside it.
+    const slos = tested.locator('tbody tr', { has: page.locator('th', { hasText: /^SLOs$/ }) });
+    await expect(slos.locator('td')).toHaveText('ready ≤ 180 s · tasks 100% · step p50 ≤ 1 s · step p95 ≤ 2 s · task p95 ≤ 5 s');
+    // The header: the question, then the catalog's written answer (D93).
+    const cap = read<CampaignDoc>('campaigns', CAP, 'campaign.json');
+    await expect(page.locator('.top .question')).toHaveText('How many microVMs fit on one m8i.4xlarge?');
+    await expect(page.locator('.top .lead')).toHaveText(cap.answer!);
+    await expect(page.locator('.top .lead')).toContainText('held 8 microVMs');
     await expect(page.locator('.answer .figs')).toHaveText(/^Max density\s*8\s*Per vCPU\s*0\.50\s*\$ \/ 1k tasks\s*\$0\.068–0\.083\s*Ran out\s*Host CPU\s*at 12$/);
     // Latency by density, with no click: a mark per counting trial in each panel, against its SLO.
     const lat = page.locator('.lat');
@@ -164,7 +176,8 @@ test.describe('the published cap-baseline-1', () => {
     // At the limit: the first failing trial, compact, and a way into it.
     const limit = page.locator('.atlimit');
     await limit.scrollIntoViewIfNeeded();
-    await expect(limit.getByRole('tablist')).toHaveCount(0);
+    // One spec: no Spec selector.
+    await expect(limit.getByRole('button', { name: /^Spec/ })).toHaveCount(0);
     await expect(limit.locator('.title')).toHaveText(/^Density 12\s*trial 1$/);
     await expect(limit.locator('.result')).toContainText('home p50 1,279 ms > 1,000 ms');
     await expect(limit.getByRole('link', { name: 'Open this trial →' })).toHaveAttribute('href', `#/results/${CAP}/runs/${RUN}/trials/d12-t1`);
@@ -179,8 +192,9 @@ test.describe('the published cap-baseline-1', () => {
 
   test('gives the run result and its trials', async ({ page }) => {
     await page.goto(`./${href({ name: 'run', campaign: CAP, run: RUN, density: null })}`);
-    await expect(page.locator('h1')).toHaveText('m8i.4xlarge · Firecracker');
-    await expect(page.locator('p.crumbs')).toHaveText(/› m8i\.4xlarge · Firecracker$/);
+    // Titled by the spec's short name (D93).
+    await expect(page.locator('h1')).toHaveText('m8i.4xlarge');
+    await expect(page.locator('p.crumbs')).toHaveText(/› m8i\.4xlarge$/);
     await expect(page.locator('table.densities tbody tr').nth(4)).toContainText('home p50 1,063–1,563 ms');
     await expect(page.locator('table.densities tbody tr').nth(5)).toContainText('not tested');
     await expect(page.getByRole('link', { name: /^trial \d at density (8|12), (passed|failed)$/ })).toHaveCount(6);
@@ -228,24 +242,33 @@ test.describe('the published nested-hv-1', () => {
     .map((e) => read<RunDoc>('campaigns', HV, 'runs', `${e.id}.json`))
     .reduce((n, r) => n + r.trials.filter((t) => t.counts).length, 0);
 
-  test('chooses campaigns from labelled tabs, by pointer or keyboard', async ({ page }) => {
+  test('chooses campaigns from the picker, by pointer or keyboard', async ({ page }) => {
     await page.goto(`./${href({ name: 'results', campaign: HV })}`);
-    const tabs = page.getByRole('tablist', { name: /^Campaigns/ });
-    const selected = tabs.getByRole('tab', { selected: true });
-    await expect(selected).toContainText(hv.title);
-    await expect(selected).toContainText(hv.question);
-    // One tab stop: the selected campaign. The arrow keys move, Enter opens, and focus stays on the chooser.
-    await expect(tabs.getByRole('tab').and(page.locator('[tabindex="0"]'))).toHaveCount(1);
-    await selected.focus();
-    await page.keyboard.press('ArrowRight');
-    const next = index.campaigns[(index.campaigns.findIndex((c) => c.id === HV) + 1) % index.campaigns.length];
-    await expect(tabs.getByRole('tab', { name: new RegExp(`^${next.title}`) })).toBeFocused();
+    // The closed picker names the campaign: its title, its question and its headline figure on its host.
+    const picker = page.getByRole('button', { name: /^Campaign/ });
+    await expect(picker).toContainText(hv.title);
+    await expect(picker).toContainText(hv.question);
+    await expect(picker).toContainText(/\d+ microVMs on m8i\.4xlarge · 3 specs/);
+    // ArrowDown opens on the selected campaign; ArrowDown again moves to the next, newest first; Enter opens it, and
+    // focus comes back to the picker.
+    const newest = [...index.campaigns].sort((a, b) => (a.started < b.started ? 1 : a.started > b.started ? -1 : 0));
+    const next = newest[newest.findIndex((c) => c.id === HV) + 1];
+    expect(next).toBeTruthy();
+    await picker.focus();
+    await page.keyboard.press('ArrowDown');
+    const list = page.getByRole('listbox', { name: 'Campaign' });
+    await expect(list.getByRole('option', { selected: true })).toContainText(hv.title);
+    await page.keyboard.press('ArrowDown');
+    await expect(list).toHaveAttribute('aria-activedescendant', `campaign-picker-option-${next.id}`);
     await page.keyboard.press('Enter');
     await expect(page).toHaveURL(new RegExp(`#/results/${next.id}$`));
     await expect(page.locator('h1')).toHaveText(next.title);
-    await expect(tabs.getByRole('tab', { selected: true })).toBeFocused();
-    await tabs.getByRole('tab', { name: new RegExp(`^${hv.title}`) }).click();
+    await expect(page.getByRole('button', { name: /^Campaign/ })).toBeFocused();
+    // And by a click on an option.
+    await page.getByRole('button', { name: /^Campaign/ }).click();
+    await page.locator(`#campaign-picker-option-${HV}`).click();
     await expect(page.locator('h1')).toHaveText(hv.title);
+    await expect(page.getByRole('listbox')).toHaveCount(0);
   });
 
   test('shows latency by density for every spec and replica without a click', async ({ page }) => {
@@ -253,14 +276,14 @@ test.describe('the published nested-hv-1', () => {
     const lat = page.locator('.lat');
     await expect(lat.locator('svg a.mark')).toHaveCount(counting * 2);
     await expect(lat.getByRole('list', { name: 'Key' })).toHaveText(
-      /Firecracker PCI \+ RNG\s*Cloud Hypervisor\s*Firecracker MMIO\s*replica 1\s*replica 2\s*failed\s*over the SLO/,
+      /Firecracker\s*Cloud Hypervisor\s*Firecracker with MMIO\s*replica 1\s*replica 2\s*failed\s*over the SLO/,
     );
     // Pointing at (or tabbing to) a trial reads it out.
     await lat.getByRole('link', { name: /^Cloud Hypervisor · replica 2 · trial 3 at density 10, failed: slowest step p50/ }).focus();
     await expect(lat.locator('.read')).toContainText('Cloud Hypervisor · replica 2 · trial 3 at density 10');
   });
 
-  test('loads one trial at the limit, only when it comes into view, and switches spec with tabs', async ({ page }) => {
+  test('loads one trial at the limit, only when it comes into view, and switches spec from a dropdown', async ({ page }) => {
     const trials: string[] = [];
     page.on('request', (r) => {
       const m = new URL(r.url()).pathname.match(/\/runs\/[^/]+\/([^/]+)\.json$/);
@@ -273,20 +296,33 @@ test.describe('the published nested-hv-1', () => {
 
     const limit = page.locator('.atlimit');
     await limit.scrollIntoViewIfNeeded();
-    const tabs = limit.getByRole('tablist', { name: 'Spec' });
-    await expect(tabs.getByRole('tab')).toHaveText([/^\s*Firecracker PCI \+ RNG\s*fails at 10$/, /^\s*Cloud Hypervisor\s*fails at 10$/, /^\s*Firecracker MMIO\s*fails at 9$/]);
+    // The Spec dropdown's button: the spec shown, by its short name, and where it stopped passing.
+    const spec = limit.getByRole('button', { name: /^Spec/ });
+    await expect(spec).toHaveText(/^\s*Firecracker\s*fails at 10\s*$/);
     const open = limit.getByRole('link', { name: 'Open this trial →' });
     await expect(open).toHaveAttribute('href', `#/results/${HV}/runs/firecracker-r1/trials/d10-t1`);
     await expect(limit.locator('.lanes svg a')).toHaveCount(10);
     expect(trials).toHaveLength(1);
 
-    await tabs.getByRole('tab', { name: /^Firecracker MMIO/ }).click();
+    // Open, every spec the same way, the shown one selected; a click chooses.
+    await spec.click();
+    const list = page.getByRole('listbox', { name: 'Spec' });
+    await expect(list.getByRole('option')).toHaveText([/^\s*Firecracker\s*fails at 10\s*$/, /^\s*Cloud Hypervisor\s*fails at 10\s*$/, /^\s*Firecracker with MMIO\s*fails at 9\s*$/]);
+    await expect(list.getByRole('option', { selected: true })).toHaveText(/^\s*Firecracker\s*fails at 10\s*$/);
+    await list.getByRole('option', { name: /^Firecracker with MMIO/ }).click();
+    await expect(list).toHaveCount(0);
+    await expect(spec).toHaveText(/^\s*Firecracker with MMIO\s*fails at 9\s*$/);
     await expect(open).toHaveAttribute('href', `#/results/${HV}/runs/firecracker-mmio-r1/trials/d9-t3`);
     await expect(limit.locator('.title')).toHaveText(/^Density 9\s*trial 3 · replica 1$/);
     await expect(limit.locator('.lanes svg a')).toHaveCount(9);
     expect(trials).toHaveLength(2);
-    await tabs.getByRole('tab', { selected: true }).press('ArrowLeft');
-    await expect(tabs.getByRole('tab', { name: /^Cloud Hypervisor/ })).toHaveAttribute('aria-selected', 'true');
+    // By keyboard: ArrowUp opens on the shown spec, ArrowUp again moves to the one before it, Enter chooses.
+    await spec.press('ArrowUp');
+    await expect(list).toBeVisible();
+    await page.keyboard.press('ArrowUp');
+    await page.keyboard.press('Enter');
+    await expect(list).toHaveCount(0);
+    await expect(spec).toHaveText(/^\s*Cloud Hypervisor\s*fails at 10\s*$/);
     await expect(open).toHaveAttribute('href', `#/results/${HV}/runs/cloud-hypervisor-r1/trials/d10-t1`);
     await open.click();
     await expect(page.locator('h1')).toHaveText('Trial 1 at density 10');
@@ -319,32 +355,37 @@ test.describe('the published hv-host-2: a metal host, judged by SLOs of its own 
 
   test('tags each campaign card whose SLOs are not the standard ones, and only those', async ({ page }) => {
     await page.goto(`./${href({ name: 'results', campaign: METAL })}`);
-    const tabs = page.getByRole('tablist', { name: /^Campaigns/ });
-    await expect(tabs.getByRole('tab', { name: /^Metal host/ }).locator('.slo-tag')).toHaveText(LOOSER);
-    await expect(tabs.locator('.slo-tag')).toHaveCount(campaigns.filter((c) => !standard(c)).length);
-    for (const c of campaigns.filter(standard)) await expect(page.locator(`#campaign-tab-${c.id} .slo-tag`)).toHaveCount(0);
+    await page.getByRole('button', { name: /^Campaign/ }).click();
+    const list = page.getByRole('listbox', { name: 'Campaign' });
+    await expect(list.locator(`#campaign-picker-option-${METAL} .slo-tag`)).toHaveText(LOOSER);
+    await expect(list.locator('.slo-tag')).toHaveCount(campaigns.filter((c) => !standard(c)).length);
+    for (const c of campaigns.filter(standard)) await expect(list.locator(`#campaign-picker-option-${c.id} .slo-tag`)).toHaveCount(0);
   });
 
-  test('highlights the SLOs that differ from the standard on its page, with the standard beside each', async ({ page }) => {
+  test('names the standard beside each SLO that differs from it, in the SLOs row of What we tested', async ({ page }) => {
     await page.goto(`./${href({ name: 'results', campaign: METAL })}`);
-    const slos = page.locator('dl.strip').getByRole('list', { name: 'Success criteria' });
-    await expect(slos.getByRole('listitem')).toHaveCount(5);
-    await expect(slos.locator('li.on')).toHaveText([/^Ready\s*≤ 900 s\s*standard ≤ 180 s$/, /^Step p50\s*≤ 2 s\s*standard ≤ 1 s$/, /^Step p95\s*≤ 3 s\s*standard ≤ 2 s$/]);
-    await expect(slos.locator('li:not(.on)')).toHaveText([/^Tasks\s*100%$/, /^Task p95\s*≤ 5 s$/]);
+    const slos = page.locator('table.tested tbody tr', { has: page.locator('th', { hasText: /^SLOs$/ }) });
+    await expect(slos.locator('td')).toHaveText(
+      'ready ≤ 900 s (standard 180 s) · tasks 100% · step p50 ≤ 2 s (standard 1 s) · step p95 ≤ 3 s (standard 2 s) · task p95 ≤ 5 s',
+    );
   });
 
   test('says the SLOs differ above the charts when a metal spec is compared with nested ones', async ({ page }) => {
     await page.goto(`./${href({ name: 'compare', specs: [`${METAL}/firecracker-metal`, 'nested-sizes-1/m8i-4xlarge'] })}`);
     const note = page.getByRole('note').filter({ hasText: 'SLOs differ' });
-    await expect(note).toHaveText('SLOs differ: Metal host uses step p50 ≤ 2 s, step p95 ≤ 3 s and ready ≤ 900 s; the rest use the standard.');
+    await expect(note).toHaveText('SLOs differ: metal_host uses step p50 ≤ 2 s, step p95 ≤ 3 s and ready ≤ 900 s; the rest use the standard.');
     const [noteBox, chartBox] = [await note.boundingBox(), await page.locator('.answer').boundingBox()];
     expect(noteBox!.y).toBeLessThan(chartBox!.y);
     // The latency chart names whose each step limit is; the task limit is shared, so it names no one.
-    await expect(page.locator('.lat .pn-step text.slo-label')).toHaveText(['SLO ≤ 1,000 ms · standard', 'SLO ≤ 2,000 ms · Metal host']);
+    await expect(page.locator('.lat .pn-step text.slo-label')).toHaveText(['SLO ≤ 1,000 ms · standard', 'SLO ≤ 2,000 ms · metal_host']);
     await expect(page.locator('.lat .pn-task text.slo-label')).toHaveText(['SLO ≤ 5,000 ms']);
-    // Each host says its kind when metal sits beside nested.
-    await expect(page.locator('dl.strip .item').first()).toContainText(/m8i\.metal-48xl\s*192 vCPU · 768 GiB · metal/);
-    await expect(page.locator('dl.strip .item').first()).toContainText(/m8i\.4xlarge\s*16 vCPU · 64 GiB · nested/);
+    // What we tested names each campaign over its columns; each host says its kind when metal sits beside nested.
+    const tested = page.locator('table.tested');
+    await expect(tested.locator('thead th[scope="colgroup"]')).toHaveText(['metal_host', 'm8i_host_size']);
+    await expect(tested.locator('thead th[scope="col"]')).toHaveText(['m8i.metal-48xl', 'm8i.4xlarge']);
+    const host = tested.locator('tbody tr', { has: page.locator('th', { hasText: /^Host$/ }) });
+    // A number and its unit are joined by a no-break space (\s here).
+    await expect(host.locator('td.diff')).toHaveText([/^m8i\.metal-48xl\s*192\svCPU · 768\sGiB · metal$/, /^m8i\.4xlarge\s*16\svCPU · 64\sGiB · nested$/]);
     // Specs judged alike: no line.
     await page.goto(`./${href({ name: 'compare', specs: ['nested-sizes-1/m8i-4xlarge', 'nested-sizes-1/m8i-2xlarge'] })}`);
     await expect(page.getByRole('heading', { name: 'How it performed' })).toBeVisible();
@@ -403,18 +444,26 @@ test.describe('the published browser-lean-1: specs that change a list, the extra
   const lean = has ? read<CampaignDoc>('campaigns', LEAN, 'campaign.json') : null;
   const flags = lean?.definition.specs['c8i-xlarge-nopre']?.workload?.chromium_extra_flags ?? [];
 
-  test('labels the specs by their flags, and shows the flags short in the strip and whole in the table', async ({ page }) => {
+  test('names the specs by their short names, and shows the flags whole in What we tested', async ({ page }) => {
     test.skip(!has, `${LEAN} isn't published`);
     await page.goto(`./${href({ name: 'results', campaign: LEAN })}`);
     await expect(page.getByRole('heading', { name: 'What we tested', exact: true })).toBeVisible();
-    const strip = page.locator('dl.strip .item').filter({ has: page.locator('dt', { hasText: 'Chromium flags' }) });
-    await expect(strip.locator('.chip')).toHaveText(['none', '--disable-features=…', 'none', '--disable-features=…']);
-    await expect(strip.locator('.chip').nth(1)).toHaveAttribute('title', flags.join(' '));
-    const heads = page.locator('.matrix .head strong');
-    await expect(heads).toHaveText(['c8i.xlarge · no extra flags', 'c8i.xlarge · extra flags', 'm8i.4xlarge · no extra flags', 'm8i.4xlarge · extra flags']);
-    const row = page.locator('.matrix .rl', { hasText: 'Chromium flags' });
+    const tested = page.locator('table.tested');
+    await expect(tested.locator('thead th[scope="col"]')).toHaveText([
+      'c8i.xlarge',
+      'c8i.xlarge without preload',
+      'm8i.4xlarge',
+      'm8i.4xlarge without preload',
+    ]);
+    // One Chromium flags row, a cell per spec: "none", or every flag in full.
+    const row = tested.locator('tbody tr', { has: page.locator('th', { hasText: /^Chromium flags$/ }) });
     await expect(row).toHaveCount(1);
-    await expect(page.locator('.matrix .cell.diff code')).toHaveText([flags.join(' '), flags.join(' ')]);
+    await expect(row.locator('td.diff')).toHaveText(['none', flags.join(' '), 'none', flags.join(' ')]);
+    await expect(row.locator('td.diff code')).toHaveText([flags.join(' '), flags.join(' ')]);
+    // No spec is named by its slug.
+    await expect(page.locator('main')).not.toContainText('c8i-xlarge-nopre');
+    const [sw, cw] = await page.evaluate(() => [document.documentElement.scrollWidth, document.documentElement.clientWidth]);
+    expect(sw).toBeLessThanOrEqual(cw);
   });
 
   test('marks the flags a run changed from the base, with the base as none', async ({ page }) => {

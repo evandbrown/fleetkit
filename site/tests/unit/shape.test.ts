@@ -14,7 +14,6 @@ import {
   coresStack,
   firedRule,
   densityRows,
-  differingRows,
   headline,
   lanes,
   latency,
@@ -26,7 +25,6 @@ import {
   sameCriteria,
   sharedBands,
   showsChromium,
-  specCard,
   specLabels,
   specResults,
   specSections,
@@ -97,30 +95,13 @@ describe('specs, from the input schema', () => {
 });
 
 describe('what we tested', () => {
-  it('shows each spec as its host, hypervisor, microVM and densities', () => {
-    expect(specCard(cap.specs[0])).toEqual({
-      host: { value: 'm8i.4xlarge', sub: '16 vCPU · 64 GiB · nested' },
-      hypervisor: { value: 'Firecracker', sub: null },
-      microvm: '2 vCPU · 2 GiB',
-      densities: [1, 2, 4, 8, 12, 16],
-      chromium: [],
-    });
-    // The devices are named only where they differ between the specs shown.
-    expect(specCard(hv.specs[1], true).hypervisor).toEqual({ value: 'Cloud Hypervisor', sub: 'PCI + RNG devices' });
-  });
-
-  it('names a guest console or memory pages that are not the defaults on the microVM row', () => {
+  it('sees a guest console or memory pages only where they are not the defaults', () => {
     const vm = (microvm: object) => ({ ...cap.specs[0], spec: { ...cap.specs[0].spec, microvm: { vcpus: 2, memory_mib: 2048, ...microvm } } });
-    expect(specCard(vm({ console: 'verbose', memory_pages: '4k' })).microvm).toBe('2 vCPU · 2 GiB');
-    expect(specCard(vm({ console: 'quiet' })).microvm).toBe('2 vCPU · 2 GiB · quiet console');
-    expect(specCard(vm({ console: 'quiet-i8042', memory_pages: 'thp' })).microvm).toBe(
-      '2 vCPU · 2 GiB · quiet console, no keyboard probe · transparent huge pages',
-    );
     // Left out is the default: a spec that writes the default doesn't differ from one that leaves it out.
     const explicit = vm({ console: 'verbose', memory_pages: '4k' });
-    expect([...differingRows([cap.specs[0], explicit])]).toEqual([]);
+    expect(differing([cap.specs[0].spec, explicit.spec])).toEqual([]);
     expect(differing([cap.specs[0].spec, vm({ console: 'quiet' }).spec])).toEqual(['microvm.console']);
-    expect([...differingRows([cap.specs[0], vm({ memory_pages: 'thp' })])]).toEqual(['microvm']);
+    expect(differing([cap.specs[0].spec, vm({ memory_pages: 'thp' }).spec])).toEqual(['microvm.memory_pages']);
   });
 
   it('shows extra Chromium flags, a list, as its own row only where some spec adds them', () => {
@@ -132,11 +113,8 @@ describe('what we tested', () => {
     });
     const [big, small] = syn.specs;
     const four = [big, flagged(big, LEAN), small, flagged(small, LEAN)];
-    expect(specCard(four[1]).chromium).toEqual(LEAN);
-    expect(specCard(four[0]).chromium).toEqual([]);
-    expect([...differingRows(four)]).toEqual(['host', 'densities', 'chromium']);
     expect(differing(four.map((s) => s.spec))).toContain('workload.chromium_extra_flags');
-    // One set of flags: labels say which specs add it; the strip and the table say what it is.
+    // One set of flags: labels say which specs add it; the table says what it is.
     expect(specLabels(four)).toEqual([
       'm8i.4xlarge · no extra flags',
       'm8i.4xlarge · extra flags',
@@ -154,7 +132,7 @@ describe('what we tested', () => {
     expect(flagsShort(LEAN)).toBe('--disable-features=…');
     // A list equal to the default, written or left out, is no difference and no row.
     const written = flagged(big, []);
-    expect([...differingRows([big, written])]).toEqual([]);
+    expect(differing([big.spec, written.spec])).toEqual([]);
     expect(showsChromium([big, written])).toBe(false);
     expect(showsChromium(four)).toBe(true);
     expect(specLabels([big, written])).toEqual(specLabels([big, { ...big, name: 'again' }]));
@@ -165,16 +143,14 @@ describe('what we tested', () => {
     expect(specLabels(syn.specs)).toEqual(['m8i.4xlarge', 'm8i.2xlarge']);
     expect(specLabels(cap.specs)).toEqual(['m8i.4xlarge · Firecracker']);
     expect(campaignRefs(hv).map((r) => [r.campaignTitle, r.groupLabel])[1]).toEqual(['Synthetic hypervisors', 'Cloud Hypervisor']);
+    // The catalog's short name, where a spec has one, is what the pages call it (D93).
+    const named: CampaignDoc = { ...hv, specs: hv.specs.map((s, i) => (i === 1 ? { ...s, short: 'CH' } : s)) };
+    expect(campaignRefs(named).map((r) => r.groupLabel)).toEqual(['Firecracker PCI + RNG', 'CH', 'Firecracker MMIO']);
   });
 
-  it('highlights the inputs that differ between specs, in any campaigns', () => {
+  it('knows which inputs differ between specs', () => {
     expect(differing(syn.specs.map((s) => s.spec))).toEqual(['worker_host.instance_type', 'densities']);
-    expect([...differingRows(syn.specs)]).toEqual(['host', 'densities']);
-    expect([...differingRows(hv.specs)]).toEqual(['hypervisor']);
-    expect([...differingRows(cap.specs)]).toEqual([]);
-    // Across campaigns: cap-baseline-1's spec is the synthetic 16-vCPU spec; against firecracker-mmio only the densities differ.
-    expect([...differingRows([cap.specs[0], syn.specs[0]])]).toEqual([]);
-    expect([...differingRows([cap.specs[0], hv.specs[2]])]).toEqual(['densities']);
+    expect(differing(cap.specs.map((s) => s.spec))).toEqual([]);
   });
 
   it('knows when every spec is judged by the same criteria', () => {
@@ -188,7 +164,8 @@ describe('how it performed', () => {
   it('gives each spec four figures: density, per vCPU, cost and what ran out', () => {
     const [big, small] = specResults(refs(syn), docs).map(headline);
     expect(big).toEqual({ density: '8', densityNote: null, perVcpu: '0.50', cost: '$0.081–0.086', ranOut: 'Host CPU', ranOutNote: 'at 12', ranOutDensity: 12 });
-    expect(small).toMatchObject({ density: '3–4', perVcpu: '0.38–0.50', ranOut: 'Host CPU', ranOutNote: 'at 4' });
+    // Its replicas ran out at 6 and at 4: the note gives both ends, never only the lowest.
+    expect(small).toMatchObject({ density: '3–4', perVcpu: '0.38–0.50', ranOut: 'Host CPU', ranOutNote: 'at 4–6', ranOutDensity: 4 });
     expect(headline(specResults(refs(cap), docs)[0])).toEqual({
       density: '8', densityNote: null, perVcpu: '0.50', cost: '$0.068–0.083', ranOut: 'Host CPU', ranOutNote: 'at 12', ranOutDensity: 12,
     });
@@ -205,7 +182,8 @@ describe('how it performed', () => {
     expect(big.replicas.map((r) => r.tested_successfully)).toEqual([8, 8]);
     expect(small.replicas.map((r) => r.tested_successfully)).toEqual([4, 3]);
     expect(small.midpoint).toBeCloseTo(0.53125, 4);
-    expect(small.limits).toEqual([{ verdict: 'host_cpu', runs: 2, density: 4 }]);
+    expect(small.limits).toEqual([{ verdict: 'host_cpu', runs: 2, density: 4, densityMax: 6 }]);
+    expect(big.limits).toEqual([{ verdict: 'host_cpu', runs: 2, density: 12, densityMax: 12 }]);
     expect(small.cost![0]).toBeLessThanOrEqual(small.cost![1]);
   });
 
@@ -290,6 +268,9 @@ describe('how it performed', () => {
     expect(hvs.metric).toBe('Max density');
     expect(hvs.bars.map((b) => [b.text, b.lo, b.hi])).toEqual([['10', 10, 10], ['9', 9, 9], ['8–9', 8, 9]]);
     expect(hvs.max).toBe(10);
+    // A spec none of whose replicas reached a failure is a floor, as the headline writes it.
+    const capped = { ...e('nested-hv-synthetic'), outcomes: e('nested-hv-synthetic').outcomes.map((o, i) => (i === 0 ? { ...o, replicas: o.replicas.map((r) => ({ ...r, first_failed: null })) } : o)) };
+    expect(campaignFigure(capped).bars[0].text).toBe('≥ 10');
   });
 });
 

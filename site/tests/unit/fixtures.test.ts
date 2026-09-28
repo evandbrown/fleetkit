@@ -50,6 +50,22 @@ describe('the contract refuses what breaks a rule', () => {
     bad.specs[1].spec.microvm.vcpus = 4;
     expect(checkCampaign(bad).join('\n')).toMatch(/isn't the base merged/);
   });
+  it('an answer the index entry gives differently, or a short name of five words (D93)', () => {
+    const doc = { ...structuredClone(c), answer: 'Yes: both held 9 microVMs on both replicas. Host CPU ran out first.' };
+    expect(checkCampaign(doc, { ...entry, answer: 'No.' })).toEqual([`campaign ${c.id}: answer differs from the index entry`]);
+    expect(checkCampaign(doc, { ...entry, answer: doc.answer })).toEqual([]);
+    expect(checkCampaign({ ...doc, answer: 'One. Two. Three.' }).join('\n')).toMatch(/one or two plain sentences/);
+    const bad = structuredClone(c);
+    bad.specs[0].short = 'one two three four five';
+    expect(checkCampaign(bad).join('\n')).toMatch(/short is a name of at most four words/);
+    bad.specs[0].short = '1 vCPU / 1 GiB tuned';
+    expect(checkCampaign(bad)).toEqual([]);
+  });
+  it("a question reworded from the definition's is allowed, an empty one is not", () => {
+    const question = 'Is density per host vCPU the same on 8 and 16 vCPU hosts?';
+    expect(checkCampaign({ ...structuredClone(c), question }, { ...entry, question })).toEqual([]);
+    expect(checkCampaign({ ...structuredClone(c), question: '' }).join('\n')).toMatch(/question is empty/);
+  });
   it('a featured campaign that is not listed', () => {
     expect(checkIndex({ ...index, featured: 'nowhere' })).toEqual(['index: featured nowhere is not listed']);
   });

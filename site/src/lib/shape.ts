@@ -6,7 +6,7 @@ import { makeBands, type Band } from './bands';
 import { meanMidpoint } from './derive';
 import { STOPPED_EARLY, SUBJECT_LABEL, trialLabel, VERDICT_SHORT } from './glossary';
 import { href } from './router';
-import { chromiumFlags, differing, flagsWords, flatten, field, hypervisorName, mib, show, STANDARD_CRITERIA } from './spec';
+import { chromiumFlags, flagsWords, flatten, field, hypervisorName, mib, show, STANDARD_CRITERIA } from './spec';
 import type {
   CampaignDoc,
   CampaignEntry,
@@ -31,14 +31,14 @@ export interface SpecRef {
   campaign: string;
   campaignTitle: string;
   spec: SpecDoc;
-  /** What the pages call the spec: the input that sets it apart in its campaign ("Cloud Hypervisor", "m8i.2xlarge"). */
+  /** What the pages call the spec: the catalog's short name (D93), else the input that sets it apart in its campaign ("Cloud Hypervisor", "m8i.2xlarge"). */
   groupLabel: string;
 }
 
-/** Refs for a campaign's own specs, each labelled by what sets it apart. */
+/** Refs for a campaign's own specs, each called by the catalog's short name (D93), or by what sets it apart. */
 export function campaignRefs(c: CampaignDoc): SpecRef[] {
   const labels = specLabels(c.specs);
-  return c.specs.map((spec, i) => ({ campaign: c.id, campaignTitle: c.title, spec, groupLabel: labels[i] }));
+  return c.specs.map((spec, i) => ({ campaign: c.id, campaignTitle: c.title, spec, groupLabel: spec.short ?? labels[i] }));
 }
 
 const devices = (h: Spec['hypervisor']) => `${h.virtio_transport.toUpperCase()}${h.virtio_rng ? ' + RNG' : ''}`;
@@ -69,63 +69,9 @@ export function specLabels(specs: SpecDoc[]): string[] {
   return named.map((l, i) => (named.filter((x) => x === l).length > 1 ? specs[i].label || specs[i].name : l));
 }
 
-// ---- what we tested: one card per spec ------------------------------------------------------------------
-
-export type CardRow = 'host' | 'hypervisor' | 'microvm' | 'densities' | 'chromium';
-
-export interface SpecCard {
-  host: { value: string; sub: string };
-  /** The devices are named only when they differ between the specs shown. */
-  hypervisor: { value: string; sub: string | null };
-  microvm: string;
-  densities: number[];
-  /** The extra Chromium flags, in full; none when the spec leaves them out. */
-  chromium: string[];
-}
-
-/** The microVM as a card shows it: its size, then its guest console and memory pages where they aren't the defaults
- * ("2 vCPU · 2 GiB · quiet console · transparent huge pages"), so specs that differ only there don't read the same. */
-function microvmCard(m: Spec['microvm']): string {
-  const parts = [`${m.vcpus} vCPU`, mib(m.memory_mib)];
-  if (m.console && m.console !== 'verbose') parts.push(m.console === 'quiet-i8042' ? 'quiet console, no keyboard probe' : `${m.console} console`);
-  if (m.memory_pages && m.memory_pages !== '4k') parts.push(show('microvm.memory_pages', m.memory_pages));
-  return parts.join(' · ');
-}
-
-/** A spec's inputs as the card shows them: the host, the hypervisor, the microVM, the densities. */
-export function specCard(s: SpecDoc, showDevices = false): SpecCard {
-  const h = s.spec.hypervisor;
-  return {
-    host: { value: s.host.instance_type, sub: `${s.host.vcpus} vCPU · ${f.num(s.host.memory_gib)} GiB · ${s.host.host_kind}` },
-    hypervisor: { value: hypervisorName(h.name), sub: showDevices ? `${devices(h)} devices` : null },
-    microvm: microvmCard(s.spec.microvm),
-    densities: s.spec.densities,
-    chromium: chromiumFlags(s.spec),
-  };
-}
-
-/** Whether the cards show a Chromium flags row: when any spec shown adds flags. Where none does, the row would only
- * say "none" for every spec, as every campaign before the flags existed ran. */
+/** Whether the What we tested table shows a Chromium flags row: when any spec shown adds flags. Where none does, the
+ * row would only say "none" for every spec, as every campaign before the flags existed ran. */
 export const showsChromium = (specs: SpecDoc[]) => specs.some((s) => chromiumFlags(s.spec).length > 0);
-
-const ROW_OF: [string, CardRow][] = [
-  ['worker_host.', 'host'],
-  ['hypervisor.', 'hypervisor'],
-  ['microvm.', 'microvm'],
-  ['densities', 'densities'],
-  ['workload.', 'chromium'],
-];
-
-/** The card rows whose inputs differ between the specs: what the cards highlight. */
-export function differingRows(specs: SpecDoc[]): Set<CardRow> {
-  const out = new Set<CardRow>();
-  if (specs.length < 2) return out;
-  for (const path of differing(specs.map((s) => s.spec))) {
-    const row = ROW_OF.find(([prefix]) => path === prefix || path.startsWith(prefix));
-    if (row) out.add(row[1]);
-  }
-  return out;
-}
 
 // ---- success criteria ------------------------------------------------------------------------------------
 // The SLOs a spec is judged by, as the pages show them, and how they differ from the method's standard ones (the
@@ -286,9 +232,13 @@ export interface SpecResult {
   midpoint: number | null;
   /** Execution cost per 1,000 tasks at each replica's result, joined: [min, max]. */
   cost: Range | null;
-  /** The distinct verdicts at each replica's first failure, most common first. */
-  limits: { verdict: Verdict; runs: number; density: number }[];
+  /** The distinct verdicts at each replica's first failure, most common first, each with the lowest and the highest
+   * density a replica ran out at with it. */
+  limits: { verdict: Verdict; runs: number; density: number; densityMax: number }[];
 }
+
+/** Where a verdict fired, across replicas: "7" when every replica ran out at the same density, "26–29" otherwise. */
+const ranOutAt = (l: SpecResult['limits'][number]) => (l.density === l.densityMax ? `${l.density}` : `${l.density}–${l.densityMax}`);
 
 export function specResults(refs: SpecRef[], docs: Map<string, CampaignDoc>): SpecResult[] {
   return refs.map((ref) => {
@@ -296,13 +246,17 @@ export function specResults(refs: SpecRef[], docs: Map<string, CampaignDoc>): Sp
     const replicas = c.outcomes.find((o) => o.spec === ref.spec.name)?.replicas ?? [];
     const runs = c.runs.filter((r) => r.spec === ref.spec.name);
     const costs = replicas.flatMap((r) => (r.cost_per_1000_tasks ? [r.cost_per_1000_tasks.execution] : []));
-    const counts = new Map<Verdict, { runs: number; density: number }>();
+    const counts = new Map<Verdict, { runs: number; density: number; densityMax: number }>();
     for (const run of runs) {
       const l = run.result.limit;
       const v = l?.verdicts[0];
       if (!l || !v) continue;
       const had = counts.get(v);
-      counts.set(v, { runs: (had?.runs ?? 0) + 1, density: Math.min(had?.density ?? Infinity, l.density) });
+      counts.set(v, {
+        runs: (had?.runs ?? 0) + 1,
+        density: Math.min(had?.density ?? Infinity, l.density),
+        densityMax: Math.max(had?.densityMax ?? -Infinity, l.density),
+      });
     }
     return {
       ref,
@@ -344,8 +298,10 @@ export interface Headline {
   cost: string | null;
   /** What ran out: "Host CPU", or a label ("not reached"). */
   ranOut: string;
+  /** Where: "at 7" when every replica ran out there, "at 26–29" when they differ; then "· 4 of 5 replicas" when fewer
+   * than every replica ran out that way. */
   ranOutNote: string | null;
-  /** The density where it ran out, for a link to it. */
+  /** The lowest density where it ran out, for a link to it. */
   ranOutDensity: number | null;
 }
 
@@ -372,13 +328,16 @@ export function headline(r: SpecResult): Headline {
     perVcpu: spread(reps.map((x) => x.per_host_vcpu), f.ratio),
     cost: r.cost ? f.usdRange(r.cost) : null,
     ranOut: top ? VERDICT_SHORT[top.verdict] : noFailure ? 'not reached' : VERDICT_SHORT.unknown,
-    ranOutNote: top ? `at ${top.density}${reps.length > 1 && top.runs < reps.length ? ` · ${top.runs} of ${reps.length} replicas` : ''}` : null,
+    ranOutNote: top ? `at ${ranOutAt(top)}${reps.length > 1 && top.runs < reps.length ? ` · ${top.runs} of ${reps.length} replicas` : ''}` : null,
     ranOutDensity: top ? top.density : null,
   };
 }
 
-/** The headline a campaign is chosen by: its best spec's density and density per host vCPU. */
-export function campaignHeadline(e: CampaignEntry): {
+/**
+ * The headline a campaign is chosen by: its best spec's density and density per host vCPU. With `spec` (the catalog's
+ * `featured_spec`, for About's card), that spec's instead, as long as it has run.
+ */
+export function campaignHeadline(e: CampaignEntry, spec: string | null = null): {
   /** "8", "3–4"; null with a label instead. */
   density: string | null;
   label: string;
@@ -390,7 +349,8 @@ export function campaignHeadline(e: CampaignEntry): {
     const per = o.replicas.map((r) => r.per_host_vcpu).filter((x): x is number => x !== null);
     return o.midpoint_per_host_vcpu ?? (per.length ? Math.min(...per) : -1);
   };
-  const best = [...e.outcomes].sort((a, b) => score(b) - score(a))[0];
+  const asked = spec ? e.outcomes.find((o) => o.spec === spec) : undefined;
+  const best = asked?.replicas.length ? asked : [...e.outcomes].sort((a, b) => score(b) - score(a))[0];
   if (!best || !best.replicas.length) return { density: null, label: 'not run yet', perVcpu: null, spec: null };
   const passed = spread(best.replicas.map((r) => r.tested_successfully), (v) => f.num(v));
   return {
@@ -404,8 +364,9 @@ export function campaignHeadline(e: CampaignEntry): {
 export interface CardBar {
   key: string;
   label: string;
-  /** "9", "8–9", "0.56"; a label when there's no figure ("not run yet"). */
+  /** "9", "8–9", "0.56"; "≥ 200" when no replica reached a failure; a label when there's no figure ("not run yet"). */
   text: string;
+  /** The figure's ends; both 0 when there's no figure. */
   lo: number;
   hi: number;
 }
@@ -426,7 +387,9 @@ export function campaignFigure(
     const reps = e.outcomes.find((o) => o.spec === s.name)?.replicas ?? [];
     const vals = reps.map((r) => (perVcpu ? r.per_host_vcpu : r.tested_successfully)).filter((v): v is number => v !== null);
     const fmt = perVcpu ? f.ratio : (v: number) => f.num(v);
-    const text = !reps.length ? 'not run yet' : !vals.length ? 'none passed' : f.range([Math.min(...vals), Math.max(...vals)], fmt);
+    // No replica reached a failure: the figure is a floor, as headline() writes it.
+    const noFailure = reps.length > 0 && reps.every((r) => r.first_failed === null);
+    const text = !reps.length ? 'not run yet' : !vals.length ? 'none passed' : `${noFailure ? '≥ ' : ''}${f.range([Math.min(...vals), Math.max(...vals)], fmt)}`;
     return { key: s.name, label: labels[i] ?? s.label, text, lo: vals.length ? Math.min(...vals) : 0, hi: vals.length ? Math.max(...vals) : 0 };
   });
   return { single: null, metric, bars, max: Math.max(0, ...bars.map((b) => b.hi)) };
@@ -522,7 +485,7 @@ export function answerText(results: SpecResult[]): string {
     if (h.density === '0') return 'No density met every SLO.';
     const d = h.density.startsWith('≥') ? `At least ${h.density.slice(2)}` : h.density;
     const fit = `${d} ${d === '1' ? 'microVM' : 'microVMs'} met every SLO${h.perVcpu ? `, ${h.perVcpu} per host vCPU` : ''}.`;
-    return `${fit} ${r.limits[0] ? `${h.ranOut} ran out at ${r.limits[0].density}.` : 'Nothing ran out.'}`;
+    return `${fit} ${r.limits[0] ? `${h.ranOut} ran out at ${ranOutAt(r.limits[0])}.` : 'Nothing ran out.'}`;
   }
   const perVcpu = new Set(results.flatMap((r) => r.replicas.map((x) => x.host_vcpus))).size > 1;
   const groups = new Map<string, string[]>();

@@ -1,12 +1,13 @@
 {
   "schema": "fleetkit-site-data/2",
   "id": "nested-sizes-1",
-  "title": "Host size",
+  "title": "m8i_host_size",
   "question": "Is density per host vCPU the same on 8 and 16 vCPU hosts?",
   "started": "2026-09-28T00:00Z",
   "ended": "2026-09-28T00:04Z",
   "status": "complete",
   "definition_path": "experiments/campaigns/nested-sizes-1.json",
+  "answer": "Close: m8i.4xlarge (16 vCPUs) held 9 microVMs on both replicas and m8i.2xlarge (8 vCPUs) held 4, 0.56 against 0.50 microVMs per host vCPU. Host CPU ran out first on every host.",
   "definition": {
     "name": "nested-sizes-1",
     "question": "Is density per host vCPU the same on 8 and 16 vCPU hosts?",
@@ -80,7 +81,8 @@
     {
       "name": "m8i-4xlarge",
       "label": "m8i.4xlarge",
-      "why": "The baseline host, 16 vCPUs.",
+      "short": "m8i.4xlarge",
+      "why": "The same host as the baseline campaign",
       "changes": [],
       "spec": {
         "worker_host": {
@@ -135,7 +137,8 @@
     {
       "name": "m8i-2xlarge",
       "label": "m8i.2xlarge",
-      "why": "Half the vCPUs, same family.",
+      "short": "m8i.2xlarge",
+      "why": "Half the vCPUs of the same family",
       "changes": [
         {
           "path": "worker_host.instance_type",

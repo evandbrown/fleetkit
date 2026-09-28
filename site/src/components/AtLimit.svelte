@@ -2,16 +2,18 @@
   // At the limit: for each spec, one trial at its first failing density (limitPick), shown the way the trial page
   // shows it but compact: the steps against their limits, the host CPU by process over time, the rule that ran out,
   // and every microVM's lane. A switch sets the last density that passed beside it, in the same run, so the jump is
-  // visible. Tabs choose the spec when there are several. A trial's own document loads only when this comes near the
-  // screen, and only for the trial shown.
+  // visible. When there are several specs, a dropdown (Dropdown.svelte, the campaign picker's) chooses the one shown:
+  // its colour dot, its short name and where it stopped passing. A trial's own document loads only when this comes
+  // near the screen, and only for the trial shown.
   import { onMount } from 'svelte';
   import { HOST_CONSUMER_COLOR, specColor } from '../lib/colors';
   import { loadTrial } from '../lib/data';
   import * as f from '../lib/format';
   import { HOST_CONSUMER_LABEL, RULE_LABEL, trialLabel, VERDICT_SHORT } from '../lib/glossary';
   import { href } from '../lib/router';
-  import { coresStack, firedRule, lanes, limitPanels, limitPick, type SpecRef } from '../lib/shape';
+  import { coresStack, firedRule, lanes, limitPanels, limitPick, type LimitPick, type SpecRef } from '../lib/shape';
   import type { CampaignDoc, RuleDef, RunDoc } from '../lib/types';
+  import Dropdown from './Dropdown.svelte';
   import LaneChart from './LaneChart.svelte';
   import Mark from './Mark.svelte';
   import StepChart from './StepChart.svelte';
@@ -19,11 +21,23 @@
 
   let { refs, c, runs }: { refs: SpecRef[]; c: CampaignDoc; runs: Map<string, RunDoc> } = $props();
 
-  const picks = $derived(refs.map((r, i) => ({ i, pick: limitPick(r, c, runs) })).filter((x) => x.pick !== null));
-  let sel = $state(0);
-  const cur = $derived(picks[Math.min(sel, picks.length - 1)] ?? null);
+  /** A spec with a trial at its limit, as the dropdown lists it: `id` is the spec's name, `i` its place in the campaign (its colour). */
+  interface Item {
+    id: string;
+    i: number;
+    pick: LimitPick;
+  }
+  const items = $derived(
+    refs.flatMap((r, i): Item[] => {
+      const pick = limitPick(r, c, runs);
+      return pick ? [{ id: r.spec.name, i, pick }] : [];
+    }),
+  );
+  /** The spec the reader chose; the first spec until then, or if the campaign changes under it. */
+  let chosen = $state<string | null>(null);
+  const cur = $derived(items.find((x) => x.id === chosen) ?? items[0] ?? null);
   const pick = $derived(cur?.pick ?? null);
-  const many = $derived(picks.length > 1);
+  const many = $derived(items.length > 1);
   /** Which trial is shown: the first failure, or the last pass beside it. */
   let view = $state<'fail' | 'pass'>('fail');
   const shown = $derived(
@@ -38,6 +52,13 @@
     const v = r.key.endsWith('_fraction') ? r.threshold * 100 : r.threshold;
     return `${RULE_LABEL[r.key]} ${r.op === '>=' ? '≥' : '<'} ${pct ? `${f.num(v)}%` : f.num(v, 2)}`;
   };
+  /** What the dropdown says of a spec beside its name: where it stopped passing, or the most that passed. */
+  const at = (x: Item) => (x.pick.failed ? `fails at ${x.pick.density}` : `passed ${x.pick.density}`);
+  /** A new spec opens on its failure, as the first one does. */
+  function choose(id: string) {
+    chosen = id;
+    view = 'fail';
+  }
 
   let root: HTMLElement | undefined = $state();
   let near = $state(false);
@@ -57,46 +78,34 @@
   });
 
   const detail = $derived(near && pick && shown ? loadTrial(c.id, pick.run.id, shown.trial.id) : null);
-
-  let tablist: HTMLElement | undefined = $state();
-  function key(e: KeyboardEvent) {
-    const n = picks.length;
-    let next = -1;
-    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = (sel + 1) % n;
-    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') next = (sel - 1 + n) % n;
-    else if (e.key === 'Home') next = 0;
-    else if (e.key === 'End') next = n - 1;
-    if (next < 0) return;
-    e.preventDefault();
-    sel = next;
-    tablist?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus();
-  }
 </script>
 
 <div class="atlimit" bind:this={root}>
   {#if many}
     <div class="choose">
-      <span class="tl" id="limit-label">Spec</span>
-      <!-- svelte-ignore a11y_interactive_supports_focus -->
-      <div class="tabs" role="tablist" aria-labelledby="limit-label" bind:this={tablist} onkeydown={key}>
-        {#each picks as p, k (p.pick!.ref.spec.name)}
-          <button
-            type="button"
-            role="tab"
-            id="limit-tab-{k}"
-            aria-selected={k === sel}
-            aria-controls="limit-panel"
-            tabindex={k === sel ? 0 : -1}
-            onclick={() => {
-              sel = k;
-              view = 'fail';
-            }}
-          >
-            <i class="sw" style:background={specColor(p.i)}></i>
-            <span class="tn">{p.pick!.ref.groupLabel}</span>
-            <span class="ta">{p.pick!.failed ? `fails at ${p.pick!.density}` : `passed ${p.pick!.density}`}</span>
-          </button>
-        {/each}
+      <span class="tl">Spec</span>
+      <div class="pick">
+        <Dropdown {items} selected={cur?.id ?? ''} label="Spec" id="limit-spec" controls="limit-panel" onselect={choose}>
+          {#snippet button(x: Item)}
+            <span class="opt">
+              <i class="sw" style:background={specColor(x.i)}></i>
+              <span class="tn">{x.pick.ref.groupLabel}</span>
+              <span class="ta">{at(x)}</span>
+            </span>
+          {/snippet}
+          {#snippet option(x: Item, on: boolean)}
+            <span class="opt" class:on>
+              <i class="sw" style:background={specColor(x.i)}></i>
+              <span class="tn">{x.pick.ref.groupLabel}</span>
+              <span class="ta">{at(x)}</span>
+              {#if on}
+                <svg class="check" aria-hidden="true" viewBox="0 0 16 16" width="16" height="16">
+                  <path d="M3 8.5l3.2 3.2L13 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+              {/if}
+            </span>
+          {/snippet}
+        </Dropdown>
       </div>
     </div>
   {/if}
@@ -106,7 +115,7 @@
     {@const r = pick.run}
     {@const crit = pick.ref.spec.spec.criteria}
     {@const trialHref = href({ name: 'trial', campaign: c.id, run: r.id, trial: t.id, microvm: null })}
-    <div class="card" id="limit-panel" role={many ? 'tabpanel' : undefined} aria-labelledby={many ? `limit-tab-${sel}` : undefined}>
+    <div class="card" id="limit-panel">
       {#if pick.pass}
         <div class="switch" role="group" aria-label="Density shown">
           <span class="sl">Show</span>
@@ -132,7 +141,8 @@
               <span class="why">{t.failed.join('; ')}</span>
             {/if}
             {#if pick.ranOut && view === 'fail'}
-              <span class="out">Ran out <strong>{VERDICT_SHORT[pick.ranOut]}</strong>{#if rule}<span class="rule">{ruleText(rule)}</span>{/if}</span>
+              <!-- The rule in parentheses after the verdict, so "Host CPU" isn't printed twice in a row. -->
+              <span class="out">Ran out <strong>{VERDICT_SHORT[pick.ranOut]}</strong>{#if rule}<span class="rule">({ruleText(rule)})</span>{/if}</span>
             {/if}
           </p>
         </div>
@@ -176,8 +186,9 @@
                 </ul>
               {/if}
               {#if panel}
+                <!-- "the rule that ran out" only where something did: a spec that passed every density has no such rule. -->
                 <TimeChart
-                  title={panel.threshold ? `${panel.title}, the rule that ran out` : panel.title}
+                  title={pick.ranOut && panel.threshold ? `${panel.title}, the rule that ran out` : panel.title}
                   unit={panel.unit}
                   t={panel.t}
                   series={panel.series.map((x) => ({ ...x, color: 'var(--series-1)' }))}
@@ -237,42 +248,59 @@
   .atlimit {
     margin-top: 8px;
   }
+  /* The spec selector: its label at the left, the dropdown beside it, the card under both at one gap. */
   .choose {
     display: flex;
-    flex-wrap: wrap;
     align-items: center;
-    gap: 6px 12px;
-    margin-bottom: 10px;
+    gap: 10px;
+    margin-bottom: 12px;
   }
+  /* The same label style as the campaign picker's "Campaign". */
   .tl {
-    font-size: 0.82rem;
-    font-weight: 650;
-    color: var(--ink-2);
+    flex: none;
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: var(--ink);
   }
-  .tabs {
+  .pick {
+    flex: 0 1 26rem;
+    min-width: 0;
+  }
+  /* The dropdown's button and each option: the spec's colour dot, its name, and where it stopped passing. */
+  .opt {
     display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    padding: 3px;
-    border-radius: 999px;
-    background: var(--surface-2);
-    max-width: 100%;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    font-size: 0.9rem;
   }
-  /* A phone: the specs stay one row, and scroll sideways. */
-  @media (max-width: 560px) {
-    .choose {
-      flex-wrap: nowrap;
-    }
-    .tabs {
-      flex-wrap: nowrap;
-      overflow-x: auto;
-      scrollbar-width: none;
-      min-width: 0;
-    }
-    .tabs button {
-      flex: none;
-      white-space: nowrap;
-    }
+  .tn {
+    font-weight: 600;
+    color: var(--ink);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .opt.on .tn {
+    color: var(--accent-ink);
+  }
+  .ta {
+    flex: none;
+    font-size: 0.85rem;
+    color: var(--ink-2);
+    font-variant-numeric: tabular-nums;
+  }
+  .check {
+    flex: none;
+    margin-left: auto;
+    color: var(--accent);
+  }
+  .sw {
+    flex: none;
+    display: inline-block;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
   }
   .switch {
     display: flex;
@@ -287,6 +315,7 @@
     color: var(--ink-2);
     margin-right: 2px;
   }
+  /* Single-line buttons, so fully rounded ends. */
   .switch button {
     display: inline-flex;
     align-items: center;
@@ -343,46 +372,9 @@
   .ksw.window {
     background: var(--surface-2);
   }
-  .tabs button {
-    display: inline-flex;
-    align-items: baseline;
-    gap: 6px;
-    padding: 5px 12px;
-    border: 0;
-    border-radius: 999px;
-    background: transparent;
-    color: var(--ink-2);
-    font: inherit;
-    font-size: 0.86rem;
-    cursor: pointer;
-    min-width: 0;
-  }
-  .tabs button:hover {
-    background: var(--bg);
-    color: var(--ink);
-  }
-  .tabs button[aria-selected='true'] {
-    background: var(--bg);
-    color: var(--ink);
-    box-shadow: 0 0 0 1.5px var(--accent);
-  }
-  .tn {
-    font-weight: 650;
-  }
-  .ta {
-    font-size: 0.78rem;
-    color: var(--muted);
-  }
-  .sw {
-    align-self: center;
-    display: inline-block;
-    width: 9px;
-    height: 9px;
-    border-radius: 50%;
-  }
   .card {
     border: 1px solid var(--rule);
-    border-radius: 12px;
+    border-radius: var(--radius);
     padding: 16px 18px 12px;
   }
   @media (max-width: 640px) {

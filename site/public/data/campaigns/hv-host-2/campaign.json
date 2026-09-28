@@ -1,12 +1,13 @@
 {
   "schema": "fleetkit-site-data/2",
   "id": "hv-host-2",
-  "title": "Metal host",
+  "title": "metal_host",
   "question": "How does a metal host change density per vCPU and cost?",
   "started": "2026-09-28T02:59Z",
   "ended": "2026-09-28T03:04Z",
   "status": "complete",
   "definition_path": "experiments/campaigns/hv-host-2.json",
+  "answer": "One m8i.metal-48xl held at least 192 microVMs, 1.0 microVMs per host vCPU, at $0.073–0.076 per 1,000 tasks; every density passed. Its SLOs were looser (step p50 within 2 s, p95 within 3 s, ready within 900 s), and the harness caps a host at 200.",
   "definition": {
     "name": "hv-host-2",
     "question": "How does a metal host change density per vCPU and cost?",
@@ -81,7 +82,8 @@
     {
       "name": "firecracker-metal",
       "label": "m8i.metal-48xl, Firecracker, 2 vCPU / 2 GiB",
-      "why": "Firecracker on a whole metal host.",
+      "short": "m8i.metal-48xl",
+      "why": "The first metal host tried, with looser SLOs",
       "changes": [
         {
           "path": "worker_host.instance_type",
