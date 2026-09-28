@@ -45,6 +45,14 @@
                 "observed": [
                   0.1735,
                   0.1808
+                ],
+                "observed_charged": [
+                  0.1735,
+                  0.1808
+                ],
+                "steady_state": [
+                  0.1844,
+                  0.1927
                 ]
               }
             },
@@ -64,6 +72,14 @@
                 "observed": [
                   0.1783,
                   0.1804
+                ],
+                "observed_charged": [
+                  0.1783,
+                  0.1804
+                ],
+                "steady_state": [
+                  0.1895,
+                  0.1923
                 ]
               }
             }
@@ -89,6 +105,14 @@
                 "observed": [
                   0.1877,
                   0.1965
+                ],
+                "observed_charged": [
+                  0.1877,
+                  0.1965
+                ],
+                "steady_state": [
+                  0.1951,
+                  0.2044
                 ]
               }
             },
@@ -108,6 +132,14 @@
                 "observed": [
                   0.1919,
                   0.1919
+                ],
+                "observed_charged": [
+                  0.1919,
+                  0.1919
+                ],
+                "steady_state": [
+                  0.2037,
+                  0.2037
                 ]
               }
             }
@@ -133,6 +165,14 @@
                 "observed": [
                   0.2009,
                   0.2142
+                ],
+                "observed_charged": [
+                  0.2009,
+                  0.2142
+                ],
+                "steady_state": [
+                  0.1983,
+                  0.2001
                 ]
               }
             },
@@ -152,6 +192,14 @@
                 "observed": [
                   0.1934,
                   0.1954
+                ],
+                "observed_charged": [
+                  0.1934,
+                  0.1954
+                ],
+                "steady_state": [
+                  0.2014,
+                  0.206
                 ]
               }
             }
@@ -199,6 +247,14 @@
                 "observed": [
                   0.206,
                   0.2121
+                ],
+                "observed_charged": [
+                  0.206,
+                  0.2121
+                ],
+                "steady_state": [
+                  0.1926,
+                  0.2107
                 ]
               }
             },
@@ -218,6 +274,14 @@
                 "observed": [
                   0.2063,
                   0.2095
+                ],
+                "observed_charged": [
+                  0.2063,
+                  0.2095
+                ],
+                "steady_state": [
+                  0.196,
+                  0.1971
                 ]
               }
             }
@@ -243,6 +307,14 @@
                 "observed": [
                   0.2044,
                   0.2099
+                ],
+                "observed_charged": [
+                  0.2044,
+                  0.2099
+                ],
+                "steady_state": [
+                  0.1963,
+                  0.2081
                 ]
               }
             },
@@ -262,7 +334,12 @@
                 "observed": [
                   0.2386,
                   0.2507
-                ]
+                ],
+                "observed_charged": [
+                  0.2386,
+                  0.2507
+                ],
+                "steady_state": null
               }
             }
           ],
@@ -272,8 +349,8 @@
     },
     {
       "id": "cap-baseline-1",
-      "title": "Capacity baseline",
-      "question": "How many 2 vCPU / 2 GiB Firecracker microVMs can one m8i.4xlarge worker host run at once, with every shopping task inside its latency targets?",
+      "title": "baseline",
+      "question": "How many microVMs fit on one m8i.4xlarge?",
       "started": "2026-09-27T17:09Z",
       "status": "complete",
       "before_campaigns": true,
@@ -305,6 +382,14 @@
                 "observed": [
                   0.1843,
                   0.2014
+                ],
+                "observed_charged": [
+                  0.1843,
+                  0.2014
+                ],
+                "steady_state": [
+                  0.1407,
+                  0.1419
                 ]
               }
             }

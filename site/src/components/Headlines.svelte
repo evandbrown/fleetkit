@@ -16,9 +16,20 @@
     <dt>Per vCPU</dt>
     <dd><span class="v">{h.perVcpu ?? '–'}</span></dd>
   </div>
+  <!-- Each cost says what it counts, in About's words: the steady-state cost (D81) is what a full fleet pays, with
+       what one burst is charged under it. Where the host wasn't full at the result there is no fleet figure, so the
+       burst stands alone and says why. -->
   <div class="stat">
     <dt>$ / 1k tasks</dt>
-    <dd><span class="v small">{h.cost ?? '–'}</span></dd>
+    <dd>
+      {#if h.cost}
+        <span class="v small">{h.cost} <span class="what">full fleet</span></span><span class="n">{h.burst} one burst</span>
+      {:else if h.burst}
+        <span class="v small">{h.burst} <span class="what">one burst</span></span><span class="n">host not full, no fleet figure</span>
+      {:else}
+        <span class="v small">–</span>
+      {/if}
+    </dd>
   </div>
   <div class="stat">
     <dt>Ran out</dt>
@@ -85,6 +96,16 @@
   .v.small {
     font-size: clamp(1.1rem, 0.9rem + 1vw, 1.5rem);
     line-height: 1.6;
+    /* So "full fleet" can drop under the figure on a phone. */
+    white-space: normal;
+  }
+  /* What a cost figure counts, muted beside it. */
+  .what {
+    font-size: 0.82rem;
+    font-weight: 400;
+    letter-spacing: 0;
+    color: var(--ink-2);
+    white-space: nowrap;
   }
   .n {
     font-size: 0.82rem;

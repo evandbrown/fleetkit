@@ -28,6 +28,9 @@ async function noHorizontalScroll(page: Page) {
   expect(sw).toBeLessThanOrEqual(cw);
 }
 
+// The fixtures were judged by the targets in force before 28 September 2026, so every fixture campaign carries this tag.
+const TIGHTER = 'Tighter SLOs: step p50 ≤ 1 s, step p95 ≤ 2 s, task p95 ≤ 5 s';
+
 const SHOTS = process.env.SCREENSHOTS;
 async function shoot(page: Page, name: string) {
   if (!SHOTS) return;
@@ -116,9 +119,11 @@ test('opens on About: what Fleetkit is, how it works, and the way into the resul
   await expect(featured).toContainText(/\d+\s*microVMs? on one m8i\.4xlarge/);
   await expect(page.getByRole('link', { name: /Define your own in the Builder/ })).toHaveAttribute('href', '#/builder');
   await expect(featured).toContainText('per host vCPU');
-  // No question on the card (the answer carries its context), and a check before "SLOs" that reads as "every SLO met".
+  // No question on the card (the answer carries its context), and a check before "SLOs" that reads as "every SLO met",
+  // then the tag, since the fixture was judged by the earlier targets.
   await expect(featured.locator('.q')).toHaveCount(0);
-  await expect(featured.locator('.slos')).toHaveText(/^\s*every SLO met\s*SLOs\s*$/);
+  await expect(featured.locator('.slos')).toHaveText(/^\s*every SLO met\s*SLOs\s*Tighter SLOs:/);
+  await expect(featured.locator('.slos .slo-tag')).toHaveText(TIGHTER);
   await expect(page.getByRole('link', { name: 'See the results' })).toHaveCount(1);
   await page.getByRole('link', { name: 'See the results' }).click();
   await expect(page).toHaveURL(/#\/results$/);
@@ -131,16 +136,26 @@ test('opens on About: what Fleetkit is, how it works, and the way into the resul
 test('explains the setup on About, with the featured spec, the standard SLOs and the five steps', async ({ page }) => {
   await page.goto('./');
   await expect(page.getByRole('img', { name: /^AWS us-east-1/ })).toBeVisible();
-  // The method's standard SLOs (the input schema's defaults), not the featured campaign's.
+  // The method's standard SLOs (the input schema's defaults, the design's), not the featured campaign's.
   await expect(page.getByRole('list', { name: 'Success criteria' }).getByRole('listitem')).toHaveText([
     /^≤ 180 s\s*Browser ready$/,
     /^100%\s*Tasks succeed$/,
-    /^≤ 1 s\s*Each step p50$/,
-    /^≤ 2 s\s*Each step p95$/,
-    /^≤ 5 s\s*Whole task p95$/,
+    /^≤ 2 s\s*Each step p50$/,
+    /^≤ 3 s\s*Each step p95$/,
+    /^≤ 10 s\s*Whole task p95$/,
   ]);
-  // The featured campaign uses them, so its result carries no tag.
-  await expect(page.getByRole('complementary', { name: 'Featured result' }).locator('.slo-tag')).toHaveCount(0);
+  // Every published campaign was judged by its own targets (D95), and the line says so instead of calling them the exception.
+  await expect(page.locator('#slos + .sub')).toHaveText(
+    "The design's targets. Every campaign published so far was judged by targets of its own, tighter for most (step p50 ≤ 1 s, step p95 ≤ 2 s, task p95 ≤ 5 s); Results says so beside each.",
+  );
+  // The featured campaign was judged by the earlier targets, so its result says so.
+  await expect(page.getByRole('complementary', { name: 'Featured result' }).locator('.slo-tag')).toHaveText(TIGHTER);
+  // The task links the public copy of the test shopping site, in a new tab: the one link off the site besides GitHub.
+  // The page never fetches it (the every-route test above watches for requests leaving the site).
+  const fixture = page.getByRole('link', { name: 'the test shopping site' });
+  await expect(fixture).toHaveAttribute('href', 'https://evan.mx/fleetkit-fixture/');
+  await expect(fixture).toHaveAttribute('target', '_blank');
+  await expect(fixture).toHaveAttribute('rel', 'noopener');
   await expect(page.locator('ol.film > li')).toHaveCount(5);
   await expect(page.locator('ol.film')).toContainText('Verify cart');
   // The spec is the same table Results shows, for the featured campaign's first spec, with the support host last.

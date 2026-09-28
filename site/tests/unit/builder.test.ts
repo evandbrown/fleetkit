@@ -2,20 +2,26 @@
 // fill a host, reading pasted JSON, naming the next campaign, shorter messages, and labels short enough for the page.
 import { describe, expect, it } from 'vitest';
 import catalog from '../../catalog.json';
-import { CAMPAIGN_FIELDS, HELP, LIMITS, SPEC_FIELDS, TYPES, evaluate } from '../../src/lib/campaign';
+import { CAMPAIGN_FIELDS, HELP, LIMITS, SPEC_FIELDS, TYPES, defaults, evaluate, merge, type Obj } from '../../src/lib/campaign';
 import {
+  ALL_STARTS,
   DEFAULT_START,
+  LEAN_CHROMIUM_FLAG,
+  NEW_START,
   REVIEW_HELP,
   SPEC_NAME_HELP,
   START_HELP,
   STARTS,
   TITLES,
   WHY_HELP,
+  bundled,
   densityFit,
+  fromStart,
   hostFacts,
   interpret,
   messages,
   nextName,
+  recommendedBase,
   show,
 } from '../../src/components/builder/draft';
 
@@ -113,6 +119,62 @@ describe('builder starts', () => {
   it('names the next campaign in a series', () => {
     expect(nextName('nested-sizes-1', ['nested-sizes-1', 'nested-sizes-2'])).toBe('nested-sizes-3');
     expect(nextName('fresh', [])).toBe('fresh-2');
+  });
+});
+
+// A new campaign starts from the design's default guest (D91), not from the schema's defaults, which keep the meaning
+// of the specs recorded before the guest fields existed.
+describe('a new campaign', () => {
+  const base = NEW_START.def.base as Obj;
+
+  it('starts from the recommended guest on c8i.xlarge, at densities 1 to 8, with the schema’s criteria', () => {
+    expect(base.worker_host).toEqual({ instance_type: 'c8i.xlarge' });
+    expect(base.hypervisor).toEqual({ name: 'firecracker', virtio_transport: 'pci', virtio_rng: true });
+    expect(base.microvm).toEqual({ vcpus: 1, memory_mib: 1024, console: 'quiet-i8042', memory_pages: 'thp' });
+    expect(base.workload).toEqual({ chromium_extra_flags: [LEAN_CHROMIUM_FLAG] });
+    expect(base.densities).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(base.criteria).toEqual(defaults('criteria'));
+    expect(base.procedure).toEqual({ trials_per_density: 1, boundary_trials: 2, settle_s: 10 });
+    expect(base.support_host).toEqual({ instance_type: 'm8i.xlarge' });
+    expect(recommendedBase()).toEqual(base);
+  });
+
+  it('has no name or question yet, one spec that runs the base unchanged, and the schema’s 2 replicas', () => {
+    expect(NEW_START.def.name).toBe('');
+    expect(NEW_START.def.question).toBe('');
+    expect(NEW_START.def.specs).toEqual({ 'tuned-guest': {} });
+    expect(NEW_START.def.replicas).toBe(2);
+    expect(NEW_START.def.shutdown_after_minutes).toBe(CAMPAIGN_FIELDS.shutdown_after_minutes.schema.default);
+  });
+
+  it('is the control of tuned_guest_host_size, unchanged', () => {
+    const c = STARTS.find((s) => s.key === 'host16-stack-1')!.def;
+    const control = merge(c.base as Obj, (c.specs as Obj)['c8i-xlarge-stack'] as Obj);
+    for (const k of ['worker_host', 'hypervisor', 'microvm', 'densities', 'workload']) expect(base[k], k).toEqual(control[k]);
+  });
+
+  it('passes every check once named and asked, and plans 2 runs', () => {
+    const def = { ...structuredClone(NEW_START.def), name: 'tuned-guest-1', question: 'Does the recommended guest hold on the next host?' };
+    const r = evaluate(def);
+    expect(r.errors).toEqual([]);
+    expect(r.plan!.runs.map((x) => x.run)).toEqual(['tuned-guest-r1', 'tuned-guest-r2']);
+  });
+
+  it('heads the Start menu and opens from a link, as a campaign file does', () => {
+    expect(ALL_STARTS[0]).toBe(NEW_START);
+    expect(ALL_STARTS.slice(1)).toEqual(STARTS);
+    expect(bundled('campaign:new')!.def).toEqual(NEW_START.def);
+    expect(fromStart(NEW_START).source).toBe(NEW_START.def);
+    expect(START_HELP).toMatch(/recommended guest/);
+  });
+
+  it('is what the guest fields’ help recommends', () => {
+    expect(HELP['microvm.vcpus']).toMatch(/Recommended: 1,/);
+    expect(HELP['microvm.memory_mib']).toMatch(/Recommended: 1,024/);
+    expect(HELP['microvm.console']).toMatch(/Recommended: quiet-i8042/);
+    expect(HELP['microvm.memory_pages']).toMatch(/Recommended: thp/);
+    expect(HELP['microvm.memory_pages']).toMatch(/madvise or always/);
+    expect(HELP['workload.chromium_extra_flags']).toMatch(/Recommended: the one a new campaign starts with/);
   });
 });
 

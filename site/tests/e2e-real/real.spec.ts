@@ -158,15 +158,20 @@ test.describe('the published cap-baseline-1', () => {
     await expect(tested.locator('thead')).toHaveCount(0);
     // A number and its unit are joined by a no-break space (\s here), so "16 vCPU" never breaks in a narrow column.
     await expect(tested.locator('tbody tr').first()).toHaveText(/^Host\s*m8i\.4xlarge\s*16\svCPU · 64\sGiB · nested$/);
-    // The SLOs are its last row: the standard ones, so none carries a standard beside it.
+    // The SLOs are its last row: the targets in force before 28 September 2026, each with the standard beside it.
     const slos = tested.locator('tbody tr', { has: page.locator('th', { hasText: /^SLOs$/ }) });
-    await expect(slos.locator('td')).toHaveText('ready ≤ 180 s · tasks 100% · step p50 ≤ 1 s · step p95 ≤ 2 s · task p95 ≤ 5 s');
+    await expect(slos.locator('td')).toHaveText(
+      'ready ≤ 180 s · tasks 100% · step p50 ≤ 1 s (standard 2 s) · step p95 ≤ 2 s (standard 3 s) · task p95 ≤ 5 s (standard 10 s)',
+    );
     // The header: the question, then the catalog's written answer (D93).
     const cap = read<CampaignDoc>('campaigns', CAP, 'campaign.json');
     await expect(page.locator('.top .question')).toHaveText('How many microVMs fit on one m8i.4xlarge?');
     await expect(page.locator('.top .lead')).toHaveText(cap.answer!);
     await expect(page.locator('.top .lead')).toContainText('held 8 microVMs');
-    await expect(page.locator('.answer .figs')).toHaveText(/^Max density\s*8\s*Per vCPU\s*0\.50\s*\$ \/ 1k tasks\s*\$0\.068–0\.083\s*Ran out\s*Host CPU\s*at 12$/);
+    // "$ / 1k tasks" is the steady-state cost (D81), with what one burst is charged under it.
+    await expect(page.locator('.answer .figs')).toHaveText(
+      /^Max density\s*8\s*Per vCPU\s*0\.50\s*\$ \/ 1k tasks\s*\$0\.141–0\.142\s*full fleet\s*\$0\.184–0\.201 one burst\s*Ran out\s*Host CPU\s*at 12$/,
+    );
     // Latency by density, with no click: a mark per counting trial in each panel, against its SLO.
     const lat = page.locator('.lat');
     await expect(lat.locator('figcaption')).toHaveText(['Slowest step p50 (ms)', 'Task p95 (ms)']);
@@ -329,14 +334,29 @@ test.describe('the published nested-hv-1', () => {
   });
 });
 
-test.describe('the published hv-host-2: a metal host, judged by SLOs of its own (D74)', () => {
+test.describe('every published campaign stands as judged by its own SLOs (D74, D95)', () => {
   const METAL = 'hv-host-2';
   const RUN = 'firecracker-metal-r1';
-  const LOOSER = 'Looser SLOs: step p50 ≤ 2 s, step p95 ≤ 3 s, ready ≤ 900 s';
-  /** The method's standard SLOs, the input schema's defaults. */
-  const STANDARD = { ready_timeout_s: 180, step_p50_target_ms: 1000, step_p95_target_ms: 2000, task_p95_target_ms: 5000, step_timeout_ms: 10000, task_timeout_ms: 45000 };
-  const standard = (c: CampaignDoc) =>
-    c.specs.every((s) => Object.entries(STANDARD).every(([k, v]) => s.spec.criteria[k as keyof typeof STANDARD] === v));
+  // The standard changed on 28 September 2026 to the design's SLOs (step p50 2 s, step p95 3 s, task p95 10 s).
+  // Every campaign published before then was judged by the earlier targets, 1 s / 2 s / 5 s, and says so; the
+  // metal campaigns also waited longer for ready (looser, named as such beside the tighter ones), and hv-host-2 had
+  // step targets of its own that are now the standard.
+  const TIGHTER = 'Tighter SLOs: step p50 ≤ 1 s, step p95 ≤ 2 s, task p95 ≤ 5 s';
+  const TIGHTER_SLOW_READY = 'Tighter SLOs: step p50 ≤ 1 s, step p95 ≤ 2 s, task p95 ≤ 5 s · looser: ready ≤ 900 s';
+  const METAL_TAG = 'Tighter SLO: task p95 ≤ 5 s · looser: ready ≤ 900 s';
+  const TAGS: Record<string, string | null> = {
+    '2000,3000,10000,180': null,
+    '1000,2000,5000,180': TIGHTER,
+    '1000,2000,5000,900': TIGHTER_SLOW_READY,
+    '2000,3000,5000,900': METAL_TAG,
+  };
+  /** The tag a campaign's card carries: every spec in a campaign shares its criteria (the schema requires it). */
+  const tagFor = (c: CampaignDoc): string | null => {
+    const k = c.specs[0].spec.criteria;
+    const key = [k.step_p50_target_ms, k.step_p95_target_ms, k.task_p95_target_ms, k.ready_timeout_s].join();
+    if (!(key in TAGS)) throw new Error(`${c.id}: no expected tag for criteria ${key}; add it to TAGS`);
+    return TAGS[key];
+  };
   const campaigns = index.campaigns.map((e) => read<CampaignDoc>('campaigns', e.id, 'campaign.json'));
 
   test('About states the standard SLOs, whichever campaign is featured, and the featured result names its own', async ({ page }) => {
@@ -344,40 +364,48 @@ test.describe('the published hv-host-2: a metal host, judged by SLOs of its own 
     await expect(page.getByRole('list', { name: 'Success criteria' }).getByRole('listitem')).toHaveText([
       /^≤ 180 s\s*Browser ready$/,
       /^100%\s*Tasks succeed$/,
-      /^≤ 1 s\s*Each step p50$/,
-      /^≤ 2 s\s*Each step p95$/,
-      /^≤ 5 s\s*Whole task p95$/,
+      /^≤ 2 s\s*Each step p50$/,
+      /^≤ 3 s\s*Each step p95$/,
+      /^≤ 10 s\s*Whole task p95$/,
     ]);
     const tag = page.getByRole('complementary', { name: 'Featured result' }).locator('.slo-tag');
-    if (featured.id === METAL) await expect(tag).toHaveText(LOOSER);
-    else if (standard(featured)) await expect(tag).toHaveCount(0);
+    const want = tagFor(featured);
+    if (want === null) await expect(tag).toHaveCount(0);
+    else await expect(tag).toHaveText(want);
   });
 
   test('tags each campaign card whose SLOs are not the standard ones, and only those', async ({ page }) => {
     await page.goto(`./${href({ name: 'results', campaign: METAL })}`);
     await page.getByRole('button', { name: /^Campaign/ }).click();
     const list = page.getByRole('listbox', { name: 'Campaign' });
-    await expect(list.locator(`#campaign-picker-option-${METAL} .slo-tag`)).toHaveText(LOOSER);
-    await expect(list.locator('.slo-tag')).toHaveCount(campaigns.filter((c) => !standard(c)).length);
-    for (const c of campaigns.filter(standard)) await expect(list.locator(`#campaign-picker-option-${c.id} .slo-tag`)).toHaveCount(0);
+    await expect(list.locator(`#campaign-picker-option-${METAL} .slo-tag`)).toHaveText(METAL_TAG);
+    await expect(list.locator('.slo-tag')).toHaveCount(campaigns.filter((c) => tagFor(c) !== null).length);
+    for (const c of campaigns) {
+      const want = tagFor(c);
+      const tag = list.locator(`#campaign-picker-option-${c.id} .slo-tag`);
+      if (want === null) await expect(tag).toHaveCount(0);
+      else await expect(tag).toHaveText(want);
+    }
   });
 
   test('names the standard beside each SLO that differs from it, in the SLOs row of What we tested', async ({ page }) => {
     await page.goto(`./${href({ name: 'results', campaign: METAL })}`);
     const slos = page.locator('table.tested tbody tr', { has: page.locator('th', { hasText: /^SLOs$/ }) });
-    await expect(slos.locator('td')).toHaveText(
-      'ready ≤ 900 s (standard 180 s) · tasks 100% · step p50 ≤ 2 s (standard 1 s) · step p95 ≤ 3 s (standard 2 s) · task p95 ≤ 5 s',
-    );
+    await expect(slos.locator('td')).toHaveText('ready ≤ 900 s (standard 180 s) · tasks 100% · step p50 ≤ 2 s · step p95 ≤ 3 s · task p95 ≤ 5 s (standard 10 s)');
   });
 
   test('says the SLOs differ above the charts when a metal spec is compared with nested ones', async ({ page }) => {
     await page.goto(`./${href({ name: 'compare', specs: [`${METAL}/firecracker-metal`, 'nested-sizes-1/m8i-4xlarge'] })}`);
     const note = page.getByRole('note').filter({ hasText: 'SLOs differ' });
-    await expect(note).toHaveText('SLOs differ: metal_host uses step p50 ≤ 2 s, step p95 ≤ 3 s and ready ≤ 900 s; the rest use the standard.');
+    // Neither campaign was judged by the standard, so each is named with its own targets.
+    await expect(note).toHaveText(
+      'SLOs differ: metal_host uses task p95 ≤ 5 s and ready ≤ 900 s; m8i_host_size uses step p50 ≤ 1 s, step p95 ≤ 2 s and task p95 ≤ 5 s.',
+    );
     const [noteBox, chartBox] = [await note.boundingBox(), await page.locator('.answer').boundingBox()];
     expect(noteBox!.y).toBeLessThan(chartBox!.y);
-    // The latency chart names whose each step limit is; the task limit is shared, so it names no one.
-    await expect(page.locator('.lat .pn-step text.slo-label')).toHaveText(['SLO ≤ 1,000 ms · standard', 'SLO ≤ 2,000 ms · metal_host']);
+    // The latency chart names whose each step limit is (the metal campaign's is the standard); the task limit is
+    // shared, so it names no one.
+    await expect(page.locator('.lat .pn-step text.slo-label')).toHaveText(['SLO ≤ 1,000 ms · m8i_host_size', 'SLO ≤ 2,000 ms · standard']);
     await expect(page.locator('.lat .pn-task text.slo-label')).toHaveText(['SLO ≤ 5,000 ms']);
     // What we tested names each campaign over its columns; each host says its kind when metal sits beside nested.
     const tested = page.locator('table.tested');

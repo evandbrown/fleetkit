@@ -177,17 +177,23 @@ function mergedDiffs(criteria: Criteria[]): SloDiff[] {
   return [...seen.values()].sort((a, b) => DIFF_ORDER.indexOf(a.key) - DIFF_ORDER.indexOf(b.key));
 }
 
-const kind = (ds: SloDiff[]) => (ds.every((d) => d.looser) ? 'looser' : ds.every((d) => !d.looser) ? 'stricter' : 'different');
-
 /**
- * A short tag for a campaign (or spec) judged by other than the standard SLOs, naming the difference: "Looser SLO:
- * step p50 ≤ 2 s", "Looser SLOs: step p50 ≤ 2 s, step p95 ≤ 3 s, ready ≤ 900 s". Null for the standard SLOs.
+ * A short tag for a campaign (or spec) judged by other than the standard SLOs, naming each difference and which way
+ * it went. Every criterion is an upper limit, so a lower one is tighter and a higher one looser: "Tighter SLOs: step
+ * p50 ≤ 1 s, step p95 ≤ 2 s, task p95 ≤ 5 s" (every campaign judged before the standard changed), "Looser SLO: step
+ * p50 ≤ 3 s", and when they mix, each group named: "Tighter SLO: task p95 ≤ 5 s · looser: ready ≤ 900 s". Null for
+ * the standard SLOs.
  */
 export function sloTag(criteria: Criteria[]): string | null {
   const ds = mergedDiffs(criteria);
   if (!ds.length) return null;
-  const k = kind(ds);
-  return `${k[0].toUpperCase()}${k.slice(1)} SLO${ds.length > 1 ? 's' : ''}: ${ds.map((d) => d.text).join(', ')}`;
+  const tighter = ds.filter((d) => !d.looser);
+  const looser = ds.filter((d) => d.looser);
+  const words = (xs: SloDiff[]) => xs.map((d) => d.text).join(', ');
+  const slos = (xs: SloDiff[]) => `SLO${xs.length > 1 ? 's' : ''}`;
+  if (!tighter.length) return `Looser ${slos(looser)}: ${words(looser)}`;
+  if (!looser.length) return `Tighter ${slos(tighter)}: ${words(tighter)}`;
+  return `Tighter ${slos(tighter)}: ${words(tighter)} · looser: ${words(looser)}`;
 }
 
 const list = (xs: string[]) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`);
@@ -230,8 +236,12 @@ export interface SpecResult {
   runs: RunEntry[];
   replicas: ReplicaResult[];
   midpoint: number | null;
-  /** Execution cost per 1,000 tasks at each replica's result, joined: [min, max]. */
-  cost: Range | null;
+  /**
+   * Cost per 1,000 tasks at each replica's result, joined across replicas as [min, max] (D81): `steady`, what a full
+   * fleet pays per task, null unless every replica with a cost has one (the host was full at its result); and
+   * `burst`, what one burst is charged.
+   */
+  cost: { steady: Range | null; burst: Range } | null;
   /** The distinct verdicts at each replica's first failure, most common first, each with the lowest and the highest
    * density a replica ran out at with it. */
   limits: { verdict: Verdict; runs: number; density: number; densityMax: number }[];
@@ -245,7 +255,9 @@ export function specResults(refs: SpecRef[], docs: Map<string, CampaignDoc>): Sp
     const c = docs.get(ref.campaign)!;
     const replicas = c.outcomes.find((o) => o.spec === ref.spec.name)?.replicas ?? [];
     const runs = c.runs.filter((r) => r.spec === ref.spec.name);
-    const costs = replicas.flatMap((r) => (r.cost_per_1000_tasks ? [r.cost_per_1000_tasks.execution] : []));
+    const costs = replicas.flatMap((r) => (r.cost_per_1000_tasks ? [r.cost_per_1000_tasks] : []));
+    const join = (rs: Range[]): Range => [Math.min(...rs.map((x) => x[0])), Math.max(...rs.map((x) => x[1]))];
+    const steadies = costs.map((x) => x.steady_state);
     const counts = new Map<Verdict, { runs: number; density: number; densityMax: number }>();
     for (const run of runs) {
       const l = run.result.limit;
@@ -263,7 +275,12 @@ export function specResults(refs: SpecRef[], docs: Map<string, CampaignDoc>): Sp
       runs,
       replicas,
       midpoint: meanMidpoint(replicas.map((r) => r.midpoint_per_host_vcpu)),
-      cost: costs.length ? [Math.min(...costs.map((x) => x[0])), Math.max(...costs.map((x) => x[1]))] : null,
+      cost: costs.length
+        ? {
+            steady: steadies.every((s): s is Range => s !== null) ? join(steadies) : null,
+            burst: join(costs.map((x) => x.observed_charged)),
+          }
+        : null,
       limits: [...counts].map(([verdict, x]) => ({ verdict, ...x })).sort((a, b) => b.runs - a.runs),
     };
   });
@@ -295,7 +312,10 @@ export interface Headline {
   /** Under the density: "stopped early", "none passed", "not run yet". */
   densityNote: string | null;
   perVcpu: string | null;
+  /** "$ / 1k tasks": the steady-state cost (D81), "$0.035–0.037"; null where no replica's host was full. */
   cost: string | null;
+  /** What one burst is charged, shown beside the cost, or alone (labelled) when there is no steady-state cost. */
+  burst: string | null;
   /** What ran out: "Host CPU", or a label ("not reached"). */
   ranOut: string;
   /** Where: "at 7" when every replica ran out there, "at 26–29" when they differ; then "· 4 of 5 replicas" when fewer
@@ -309,7 +329,7 @@ export interface Headline {
 export function headline(r: SpecResult): Headline {
   const reps = r.replicas;
   if (!reps.length) {
-    return { density: '–', densityNote: 'not run yet', perVcpu: null, cost: null, ranOut: '–', ranOutNote: null, ranOutDensity: null };
+    return { density: '–', densityNote: 'not run yet', perVcpu: null, cost: null, burst: null, ranOut: '–', ranOutNote: null, ranOutDensity: null };
   }
   const passed = spread(reps.map((x) => x.tested_successfully), (v) => f.num(v));
   const noFailure = reps.every((x) => x.first_failed === null);
@@ -326,7 +346,8 @@ export function headline(r: SpecResult): Headline {
             : STOPPED_EARLY
           : null,
     perVcpu: spread(reps.map((x) => x.per_host_vcpu), f.ratio),
-    cost: r.cost ? f.usdRange(r.cost) : null,
+    cost: r.cost?.steady ? f.usdRange(r.cost.steady) : null,
+    burst: r.cost ? f.usdRange(r.cost.burst) : null,
     ranOut: top ? VERDICT_SHORT[top.verdict] : noFailure ? 'not reached' : VERDICT_SHORT.unknown,
     ranOutNote: top ? `at ${ranOutAt(top)}${reps.length > 1 && top.runs < reps.length ? ` · ${top.runs} of ${reps.length} replicas` : ''}` : null,
     ranOutDensity: top ? top.density : null,
@@ -415,7 +436,9 @@ export interface CompareRow {
   delta: number | null;
   /** Why there is no midpoint at all, where it would be (D62). */
   missing: string | null;
+  /** The steady-state cost per 1,000 tasks (D81), and the charged burst beside it (alone when cost is null). */
   cost: string | null;
+  burst: string | null;
   ranOut: string;
   ranOutAt: string | null;
 }
@@ -458,6 +481,7 @@ export function compareRows(results: SpecResult[]): CompareRow[] {
               ? STOPPED_EARLY
               : 'no failure yet',
       cost: h.cost,
+      burst: h.burst,
       ranOut: h.ranOut,
       ranOutAt: h.ranOutNote,
     };
@@ -945,7 +969,9 @@ export interface DensityRow {
   cpuPressure: Range | null;
   memUsed: Range | null;
   memAllocated: number;
-  costExecution: Range | null;
+  /** "$ / 1k tasks" at this density: the steady-state cost (null where the host wasn't full) and the charged burst. */
+  costSteady: Range | null;
+  costBurst: Range | null;
 }
 
 export function densityRows(run: RunDoc): DensityRow[] {
@@ -978,7 +1004,8 @@ export function densityRows(run: RunDoc): DensityRow[] {
       cpuPressure: d.host?.cpu_pressure_pct ?? null,
       memUsed: d.host?.mem_used_gib ?? null,
       memAllocated: d.mem_allocated_gib,
-      costExecution: d.cost_per_1000_tasks?.execution ?? null,
+      costSteady: d.cost_per_1000_tasks?.steady_state ?? null,
+      costBurst: d.cost_per_1000_tasks?.observed_charged ?? null,
     };
   });
 }

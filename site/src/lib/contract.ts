@@ -5,12 +5,15 @@ import {
   countsTowardResult,
   densityBriefs,
   fullSizeTrials,
+  hostFull,
   hostKindOf,
   meanMidpoint,
   meetsEveryCriterion,
   midpoint,
   parseTrialId,
+  rangeOf,
   runResultCore,
+  steadyStatePer1000,
 } from './derive';
 import { filled } from './spec';
 import { SCHEMA, type CampaignDoc, type Index, type ReplicaResult, type RunDoc, type RunEntry, type TrialDoc } from './types';
@@ -286,6 +289,18 @@ export function checkRun(run: RunDoc, campaign: CampaignDoc): string[] {
     if (!same(d.trial_results, at.map((t) => t.passed))) p.push(`${wd}: trial_results`);
     if (d.vcpus_allocated !== d.density * spec.spec.microvm.vcpus) p.push(`${wd}: vcpus_allocated`);
     if (d.cost_per_1000_tasks && d.result !== 'passed') p.push(`${wd}: cost only at densities that passed`);
+    if (d.cost_per_1000_tasks) {
+      // Rule 5: each range is over the trials at the density; the steady-state range only when every trial has one.
+      const costs = at.map((t) => t.cost_per_1000_tasks);
+      if (costs.some((c) => !c)) p.push(`${wd}: cost at a density needs a cost on every trial there`);
+      else {
+        for (const k of ['execution', 'observed', 'observed_charged'] as const) {
+          if (!same(d.cost_per_1000_tasks[k], rangeOf(costs.map((c) => c![k])))) p.push(`${wd}: ${k} cost isn't the range over its trials`);
+        }
+        const steady = costs.every((c) => c!.steady_state !== null) ? rangeOf(costs.map((c) => c!.steady_state)) : null;
+        if (!same(d.cost_per_1000_tasks.steady_state, steady)) p.push(`${wd}: steady-state cost is the range over its trials, or null when any trial has none`);
+      }
+    }
   }
   const t = run.result.tested_successfully;
   if (t !== null) {
@@ -296,6 +311,30 @@ export function checkRun(run: RunDoc, campaign: CampaignDoc): string[] {
     const secs = (tr.marks.last_return_ms! - tr.marks.release_ms!) / 1000;
     if (!close(tr.cost_per_1000_tasks!.execution, costPer1000(spec.host.price_usd_per_hour, secs, tr.density), 0.02)) {
       p.push(`${w} trial ${tr.id}: execution cost doesn't follow rule 5`);
+    }
+  }
+  // Rule 5, the charged burst and the steady-state cost, with the model's inputs. A density that kept the host full
+  // (its trials averaged at least 85% busy over the task window) gives each trial there with a known host CPU per
+  // task a steady-state cost; no other trial has one.
+  const wait = spec.spec.procedure.release_after_ready_s ?? 0;
+  const fullAt = new Map(
+    spec.spec.densities.map((d) => [d, hostFull(run.trials.filter((t) => t.counts && t.density === d && t.cost_per_1000_tasks).map((t) => t.cost_per_1000_tasks!.host_busy_fraction))]),
+  );
+  for (const tr of run.trials) {
+    const c = tr.cost_per_1000_tasks;
+    if (!c) continue;
+    const wt = `${w} trial ${tr.id}`;
+    if (!wait && !close(c.observed_charged, c.observed)) p.push(`${wt}: with no warm start the charged burst equals the observed cost`);
+    if (c.observed_charged > c.observed * (1 + 1e-3)) p.push(`${wt}: the charged burst can't exceed the observed cost`);
+    if (tr.host && c.host_busy_fraction !== null && !close(c.host_busy_fraction, tr.host.cpu_util_pct / 100, 1e-2)) {
+      p.push(`${wt}: host_busy_fraction ≠ host CPU busy over the task window`);
+    }
+    if (c.host_cpu_per_task_s !== null && c.host_cpu_per_task_s <= 0) p.push(`${wt}: host CPU per task is positive`);
+    const has = c.host_cpu_per_task_s !== null && (fullAt.get(tr.density) ?? false);
+    if ((c.steady_state !== null) !== has) p.push(`${wt}: a steady-state cost exactly when its density kept the host full and its CPU per task is known`);
+    // Costs are under a dollar, so close()'s tolerance is absolute here: 0.001 leaves room only for the rounding.
+    if (c.steady_state !== null && !close(c.steady_state, steadyStatePer1000(spec.host.price_usd_per_hour, run.host.vcpus, c.host_cpu_per_task_s!), 1e-3)) {
+      p.push(`${wt}: steady-state cost doesn't follow rule 5`);
     }
   }
 

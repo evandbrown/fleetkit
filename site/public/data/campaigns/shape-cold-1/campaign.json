@@ -7,7 +7,7 @@
   "ended": "2026-09-28T07:02Z",
   "status": "complete",
   "definition_path": "experiments/campaigns/shape-cold-1.json",
-  "answer": "No, not started cold: on c8i.xlarge, 1-vCPU microVMs held 2 and 1 against 2 on both 2-vCPU replicas, at $0.058–0.120 against $0.048–0.056 per 1,000 tasks. With 1 vCPU nothing on the host ran out; each microVM's own vCPU was busy starting up.",
+  "answer": "No, not started cold: on c8i.xlarge, 1-vCPU microVMs held 2 and 1 against 2 for 2-vCPU, one burst costing $0.148–0.288 against $0.137–0.140 per 1,000 tasks. With 1 vCPU the host was never full; each microVM's own vCPU was busy starting up.",
   "definition": {
     "name": "shape-cold-1",
     "question": "Does a 1-vCPU microVM cost less per task than a 2-vCPU one?",
@@ -337,6 +337,14 @@
           "observed": [
             0.1387,
             0.1403
+          ],
+          "observed_charged": [
+            0.1387,
+            0.1403
+          ],
+          "steady_state": [
+            0.1069,
+            0.1079
           ]
         },
         "limit": {
@@ -448,6 +456,14 @@
           "observed": [
             0.1369,
             0.139
+          ],
+          "observed_charged": [
+            0.1369,
+            0.139
+          ],
+          "steady_state": [
+            0.1065,
+            0.1085
           ]
         },
         "limit": {
@@ -561,7 +577,12 @@
           "observed": [
             0.1477,
             0.1492
-          ]
+          ],
+          "observed_charged": [
+            0.1477,
+            0.1492
+          ],
+          "steady_state": null
         },
         "limit": {
           "density": 3,
@@ -676,7 +697,12 @@
           "observed": [
             0.2844,
             0.2879
-          ]
+          ],
+          "observed_charged": [
+            0.2844,
+            0.2879
+          ],
+          "steady_state": null
         },
         "limit": {
           "density": 2,
@@ -794,6 +820,14 @@
           "observed": [
             0.1797,
             0.1842
+          ],
+          "observed_charged": [
+            0.1797,
+            0.1842
+          ],
+          "steady_state": [
+            0.1449,
+            0.1459
           ]
         },
         "limit": {
@@ -946,6 +980,14 @@
           "observed": [
             0.1807,
             0.1876
+          ],
+          "observed_charged": [
+            0.1807,
+            0.1876
+          ],
+          "steady_state": [
+            0.1458,
+            0.1483
           ]
         },
         "limit": {
@@ -1083,6 +1125,14 @@
             "observed": [
               0.1387,
               0.1403
+            ],
+            "observed_charged": [
+              0.1387,
+              0.1403
+            ],
+            "steady_state": [
+              0.1069,
+              0.1079
             ]
           }
         },
@@ -1102,6 +1152,14 @@
             "observed": [
               0.1369,
               0.139
+            ],
+            "observed_charged": [
+              0.1369,
+              0.139
+            ],
+            "steady_state": [
+              0.1065,
+              0.1085
             ]
           }
         }
@@ -1127,7 +1185,12 @@
             "observed": [
               0.1477,
               0.1492
-            ]
+            ],
+            "observed_charged": [
+              0.1477,
+              0.1492
+            ],
+            "steady_state": null
           }
         },
         {
@@ -1146,7 +1209,12 @@
             "observed": [
               0.2844,
               0.2879
-            ]
+            ],
+            "observed_charged": [
+              0.2844,
+              0.2879
+            ],
+            "steady_state": null
           }
         }
       ],
@@ -1171,6 +1239,14 @@
             "observed": [
               0.1797,
               0.1842
+            ],
+            "observed_charged": [
+              0.1797,
+              0.1842
+            ],
+            "steady_state": [
+              0.1449,
+              0.1459
             ]
           }
         },
@@ -1190,6 +1266,14 @@
             "observed": [
               0.1807,
               0.1876
+            ],
+            "observed_charged": [
+              0.1807,
+              0.1876
+            ],
+            "steady_state": [
+              0.1458,
+              0.1483
             ]
           }
         }

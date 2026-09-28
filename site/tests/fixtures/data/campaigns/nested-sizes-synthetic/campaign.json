@@ -245,6 +245,14 @@
           "observed": [
             0.206,
             0.2121
+          ],
+          "observed_charged": [
+            0.206,
+            0.2121
+          ],
+          "steady_state": [
+            0.1926,
+            0.2107
           ]
         },
         "limit": {
@@ -377,6 +385,14 @@
           "observed": [
             0.2063,
             0.2095
+          ],
+          "observed_charged": [
+            0.2063,
+            0.2095
+          ],
+          "steady_state": [
+            0.196,
+            0.1971
           ]
         },
         "limit": {
@@ -509,6 +525,14 @@
           "observed": [
             0.2044,
             0.2099
+          ],
+          "observed_charged": [
+            0.2044,
+            0.2099
+          ],
+          "steady_state": [
+            0.1963,
+            0.2081
           ]
         },
         "limit": {
@@ -639,7 +663,12 @@
           "observed": [
             0.2386,
             0.2507
-          ]
+          ],
+          "observed_charged": [
+            0.2386,
+            0.2507
+          ],
+          "steady_state": null
         },
         "limit": {
           "density": 4,
@@ -741,6 +770,14 @@
             "observed": [
               0.206,
               0.2121
+            ],
+            "observed_charged": [
+              0.206,
+              0.2121
+            ],
+            "steady_state": [
+              0.1926,
+              0.2107
             ]
           }
         },
@@ -760,6 +797,14 @@
             "observed": [
               0.2063,
               0.2095
+            ],
+            "observed_charged": [
+              0.2063,
+              0.2095
+            ],
+            "steady_state": [
+              0.196,
+              0.1971
             ]
           }
         }
@@ -785,6 +830,14 @@
             "observed": [
               0.2044,
               0.2099
+            ],
+            "observed_charged": [
+              0.2044,
+              0.2099
+            ],
+            "steady_state": [
+              0.1963,
+              0.2081
             ]
           }
         },
@@ -804,7 +857,12 @@
             "observed": [
               0.2386,
               0.2507
-            ]
+            ],
+            "observed_charged": [
+              0.2386,
+              0.2507
+            ],
+            "steady_state": null
           }
         }
       ],

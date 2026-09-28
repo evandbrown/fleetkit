@@ -76,9 +76,22 @@ def test_the_published_result(data):
     # never rounded across a threshold: d12-t2's utilisation is 89.98%, under the 90% rule
     assert next(t for t in run["trials"] if t["id"] == "d12-t2")["host"]["cpu_util_pct"] == 89.9837
     cost = r["cost_per_1000_tasks"]
-    assert set(cost) == {"execution", "observed"}
+    assert set(cost) == {"execution", "observed", "observed_charged", "steady_state"}
     assert 0.06 < cost["execution"][0] <= cost["execution"][1] < 0.09
     assert 0.18 <= cost["observed"][0] <= cost["observed"][1] <= 0.21
+    assert cost["observed_charged"] == cost["observed"]         # cold: no wait to leave out
+    # Density 8 kept the host full (its three trials averaged 90% busy, one of them 79%), so every trial there has a
+    # steady-state cost and the density its range; at 4 the host was under half busy, so none is published.
+    trials = {t["id"]: t["cost_per_1000_tasks"] for t in run["trials"] if t["cost_per_1000_tasks"]}
+    assert [round(trials[f"d8-t{k}"]["host_busy_fraction"], 2) for k in (1, 2, 3)] == [0.96, 0.96, 0.79]
+    assert all(trials[f"d8-t{k}"]["steady_state"] for k in (1, 2, 3))
+    assert cost["steady_state"] == [min(trials[f"d8-t{k}"]["steady_state"] for k in (1, 2, 3)),
+                                    max(trials[f"d8-t{k}"]["steady_state"] for k in (1, 2, 3))]
+    assert 0.13 < cost["steady_state"][0] <= cost["steady_state"][1] < 0.15
+    assert trials["d4-t1"]["host_busy_fraction"] < 0.5 and trials["d4-t1"]["steady_state"] is None
+    assert trials["d4-t1"]["host_cpu_per_task_s"] > 0
+    d4 = next(b for b in run["by_density"] if b["density"] == 4)
+    assert d4["cost_per_1000_tasks"]["steady_state"] is None
 
 
 @needs_results
@@ -166,6 +179,93 @@ def test_an_interruption_after_the_boundary_is_outside_the_experiment(data):
     assert (entry["result"]["tested_successfully"], entry["result"]["first_failed"]) == (13, 14)
     run = read(data, "campaigns/host16-stack-1/runs/m8i-4xlarge-lean-r4.json")
     assert "illustration" not in [t["id"] for t in run["trials"]]
+
+def hand_computed_host_cpu_per_task(run_dir: Path, density: int) -> tuple[float, float]:
+    """Rule 5 by hand, for the first (ladder) trial at ``density``: the host's busy vCPU-seconds from the trial's
+    first create to its last destroy, each sample of cpu_util standing for the time since the sample before it
+    (capped at 3 s), divided by the density; and the host's vCPUs."""
+    import csv
+    trial_id = next(t["trial_id"] for t in json.loads((run_dir / "report.json").read_text())["trials"]
+                    if t["density"] == density and t["trial_kind"] == "ladder")
+    with (run_dir / "microvms.csv").open() as f:
+        vms = [r for r in csv.DictReader(f) if r["trial_id"] == trial_id]
+    t0, t1 = min(float(v["created_ts"]) for v in vms), max(float(v["destroyed_ts"]) for v in vms)
+    util, vcpus = [], None
+    with (run_dir / "host_metrics.csv").open() as f:
+        for r in csv.DictReader(f):
+            if r["subject"] == "host" and r["metric"] == "cpu_util":
+                util.append((float(r["ts"]), float(r["value"])))
+            elif r["subject"] == "host" and r["metric"] == "cpu_count":
+                vcpus = int(float(r["value"]))
+    util.sort()
+    busy = 0.0
+    for k, (ts, pct) in enumerate(util):
+        if t0 <= ts <= t1:
+            prev = util[k - 1][0] if k else ts - 0.2
+            busy += pct / 100 * min(ts - prev, 3.0) * vcpus
+    return busy / density, vcpus
+
+
+@pytest.mark.skipif(not (REPO / "results/host16-stack-1").exists(), reason="results/host16-stack-1 isn't downloaded here")
+def test_the_steady_state_cost_of_one_trial_by_hand(data):
+    """D81: the frontier's c8i-xlarge-stack-r1 at density 4, cold. Host CPU per task recomputed from the raw host
+    samples and microVM lives; the steady-state cost from it at the c8i.xlarge price over 4 host vCPUs at 0.9
+    utilisation; the host was over 85% busy in the task window, so the trial has one; and cold, the charged burst is
+    the observed cost."""
+    run = read(data, "campaigns/host16-stack-1/runs/c8i-xlarge-stack-r1.json")
+    t = next(x for x in run["trials"] if x["id"] == "d4-t1")
+    cost = t["cost_per_1000_tasks"]
+    per_task, vcpus = hand_computed_host_cpu_per_task(REPO / "results/host16-stack-1/c8i-xlarge-stack-r1", 4)
+    assert vcpus == run["host"]["vcpus"] == 4
+    assert cost["host_cpu_per_task_s"] == pytest.approx(per_task, rel=1e-3)
+    assert 2.3 < per_task < 2.6                                  # the research's 2.43 vCPU-s for this replica
+    assert cost["host_busy_fraction"] == round(t["host"]["cpu_util_pct"] / 100, 4) >= 0.85
+    price = read(data, "campaigns/host16-stack-1/campaign.json")["specs"][0]["host"]["price_usd_per_hour"]
+    assert cost["steady_state"] == pytest.approx(1000 * price / 3600 / 4 * per_task / 0.9, rel=2e-3)
+    assert cost["observed_charged"] == cost["observed"]
+    assert set(cost) == {"execution", "observed", "observed_charged", "steady_state", "host_cpu_per_task_s", "host_busy_fraction"}
+    d4 = next(b for b in run["by_density"] if b["density"] == 4)
+    assert d4["cost_per_1000_tasks"]["steady_state"] == [cost["steady_state"], cost["steady_state"]]
+
+
+@pytest.mark.skipif(not (REPO / "results/host16-stack-1").exists() or not (REPO / "results/guest-cold-1").exists(),
+                    reason="the frontier's campaigns aren't downloaded here")
+def test_the_frontier_reproduces_the_research(data):
+    """D81's acceptance figures: tuned_guest_host_size's c8i-xlarge-stack at density 4, pooled with guest-cold-1's two
+    replicas of the same spec, costs about $0.0362 per 1,000 tasks steady state (each replica within 5%) with a
+    charged burst of about $0.0417; m8i-4xlarge-lean at density 11 about $0.121 steady state."""
+    def replica_means(campaign, spec, density, key):
+        out = []
+        for e in read(data, f"campaigns/{campaign}/campaign.json")["runs"]:
+            if e["spec"] != spec:
+                continue
+            at = [t["cost_per_1000_tasks"][key] for t in read(data, f"campaigns/{campaign}/runs/{e['id']}.json")["trials"]
+                  if t["counts"] and t["density"] == density]
+            assert at and None not in at, (campaign, e["id"], density, key)
+            out.append(sum(at) / len(at))
+        return out
+    ss = replica_means("host16-stack-1", "c8i-xlarge-stack", 4, "steady_state") + \
+        replica_means("guest-cold-1", "c8i-xlarge-stack", 4, "steady_state")
+    assert len(ss) == 7 and sum(ss) / 7 == pytest.approx(0.0362, abs=0.0003)
+    assert all(abs(x - 0.0362) / 0.0362 < 0.05 for x in ss)
+    burst = replica_means("host16-stack-1", "c8i-xlarge-stack", 4, "observed_charged") + \
+        replica_means("guest-cold-1", "c8i-xlarge-stack", 4, "observed_charged")
+    assert sum(burst) / 7 == pytest.approx(0.0417, abs=0.0003)
+    m8i = replica_means("host16-stack-1", "m8i-4xlarge-lean", 11, "steady_state") + \
+        replica_means("guest-cold-1", "m8i-4xlarge-lean", 11, "steady_state")
+    assert sum(m8i) / 7 == pytest.approx(0.121, abs=0.001)
+
+
+@pytest.mark.skipif(not (REPO / "results/stack-warm-1").exists(), reason="results/stack-warm-1 isn't downloaded here")
+def test_a_warm_start_is_charged_for_its_wait_only_as_cpu_used(data):
+    """stack-warm-1 waits 5 s after ready: the observed window holds the wait, the charged burst drops it and adds
+    back only the host CPU used during it, so it sits between the execution cost and the observed cost."""
+    run = read(data, "campaigns/stack-warm-1/runs/c8i-xlarge-stack-r1.json")
+    for t in run["trials"]:
+        c = t["cost_per_1000_tasks"]
+        if c:
+            assert c["execution"] < c["observed_charged"] < c["observed"], t["id"]
+
 
 IS_CLONE = (REPO / ".git").exists()
 needs_clone = pytest.mark.skipif(not IS_CLONE, reason="not a git clone: what GitHub has can't be checked here")

@@ -128,6 +128,22 @@ export function costPer1000(priceUsdPerHour: number, seconds: number, density: n
   return (1000 * priceUsdPerHour * seconds) / 3600 / density;
 }
 
+/** The steady-state model's assumed fleet utilisation (rule 5, D81). */
+export const UTILISATION = 0.9;
+/** A trial has a steady-state cost only when the host was at least this busy over the task window. */
+export const BUSY_FLOOR = 0.85;
+
+/** Rule 5, steady state: dollars per host vCPU-second × host CPU per task (vCPU-seconds) ÷ utilisation, per 1,000. */
+export function steadyStatePer1000(priceUsdPerHour: number, hostVcpus: number, hostCpuPerTaskS: number): number {
+  return ((1000 * priceUsdPerHour) / 3600 / hostVcpus) * hostCpuPerTaskS / UTILISATION;
+}
+
+/** Whether a density kept the host full: its trials averaged at least BUSY_FLOOR busy (unknown fractions left out). */
+export function hostFull(busyFractions: (number | null)[]): boolean {
+  const known = busyFractions.filter((b): b is number => b !== null);
+  return known.length > 0 && known.reduce((a, b) => a + b, 0) / known.length >= BUSY_FLOOR;
+}
+
 /** Host kind follows from the instance type, never an input (D56). */
 export function hostKindOf(instanceType: string): 'nested' | 'metal' {
   return /\.metal(-|$)/.test(instanceType) ? 'metal' : 'nested';

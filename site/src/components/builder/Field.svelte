@@ -22,6 +22,7 @@
     spec,
     label = field.label,
     multiline = false,
+    placeholder = '',
     children,
   }: {
     id: string;
@@ -36,6 +37,8 @@
     spec?: unknown;
     label?: string;
     multiline?: boolean;
+    /** Shown in an empty text box, for a form that starts empty. */
+    placeholder?: string;
     children?: Snippet;
   } = $props();
 
@@ -134,9 +137,9 @@
           aria-invalid={errored}
         ></textarea>
       {:else if multiline}
-        <textarea {id} rows="3" value={text} oninput={input} aria-describedby={described} aria-invalid={errored}></textarea>
+        <textarea {id} rows="3" value={text} oninput={input} placeholder={placeholder || undefined} aria-describedby={described} aria-invalid={errored}></textarea>
       {:else}
-        <input {id} class="text" autocomplete="off" spellcheck="false" value={text} oninput={input} aria-describedby={described} aria-invalid={errored} />
+        <input {id} class="text" autocomplete="off" spellcheck="false" value={text} oninput={input} placeholder={placeholder || undefined} aria-describedby={described} aria-invalid={errored} />
       {/if}
       {@render children?.()}
     </div>

@@ -53,6 +53,25 @@ test("shows on hovering the field's label too, and labels every spec's name and 
   }
 });
 
+// A new campaign (D91) starts from the recommended guest on c8i.xlarge. Its guest inputs show in the base spec
+// without "more settings", because they differ from the schema's defaults.
+test('a new campaign starts from the recommended guest', async ({ page }) => {
+  await page.getByRole('combobox', { name: 'Start from', exact: true }).selectOption('new');
+  await expect(page.getByRole('status').filter({ hasText: 'Loaded New campaign.' })).toBeVisible();
+  const base = page.getByRole('region', { name: 'Base spec' });
+  await expect(base.getByRole('combobox', { name: 'Worker host', exact: true })).toHaveValue('c8i.xlarge');
+  await expect(base.getByRole('textbox', { name: 'MicroVM vCPUs', exact: true })).toHaveValue('1');
+  await expect(base.getByRole('textbox', { name: 'MicroVM memory', exact: true })).toHaveValue('1024');
+  await expect(base.getByRole('combobox', { name: 'Guest console', exact: true })).toHaveValue('quiet-i8042');
+  await expect(base.getByRole('combobox', { name: 'Guest memory pages', exact: true })).toHaveValue('thp');
+  await expect(base.getByRole('textbox', { name: 'Extra Chromium flags', exact: true })).toHaveValue(/^--disable-features=PreloadTopChromeWebUI,/);
+  await expect(base.getByRole('button', { name: 'Remove density 8' })).toBeVisible();
+  await expect(base.getByRole('button', { name: 'Remove density 9' })).toHaveCount(0);
+  await expect(page.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue('');
+  await expect(page.getByText('2 worker hosts, one per run')).toBeVisible();
+  await expect(page).toHaveURL(/#\/builder\?from=campaign:new$/);
+});
+
 test('a tap pins it; a tap elsewhere hides it', async ({ page }) => {
   const btn = page.getByRole('button', { name: 'About Worst case' });
   const tip = page.getByRole('tooltip').filter({ hasText: 'shutdown timer' });

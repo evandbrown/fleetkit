@@ -13,7 +13,9 @@ const syn = read<CampaignDoc>('nested-sizes-synthetic', 'campaign.json');
 const hv = read<CampaignDoc>('nested-hv-synthetic', 'campaign.json');
 const cap = read<CampaignDoc>('cap-baseline-1', 'campaign.json');
 
-const STANDARD = 'ready ≤ 180 s · tasks 100% · step p50 ≤ 1 s · step p95 ≤ 2 s · task p95 ≤ 5 s';
+const STANDARD = 'ready ≤ 180 s · tasks 100% · step p50 ≤ 2 s · step p95 ≤ 3 s · task p95 ≤ 10 s';
+/** The fixtures' SLOs: the targets every campaign before 28 September 2026 was judged by, each with the standard beside it. */
+const EARLIER = 'ready ≤ 180 s · tasks 100% · step p50 ≤ 1 s (standard 2 s) · step p95 ≤ 2 s (standard 3 s) · task p95 ≤ 5 s (standard 10 s)';
 /** A number and its unit are joined by a no-break space, so a narrow cell breaks only at the separators. */
 const NB = ' ';
 const LEAN = '--disable-features=PreloadTopChromeWebUI,WebUIOmniboxPopup,WebUIOmniboxAimPopup,WebUIOmniboxFullPopup';
@@ -48,10 +50,10 @@ describe('the texts', () => {
 
   it('write the five SLOs in order, a value other than the standard followed by the standard', () => {
     expect(slosText(STANDARD_CRITERIA)).toBe(STANDARD);
-    const metal = { ...STANDARD_CRITERIA, step_p50_target_ms: 2000, step_p95_target_ms: 3000, ready_timeout_s: 900 };
-    expect(slosText(metal)).toBe(
-      'ready ≤ 900 s (standard 180 s) · tasks 100% · step p50 ≤ 2 s (standard 1 s) · step p95 ≤ 3 s (standard 2 s) · task p95 ≤ 5 s',
-    );
+    // The metal campaign's own targets (hv-host-2).
+    const metal = { ...STANDARD_CRITERIA, task_p95_target_ms: 5000, ready_timeout_s: 900 };
+    expect(slosText(metal)).toBe('ready ≤ 900 s (standard 180 s) · tasks 100% · step p50 ≤ 2 s · step p95 ≤ 3 s · task p95 ≤ 5 s (standard 10 s)');
+    expect(slosText(cap.specs[0].spec.criteria)).toBe(EARLIER);
     // A time limit shows only where it differs from the standard.
     expect(slosText({ ...STANDARD_CRITERIA, step_timeout_ms: 20000 })).toBe(`${STANDARD} · step limit 20 s (standard 10 s)`);
   });
@@ -93,7 +95,7 @@ describe('the rows', () => {
     expect(texts(find(rows, 'microvm'))).toEqual([`2${NB}vCPU · 2${NB}GiB`, `2${NB}vCPU · 2${NB}GiB`]);
     expect(texts(find(rows, 'densities'))).toEqual(['1, 2, 4, 8, 12, 16', '1–4, 6, 8']);
     expect(texts(find(rows, 'replicas'))).toEqual(['2 hosts per spec', '2 hosts per spec']);
-    expect(texts(find(rows, 'slos'))).toEqual([STANDARD, STANDARD]);
+    expect(texts(find(rows, 'slos'))).toEqual([EARLIER, EARLIER]);
     // A cell's sub is only where there is one.
     expect(find(rows, 'densities').values[0]).toEqual({ main: '1, 2, 4, 8, 12, 16' });
   });
@@ -152,9 +154,10 @@ describe('the rows', () => {
     expect(texts(find(rows, 'replicas'))).toEqual(['2 hosts per spec', '1 host per spec']);
     expect(rows.filter((r) => r.differs).map((r) => r.key)).toEqual(['host', 'densities', 'replicas']);
 
-    const metal = withSpec(cap.specs[0], { criteria: { ...STANDARD_CRITERIA, step_p50_target_ms: 2000 } }, 'metal');
-    const slos = find(rowsOf([cap.specs[0], metal]), 'slos');
+    const standard = withSpec(cap.specs[0], { criteria: STANDARD_CRITERIA }, 'standard');
+    const metal = withSpec(cap.specs[0], { criteria: { ...STANDARD_CRITERIA, ready_timeout_s: 900 } }, 'metal');
+    const slos = find(rowsOf([standard, metal]), 'slos');
     expect(slos).toMatchObject({ differs: true });
-    expect(texts(slos)).toEqual([STANDARD, 'ready ≤ 180 s · tasks 100% · step p50 ≤ 2 s (standard 1 s) · step p95 ≤ 2 s · task p95 ≤ 5 s']);
+    expect(texts(slos)).toEqual([STANDARD, 'ready ≤ 900 s (standard 180 s) · tasks 100% · step p50 ≤ 2 s · step p95 ≤ 3 s · task p95 ≤ 10 s']);
   });
 });

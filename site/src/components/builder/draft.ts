@@ -1,12 +1,14 @@
-// Where a builder draft comes from and where it goes: the campaign files bundled at build time, a published campaign
-// or run a link names, pasted JSON, and the draft kept in this browser. Plus the small bits of formatting the
-// builder's components share.
+// Where a builder draft comes from and where it goes: a new campaign from the recommended guest, the campaign files
+// bundled at build time, a published campaign or run a link names, pasted JSON, and the draft kept in this browser.
+// Plus the small bits of formatting the builder's components share.
 import { loadCampaign } from '../../lib/data';
 import {
   CAMPAIGN_FIELDS,
   InputError,
   LIMITS,
+  SPEC_FIELDS,
   TYPES,
+  defaults,
   evaluate,
   fieldAt,
   isObj,
@@ -44,7 +46,7 @@ export const TITLES: Record<string, string> = {
   'shape-warm-1': 'microvm_size_warm',
   'slo-frontier-1': 'slo_targets',
   'metal-lean-1': 'metal_chromium_no_preload',
-  'hv-host-3': 'metal_host_standard_slo',
+  'hv-host-3': 'metal_host_tight_slo',
   'browser-lean-1': 'chromium_no_preload',
   'guest-cold-1': 'guest_boot_tuning',
   'stack-warm-1': 'tuned_guest_warm_start',
@@ -62,6 +64,61 @@ export const STARTS: Start[] = Object.entries(FILES)
 
 const FIRST = 'nested-sizes-1';
 export const DEFAULT_START = STARTS.find((s) => s.key === FIRST) ?? STARTS[0];
+
+// ------------------------------------------------------------------ a new campaign (D91)
+/** The one extra Chromium flag that makes Chromium lean: it stops the browser preloading its own address-bar pages,
+ * which headless never shows. */
+export const LEAN_CHROMIUM_FLAG =
+  '--disable-features=PreloadTopChromeWebUI,WebUIOmniboxPopup,WebUIOmniboxAimPopup,WebUIOmniboxFullPopup';
+
+/** One section of a spec with every field at the schema's default, the optional fields left out: a spec that leaves
+ * one out means its default, and the campaign files are written that way. */
+function sectionDefaults(section: string): Obj {
+  const out = defaults(section);
+  for (const f of SPEC_FIELDS) if (f.section === section && f.optional) delete out[f.path.slice(section.length + 1)];
+  return out;
+}
+
+/**
+ * The base spec a new campaign starts from: the design's default guest (D91), on the host where it was cheapest per
+ * task. MicroVMs of 1 vCPU and 1 GiB, a quiet console with no keyboard probe, transparent huge pages and lean
+ * Chromium, on c8i.xlarge, at densities 1 to 8: the control of tuned_guest_host_size, unchanged. Firecracker with
+ * PCI devices and a random-number device, as every campaign after the first three nested ones ran. The criteria, the
+ * procedure and the support host are the schema's defaults, read here so a change to them reaches a new campaign.
+ * The schema's own defaults for the guest fields stay what they were (verbose, 4 KiB pages, no extra flags), so a
+ * recorded spec that leaves them out still reads as it ran; the recommendation lives here and in the field help.
+ */
+export function recommendedBase(): Obj {
+  return {
+    worker_host: { instance_type: 'c8i.xlarge' },
+    hypervisor: { name: 'firecracker', virtio_transport: 'pci', virtio_rng: true },
+    microvm: { vcpus: 1, memory_mib: 1024, console: 'quiet-i8042', memory_pages: 'thp' },
+    densities: [1, 2, 3, 4, 5, 6, 7, 8],
+    criteria: sectionDefaults('criteria'),
+    procedure: sectionDefaults('procedure'),
+    support_host: sectionDefaults('support_host'),
+    workload: { chromium_extra_flags: [LEAN_CHROMIUM_FLAG] },
+  };
+}
+
+/** The Start menu's "New campaign": no name or question yet, the recommended base, one spec that runs it unchanged,
+ * and the schema's replicas (2) and shutdown timer. It opens from #/builder?from=campaign:new like a campaign file. */
+export const NEW_START: Start = {
+  key: 'new',
+  title: 'New campaign',
+  example: false,
+  def: {
+    name: '',
+    question: '',
+    replicas: CAMPAIGN_FIELDS.replicas.schema.default,
+    shutdown_after_minutes: CAMPAIGN_FIELDS.shutdown_after_minutes.schema.default,
+    base: recommendedBase(),
+    specs: { 'tuned-guest': {} },
+  },
+};
+
+/** Every start the menu offers: the new campaign, then the campaign files. */
+export const ALL_STARTS: Start[] = [NEW_START, ...STARTS];
 
 /** A draft as the builder holds it: the definition, what it started from, and that start's definition for Reset. */
 export interface Draft {
@@ -95,9 +152,10 @@ export function interpret(text: string): Draft {
   throw new InputError('this is neither a campaign definition nor a spec');
 }
 
-/** A campaign file bundled with the site, for a link like #/builder?from=campaign:nested-sizes-1. */
+/** A campaign file bundled with the site, for a link like #/builder?from=campaign:nested-sizes-1, or the new
+ * campaign for #/builder?from=campaign:new. */
 export function bundled(from: string | null): Draft | null {
-  const s = from?.startsWith('campaign:') ? STARTS.find((x) => x.key === from.slice('campaign:'.length)) : null;
+  const s = from?.startsWith('campaign:') ? ALL_STARTS.find((x) => x.key === from.slice('campaign:'.length)) : null;
   return s ? fromStart(s) : null;
 }
 
@@ -251,7 +309,7 @@ export function nextName(name: string, taken: string[]): string {
 const dollars = (x: number) => usd(x).replace(/\.00$/, '');
 
 export const START_HELP =
-  'A campaign to edit: one that has run, or an example that hasn’t. Your draft is kept in this browser until you start from another.';
+  'A campaign to edit: a new one from the recommended guest, one that has run, or an example that hasn’t. Your draft is kept in this browser until you start from another.';
 
 export const SPEC_NAME_HELP =
   'The spec’s name. Its runs are named after it, one per replica: name-r1, name-r2, and so on.';

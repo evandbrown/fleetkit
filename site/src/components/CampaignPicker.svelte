@@ -8,7 +8,8 @@
   // control names the selected campaign: its title, the question it answers on one line, and its headline figure
   // ("26 microVMs on c8i.4xlarge · 3 specs"). Each option is a card: title, question, and its figure: one spec's
   // density and density per host vCPU, or a small bar per spec of what the campaign compares, in the specs' colours.
-  // A campaign judged by other than the standard SLOs says how (D74). Choosing opens the campaign by its address.
+  // A campaign judged by other than the standard SLOs says how (D74); when every campaign says the same, it is said
+  // once above the list instead. Choosing opens the campaign by its address.
   import { onMount } from 'svelte';
   import { specColor } from '../lib/colors';
   import { loadCampaign } from '../lib/data';
@@ -51,6 +52,19 @@
   });
 
   /**
+   * When every campaign carries the same SLO tag, the tag is said once above the list, as a sentence, and left off
+   * the cards. Null until every campaign's document has loaded, and whenever the tags differ.
+   */
+  const common = $derived.by(() => {
+    const tags = index.campaigns.map((c) => slo[c.id]);
+    if (!tags.length || tags.some((t) => t === undefined)) return null;
+    const first = tags[0];
+    if (!first || tags.some((t) => t !== first)) return null;
+    const m = /^(Tighter|Looser) SLOs?: (.+)$/.exec(first);
+    return m && !m[2].includes(' · ') ? `All judged at ${m[2]}, ${m[1].toLowerCase()} than the design's` : `All judged alike. ${first}`;
+  });
+
+  /**
    * The campaign's headline: the density of the spec the catalog features (the same spec About's card leads with),
    * else of its best spec ("8", "3–4"; "≥ 200" when no replica failed), with its unit, that density per host vCPU,
    * and the spec's host once its document loads. Only a label when nothing ran or passed.
@@ -90,6 +104,7 @@
     <span class="label" id="campaign-label">Campaign</span>
     {#if specs > 1}<a class="compare" href={href({ name: 'compare', specs: null })}>Compare specs →</a>{/if}
   </div>
+  {#if common}<p class="common">{common}</p>{/if}
   <Dropdown items={campaigns} {selected} label="Campaign" id="campaign-picker" controls={panel} onselect={pick} bind:this={dropdown}>
     {#snippet button(c: CampaignEntry)}
       {@const h = headline(c)}
@@ -137,7 +152,7 @@
             {/each}
           </div>
         {/if}
-        {#if slo[c.id]}<span class="slo-tag">{slo[c.id]}</span>{/if}
+        {#if slo[c.id] && !common}<span class="slo-tag">{slo[c.id]}</span>{/if}
       </div>
     {/snippet}
   </Dropdown>
@@ -165,6 +180,13 @@
     font-size: 0.88rem;
     font-weight: 600;
     white-space: nowrap;
+  }
+  /* The one SLO line every campaign shares, above the control. */
+  .common {
+    margin: -2px 0 8px;
+    font-size: 0.82rem;
+    color: var(--ink-2);
+    font-variant-numeric: tabular-nums;
   }
 
   /* The closed control: title and question at the left, the figure at the right (under them on a phone). */

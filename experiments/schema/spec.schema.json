@@ -103,7 +103,7 @@
           "minimum": 1,
           "maximum": 8,
           "default": 2,
-          "description": "Virtual CPUs in each microVM.",
+          "description": "Virtual CPUs in each microVM. The design recommends 1 (D91): with 1 GiB of memory it was the cheapest microVM per task, with every task inside its targets.",
           "x-builder": { "tier": "basic", "label": "MicroVM vCPUs" }
         },
         "memory_mib": {
@@ -112,21 +112,21 @@
           "maximum": 16384,
           "multipleOf": 256,
           "default": 2048,
-          "description": "Guest memory of each microVM.",
+          "description": "Guest memory of each microVM. The design recommends 1024 (D91): a guest touched at most 0.7 GiB during its task, and no task failed for memory at 1 GiB.",
           "x-builder": { "tier": "basic", "label": "MicroVM memory", "unit": "MiB" }
         },
         "console": {
           "type": "string",
           "enum": ["verbose", "quiet", "quiet-i8042"],
           "default": "verbose",
-          "description": "What each guest kernel prints on its serial console while it boots. verbose prints the whole kernel log, about 21 KB, as every run before this field did. quiet adds `quiet loglevel=3` to the kernel command line, so only critical kernel messages print (a panic or oops still prints in full); errors, warnings and the rest stay in the kernel's own log. quiet-i8042 adds Firecracker's own `i8042.noaux i8042.nomux i8042.dumbkbd` too, so the kernel skips probing the emulated PS/2 keyboard (Cloud Hypervisor's guests find no PS/2 controller, so there it boots as quiet does). Every character the guest prints costs host CPU in the hypervisor's emulated serial port. Optional: absent is verbose.",
+          "description": "What each guest kernel prints on its serial console while it boots. verbose prints the whole kernel log, about 21 KB, as every run before this field did. quiet adds `quiet loglevel=3` to the kernel command line, so only critical kernel messages print (a panic or oops still prints in full); errors, warnings and the rest stay in the kernel's own log. quiet-i8042 adds Firecracker's own `i8042.noaux i8042.nomux i8042.dumbkbd` too, so the kernel skips probing the emulated PS/2 keyboard (Cloud Hypervisor's guests find no PS/2 controller, so there it boots as quiet does). Every character the guest prints costs host CPU in the hypervisor's emulated serial port. Optional: absent is verbose, as the runs before this field had; the design recommends quiet-i8042 (D91), which in guest_boot_tuning cut the cost per task about 10% on c8i.xlarge.",
           "x-builder": { "tier": "advanced", "label": "Guest console" }
         },
         "memory_pages": {
           "type": "string",
           "enum": ["4k", "thp"],
           "default": "4k",
-          "description": "How the hypervisor asks the worker host to back each microVM's guest memory. 4k asks for nothing, as every run before this field did: 4 KiB pages unless the host's transparent huge page mode is always. thp asks for transparent huge pages (Firecracker's huge_pages Transparent, Cloud Hypervisor's thp=on), which the host grants when its mode is always or madvise. run.json records the host's mode. Optional: absent is 4k.",
+          "description": "How the hypervisor asks the worker host to back each microVM's guest memory. 4k asks for nothing, as every run before this field did: 4 KiB pages unless the host's transparent huge page mode is always. thp asks for transparent huge pages (Firecracker's huge_pages Transparent, Cloud Hypervisor's thp=on), which the host grants when its mode is always or madvise. run.json records the host's mode. Optional: absent is 4k, as the runs before this field had; the design recommends thp (D91), which in guest_boot_tuning cut the cost per task 24-40% on nested hosts and in tuned_guest_metal about 10% on metal, so a production host's mode must be madvise or always.",
           "x-builder": { "tier": "advanced", "label": "Guest memory pages" }
         }
       }
@@ -143,31 +143,31 @@
     "criteria": {
       "type": "object",
       "additionalProperties": false,
-      "description": "What a trial must meet to pass, besides every microVM ready, every task succeeding and nothing left on the host.",
+      "description": "What a trial must meet to pass, besides every microVM ready, every task succeeding and nothing left on the host. The three latency targets' defaults are the SLOs the design recommends; a campaign may set its own, and its results are judged by those.",
       "x-builder": { "label": "Pass criteria" },
       "properties": {
         "step_p50_target_ms": {
           "type": "number",
           "exclusiveMinimum": 0,
           "maximum": 60000,
-          "default": 1000,
-          "description": "For each of the five steps, the median over the trial's tasks must be at most this.",
+          "default": 2000,
+          "description": "For each of the five steps, the median over the trial's tasks must be at most this. The default is the design's SLO.",
           "x-builder": { "tier": "basic", "label": "Step median target", "unit": "ms" }
         },
         "step_p95_target_ms": {
           "type": "number",
           "exclusiveMinimum": 0,
           "maximum": 60000,
-          "default": 2000,
-          "description": "For each of the five steps, the 95th percentile over the trial's tasks must be at most this.",
+          "default": 3000,
+          "description": "For each of the five steps, the 95th percentile over the trial's tasks must be at most this. The default is the design's SLO.",
           "x-builder": { "tier": "basic", "label": "Step p95 target", "unit": "ms" }
         },
         "task_p95_target_ms": {
           "type": "number",
           "exclusiveMinimum": 0,
           "maximum": 600000,
-          "default": 5000,
-          "description": "The 95th percentile of whole-task time over the trial's tasks must be at most this.",
+          "default": 10000,
+          "description": "The 95th percentile of whole-task time over the trial's tasks must be at most this. The default is the design's SLO.",
           "x-builder": { "tier": "basic", "label": "Task p95 target", "unit": "ms" }
         },
         "ready_timeout_s": {
@@ -267,7 +267,7 @@
             "x-message": "a flag is --name or --name=value, in plain ASCII, at most 200 characters"
           },
           "default": [],
-          "description": "Chromium flags added after the base flags every run has, to compare browser configurations. Each must be on the allowed list in chromium-flags.json, which says why it is allowed: it may change how Chromium spends memory and CPU, never what a task does. Each flag once, at most 8, at most 512 characters together. Optional: absent is none.",
+          "description": "Chromium flags added after the base flags every run has, to compare browser configurations. Each must be on the allowed list in chromium-flags.json, which says why it is allowed: it may change how Chromium spends memory and CPU, never what a task does. Each flag once, at most 8, at most 512 characters together. Optional: absent is none, as the runs before this field had; the design recommends lean Chromium (D91), the one flag --disable-features=PreloadTopChromeWebUI,WebUIOmniboxPopup,WebUIOmniboxAimPopup,WebUIOmniboxFullPopup, which stops the browser preloading its own address-bar pages and in chromium_no_preload cut the cost per task 8-10%.",
           "x-builder": { "tier": "advanced", "label": "Extra Chromium flags" }
         }
       }

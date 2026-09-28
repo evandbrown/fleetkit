@@ -77,7 +77,21 @@
         <dl class="figs">
           <div class="num"><dt>Max density</dt><dd><strong>{r.density}</strong></dd></div>
           <div class="num"><dt>Per vCPU</dt><dd>{r.perVcpu ?? '–'}</dd></div>
-          <div class="num"><dt>$ / 1k tasks</dt><dd>{r.cost ?? '–'}</dd></div>
+          <!-- Each cost says what it counts, in About's words: the steady-state cost (D81) is what a full fleet pays,
+               with what one burst is charged under it. Where the host wasn't full at the result there is no fleet
+               figure, so the burst stands alone and says why. -->
+          <div class="num cost">
+            <dt>$ / 1k tasks</dt>
+            <dd>
+              {#if r.cost}
+                {r.cost} <span class="what">full fleet</span><span class="burst">{r.burst} one burst</span>
+              {:else if r.burst}
+                {r.burst} <span class="what">one burst</span><span class="burst">host not full, no fleet figure</span>
+              {:else}
+                –
+              {/if}
+            </dd>
+          </div>
           <div class="out"><dt>Ran out</dt><dd>{r.ranOut}{#if r.ranOutAt}<span class="at">{r.ranOutAt}</span>{/if}</dd></div>
         </dl>
       </li>
@@ -114,7 +128,8 @@
   .spec,
   .axis {
     display: grid;
-    grid-template-columns: 11.5rem minmax(0, 1fr) 5.5rem 4.5rem 7.5rem 7.5rem;
+    /* The cost column holds "$0.216–0.221 one burst" on one line. */
+    grid-template-columns: 11.5rem minmax(0, 1fr) 5.5rem 4.5rem 10.5rem 7.5rem;
     column-gap: 16px;
     align-items: center;
   }
@@ -289,6 +304,22 @@
     flex-direction: column;
     line-height: 1.3;
   }
+  .cost dd {
+    line-height: 1.3;
+  }
+  /* What a cost figure counts, muted beside it ("full fleet", "one burst"). */
+  .what {
+    font-size: 0.8rem;
+    color: var(--ink-2);
+    white-space: nowrap;
+  }
+  /* The second line of the cost: "$0.042 one burst" under the fleet cost, or why there is no fleet cost under the
+     burst alone. It wraps rather than run into the next column. */
+  .burst {
+    display: block;
+    font-size: 0.8rem;
+    color: var(--ink-2);
+  }
   .at {
     font-size: 0.8rem;
     color: var(--ink-2);
@@ -387,6 +418,10 @@
     }
   }
   @media (max-width: 480px) {
+    /* Two figures per row, each with room for its two lines. */
+    .spec {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
     .answer.replicas {
       --rl: 28px;
     }

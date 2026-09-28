@@ -1,8 +1,8 @@
 {
   "schema": "fleetkit-site-data/2",
   "id": "cap-baseline-1",
-  "title": "Capacity baseline",
-  "question": "How many 2 vCPU / 2 GiB Firecracker microVMs can one m8i.4xlarge worker host run at once, with every shopping task inside its latency targets?",
+  "title": "baseline",
+  "question": "How many microVMs fit on one m8i.4xlarge?",
   "started": "2026-09-27T17:09Z",
   "ended": "2026-09-27T17:12Z",
   "status": "complete",
@@ -15,7 +15,7 @@
   "definition_path": "docs/capacity-experiment.md",
   "definition": {
     "name": "cap-baseline-1",
-    "question": "How many 2 vCPU / 2 GiB Firecracker microVMs can one m8i.4xlarge worker host run at once, with every shopping task inside its latency targets?",
+    "question": "How many microVMs fit on one m8i.4xlarge?",
     "replicas": 1,
     "base": {
       "worker_host": {
@@ -28,7 +28,9 @@
       },
       "microvm": {
         "vcpus": 2,
-        "memory_mib": 2048
+        "memory_mib": 2048,
+        "console": "verbose",
+        "memory_pages": "4k"
       },
       "densities": [
         1,
@@ -49,10 +51,14 @@
       "procedure": {
         "trials_per_density": 1,
         "boundary_trials": 2,
-        "settle_s": 10
+        "settle_s": 10,
+        "release_after_ready_s": 0
       },
       "support_host": {
         "instance_type": "m8i.xlarge"
+      },
+      "workload": {
+        "chromium_extra_flags": []
       }
     },
     "specs": {
@@ -63,6 +69,8 @@
     {
       "name": "baseline",
       "label": "m8i.4xlarge, Firecracker, 2 vCPU / 2 GiB",
+      "short": "m8i.4xlarge",
+      "why": "The starting point for every later campaign",
       "changes": [],
       "spec": {
         "worker_host": {
@@ -75,7 +83,9 @@
         },
         "microvm": {
           "vcpus": 2,
-          "memory_mib": 2048
+          "memory_mib": 2048,
+          "console": "verbose",
+          "memory_pages": "4k"
         },
         "densities": [
           1,
@@ -96,10 +106,14 @@
         "procedure": {
           "trials_per_density": 1,
           "boundary_trials": 2,
-          "settle_s": 10
+          "settle_s": 10,
+          "release_after_ready_s": 0
         },
         "support_host": {
           "instance_type": "m8i.xlarge"
+        },
+        "workload": {
+          "chromium_extra_flags": []
         }
       },
       "host": {
@@ -154,6 +168,14 @@
           "observed": [
             0.1843,
             0.2014
+          ],
+          "observed_charged": [
+            0.1843,
+            0.2014
+          ],
+          "steady_state": [
+            0.1407,
+            0.1419
           ]
         },
         "limit": {
@@ -266,6 +288,14 @@
             "observed": [
               0.1843,
               0.2014
+            ],
+            "observed_charged": [
+              0.1843,
+              0.2014
+            ],
+            "steady_state": [
+              0.1407,
+              0.1419
             ]
           }
         }
@@ -325,7 +355,7 @@
     }
   ],
   "notes": [
-    "Nested virtualization on one m8i.4xlarge: nothing here extrapolates to metal.",
-    "Tasks started as soon as every microVM reported ready, while browsers may still have been finishing startup."
+    "Nested host only.",
+    "Tasks start as soon as every microVM is ready."
   ]
 }

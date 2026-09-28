@@ -7,7 +7,7 @@
   "ended": "2026-09-28T09:41Z",
   "status": "complete",
   "definition_path": "experiments/campaigns/metal-lean-1.json",
-  "answer": "Yes: without the preload one m8i.metal-48xl (192 vCPUs) held at least 200 microVMs (the harness's cap), 1.04 microVMs per host vCPU. With it the same spec held 140 (metal_host_standard_slo), and cost fell from $0.072–0.075 to $0.055–0.057 per 1,000 tasks.",
+  "answer": "Yes: without the preload one m8i.metal-48xl (192 vCPUs) held at least 200 microVMs (the harness's cap), 1.04 microVMs per host vCPU. With it the same spec held 140 (metal_host_tight_slo); one burst fell from $0.218–0.219 to $0.182–0.190 per 1,000 tasks.",
   "definition": {
     "name": "metal-lean-1",
     "question": "Does lean headless Chromium fit more microVMs on a metal host?",
@@ -216,7 +216,12 @@
           "observed": [
             0.1822,
             0.1899
-          ]
+          ],
+          "observed_charged": [
+            0.1822,
+            0.1899
+          ],
+          "steady_state": null
         },
         "limit": null
       },
@@ -318,7 +323,12 @@
             "observed": [
               0.1822,
               0.1899
-            ]
+            ],
+            "observed_charged": [
+              0.1822,
+              0.1899
+            ],
+            "steady_state": null
           }
         }
       ],

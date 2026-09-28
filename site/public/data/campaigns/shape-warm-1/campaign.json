@@ -7,7 +7,7 @@
   "ended": "2026-09-28T07:07Z",
   "status": "complete",
   "definition_path": "experiments/campaigns/shape-warm-1.json",
-  "answer": "No: the wait moves start-up work out of the cost shown; once charged, 2-vCPU microVMs saved nothing. Warm, 1 vCPU / 1 GiB microVMs held 4 on c8i.xlarge, 1.0 microVMs per host vCPU, at $0.035–0.039 per 1,000 tasks; host CPU ran out.",
+  "answer": "No: over the microVM's whole life, 2-vCPU microVMs cost $0.108–0.120 per 1,000 tasks against $0.100–0.105 for 1 vCPU / 1 GiB. Warm, 1 vCPU / 1 GiB microVMs held 4 on c8i.xlarge, 1.0 microVMs per host vCPU; host CPU ran out.",
   "definition": {
     "name": "shape-warm-1",
     "question": "Does a warm start lower the cost per task, once its wait is charged?",
@@ -421,6 +421,14 @@
           "observed": [
             0.2648,
             0.266
+          ],
+          "observed_charged": [
+            0.1462,
+            0.1493
+          ],
+          "steady_state": [
+            0.108,
+            0.1115
           ]
         },
         "limit": {
@@ -547,6 +555,14 @@
           "observed": [
             0.2045,
             0.2085
+          ],
+          "observed_charged": [
+            0.1292,
+            0.1316
+          ],
+          "steady_state": [
+            0.1183,
+            0.1192
           ]
         },
         "limit": {
@@ -663,6 +679,14 @@
           "observed": [
             0.2044,
             0.2093
+          ],
+          "observed_charged": [
+            0.1302,
+            0.1321
+          ],
+          "steady_state": [
+            0.1195,
+            0.1204
           ]
         },
         "limit": {
@@ -780,6 +804,14 @@
           "observed": [
             0.2556,
             0.2699
+          ],
+          "observed_charged": [
+            0.1441,
+            0.1485
+          ],
+          "steady_state": [
+            0.108,
+            0.1112
           ]
         },
         "limit": {
@@ -906,7 +938,12 @@
           "observed": [
             0.2014,
             0.2126
-          ]
+          ],
+          "observed_charged": [
+            0.1336,
+            0.1396
+          ],
+          "steady_state": null
         },
         "limit": {
           "density": 4,
@@ -1033,6 +1070,14 @@
           "observed": [
             0.1501,
             0.1532
+          ],
+          "observed_charged": [
+            0.1034,
+            0.1065
+          ],
+          "steady_state": [
+            0.1007,
+            0.1044
           ]
         },
         "limit": {
@@ -1162,6 +1207,14 @@
           "observed": [
             0.1525,
             0.1545
+          ],
+          "observed_charged": [
+            0.1047,
+            0.1064
+          ],
+          "steady_state": [
+            0.1023,
+            0.1028
           ]
         },
         "limit": {
@@ -1291,6 +1344,14 @@
           "observed": [
             0.1516,
             0.1543
+          ],
+          "observed_charged": [
+            0.1034,
+            0.105
+          ],
+          "steady_state": [
+            0.1022,
+            0.1025
           ]
         },
         "limit": {
@@ -1420,6 +1481,14 @@
           "observed": [
             0.1528,
             0.1542
+          ],
+          "observed_charged": [
+            0.1026,
+            0.1044
+          ],
+          "steady_state": [
+            0.1014,
+            0.1017
           ]
         },
         "limit": {
@@ -1549,6 +1618,14 @@
           "observed": [
             0.1516,
             0.1524
+          ],
+          "observed_charged": [
+            0.1027,
+            0.105
+          ],
+          "steady_state": [
+            0.0999,
+            0.1019
           ]
         },
         "limit": {
@@ -1678,6 +1755,14 @@
           "observed": [
             0.1512,
             0.1526
+          ],
+          "observed_charged": [
+            0.104,
+            0.1051
+          ],
+          "steady_state": [
+            0.1008,
+            0.1015
           ]
         },
         "limit": {
@@ -1807,6 +1892,14 @@
           "observed": [
             0.1542,
             0.1549
+          ],
+          "observed_charged": [
+            0.106,
+            0.1067
+          ],
+          "steady_state": [
+            0.1043,
+            0.1048
           ]
         },
         "limit": {
@@ -1940,6 +2033,14 @@
           "observed": [
             0.2682,
             0.2709
+          ],
+          "observed_charged": [
+            0.178,
+            0.1814
+          ],
+          "steady_state": [
+            0.1553,
+            0.1565
           ]
         },
         "limit": {
@@ -2107,6 +2208,14 @@
           "observed": [
             0.2856,
             0.2887
+          ],
+          "observed_charged": [
+            0.1811,
+            0.1888
+          ],
+          "steady_state": [
+            0.1546,
+            0.1558
           ]
         },
         "limit": {
@@ -2276,6 +2385,14 @@
           "observed": [
             0.272,
             0.2748
+          ],
+          "observed_charged": [
+            0.1787,
+            0.1842
+          ],
+          "steady_state": [
+            0.1581,
+            0.1592
           ]
         },
         "limit": {
@@ -2444,6 +2561,14 @@
           "observed": [
             0.285,
             0.287
+          ],
+          "observed_charged": [
+            0.1781,
+            0.1837
+          ],
+          "steady_state": [
+            0.1514,
+            0.1518
           ]
         },
         "limit": {
@@ -2588,6 +2713,14 @@
             "observed": [
               0.2648,
               0.266
+            ],
+            "observed_charged": [
+              0.1462,
+              0.1493
+            ],
+            "steady_state": [
+              0.108,
+              0.1115
             ]
           }
         },
@@ -2607,6 +2740,14 @@
             "observed": [
               0.2045,
               0.2085
+            ],
+            "observed_charged": [
+              0.1292,
+              0.1316
+            ],
+            "steady_state": [
+              0.1183,
+              0.1192
             ]
           }
         },
@@ -2626,6 +2767,14 @@
             "observed": [
               0.2044,
               0.2093
+            ],
+            "observed_charged": [
+              0.1302,
+              0.1321
+            ],
+            "steady_state": [
+              0.1195,
+              0.1204
             ]
           }
         },
@@ -2645,6 +2794,14 @@
             "observed": [
               0.2556,
               0.2699
+            ],
+            "observed_charged": [
+              0.1441,
+              0.1485
+            ],
+            "steady_state": [
+              0.108,
+              0.1112
             ]
           }
         }
@@ -2670,7 +2827,12 @@
             "observed": [
               0.2014,
               0.2126
-            ]
+            ],
+            "observed_charged": [
+              0.1336,
+              0.1396
+            ],
+            "steady_state": null
           }
         },
         {
@@ -2689,6 +2851,14 @@
             "observed": [
               0.1501,
               0.1532
+            ],
+            "observed_charged": [
+              0.1034,
+              0.1065
+            ],
+            "steady_state": [
+              0.1007,
+              0.1044
             ]
           }
         },
@@ -2708,6 +2878,14 @@
             "observed": [
               0.1525,
               0.1545
+            ],
+            "observed_charged": [
+              0.1047,
+              0.1064
+            ],
+            "steady_state": [
+              0.1023,
+              0.1028
             ]
           }
         },
@@ -2727,6 +2905,14 @@
             "observed": [
               0.1516,
               0.1543
+            ],
+            "observed_charged": [
+              0.1034,
+              0.105
+            ],
+            "steady_state": [
+              0.1022,
+              0.1025
             ]
           }
         }
@@ -2752,6 +2938,14 @@
             "observed": [
               0.1528,
               0.1542
+            ],
+            "observed_charged": [
+              0.1026,
+              0.1044
+            ],
+            "steady_state": [
+              0.1014,
+              0.1017
             ]
           }
         },
@@ -2771,6 +2965,14 @@
             "observed": [
               0.1516,
               0.1524
+            ],
+            "observed_charged": [
+              0.1027,
+              0.105
+            ],
+            "steady_state": [
+              0.0999,
+              0.1019
             ]
           }
         },
@@ -2790,6 +2992,14 @@
             "observed": [
               0.1512,
               0.1526
+            ],
+            "observed_charged": [
+              0.104,
+              0.1051
+            ],
+            "steady_state": [
+              0.1008,
+              0.1015
             ]
           }
         },
@@ -2809,6 +3019,14 @@
             "observed": [
               0.1542,
               0.1549
+            ],
+            "observed_charged": [
+              0.106,
+              0.1067
+            ],
+            "steady_state": [
+              0.1043,
+              0.1048
             ]
           }
         }
@@ -2834,6 +3052,14 @@
             "observed": [
               0.2682,
               0.2709
+            ],
+            "observed_charged": [
+              0.178,
+              0.1814
+            ],
+            "steady_state": [
+              0.1553,
+              0.1565
             ]
           }
         },
@@ -2853,6 +3079,14 @@
             "observed": [
               0.2856,
               0.2887
+            ],
+            "observed_charged": [
+              0.1811,
+              0.1888
+            ],
+            "steady_state": [
+              0.1546,
+              0.1558
             ]
           }
         },
@@ -2872,6 +3106,14 @@
             "observed": [
               0.272,
               0.2748
+            ],
+            "observed_charged": [
+              0.1787,
+              0.1842
+            ],
+            "steady_state": [
+              0.1581,
+              0.1592
             ]
           }
         },
@@ -2891,6 +3133,14 @@
             "observed": [
               0.285,
               0.287
+            ],
+            "observed_charged": [
+              0.1781,
+              0.1837
+            ],
+            "steady_state": [
+              0.1514,
+              0.1518
             ]
           }
         }

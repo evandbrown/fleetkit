@@ -142,7 +142,14 @@
               </td>
               <td class="num">{d.cpuPressure ? f.range(d.cpuPressure, (v) => f.pct(v, 0)) : '–'}</td>
               <td class="num wide">{d.memUsed ? f.range(d.memUsed, (v) => f.num(v, 0)) : '–'} <span class="muted">of {f.num(d.memAllocated, 0)} given</span></td>
-              <td class="num wide">{d.costExecution ? f.usdRange(d.costExecution) : '–'}</td>
+              <!-- Each cost says what it counts, in About's words: the steady-state cost (D81) is what a full fleet
+                   pays, with the charged burst under it; the burst alone, saying why, where the host wasn't full at
+                   this density. -->
+              <td class="num wide cost">
+                {#if d.costSteady}{f.usdRange(d.costSteady)} <span class="what">full fleet</span><span class="burst">{f.usdRange(d.costBurst!)} one burst</span>
+                {:else if d.costBurst}{f.usdRange(d.costBurst)} <span class="what">one burst</span><span class="burst">host not full, no fleet figure</span>
+                {:else}–{/if}
+              </td>
             {/if}
           </tr>
         {/each}
@@ -295,6 +302,19 @@
   .miss {
     display: block;
     font-size: 0.82rem;
+    color: var(--ink-2);
+  }
+  /* What a cost figure counts, muted beside it ("full fleet", "one burst"). */
+  .what {
+    font-size: 0.8rem;
+    color: var(--ink-2);
+    white-space: nowrap;
+  }
+  /* The second line of a cost: the charged burst under the fleet cost, or why there is no fleet cost under the burst
+     alone. */
+  .burst {
+    display: block;
+    font-size: 0.8rem;
     color: var(--ink-2);
   }
   .marks {

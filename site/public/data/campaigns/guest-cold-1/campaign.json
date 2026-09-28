@@ -7,7 +7,7 @@
   "ended": "2026-09-28T10:41Z",
   "status": "complete",
   "definition_path": "experiments/campaigns/guest-cold-1.json",
-  "answer": "Huge pages moved c8i.xlarge from 3 microVMs to 5–6, cutting cost from $0.033–0.035 to $0.022–0.031 per 1,000 tasks; a quiet console changed nothing. With both, the 1 vCPU / 1 GiB guest held 6 at $0.019–0.027 (host CPU ran out); m8i.4xlarge rose from 13 to at least 18.",
+  "answer": "Huge pages moved c8i.xlarge from 3 microVMs to 5–6, cutting cost from $0.089–0.092 to $0.063–0.074 per 1,000 tasks; a quiet console held 3 at $0.081–0.083. With both, the 1 vCPU / 1 GiB guest held 6 at $0.038–0.047 (host CPU ran out); m8i.4xlarge rose from 13 to at least 18.",
   "definition": {
     "name": "guest-cold-1",
     "question": "Do a quiet guest console and huge pages cut CPU per task on lean Chromium?",
@@ -738,6 +738,14 @@
           "observed": [
             0.1022,
             0.1085
+          ],
+          "observed_charged": [
+            0.1022,
+            0.1085
+          ],
+          "steady_state": [
+            0.0897,
+            0.0906
           ]
         },
         "limit": {
@@ -857,6 +865,14 @@
           "observed": [
             0.1027,
             0.1054
+          ],
+          "observed_charged": [
+            0.1027,
+            0.1054
+          ],
+          "steady_state": [
+            0.0891,
+            0.0917
           ]
         },
         "limit": {
@@ -976,6 +992,14 @@
           "observed": [
             0.0866,
             0.0908
+          ],
+          "observed_charged": [
+            0.0866,
+            0.0908
+          ],
+          "steady_state": [
+            0.0813,
+            0.0833
           ]
         },
         "limit": {
@@ -1095,6 +1119,14 @@
           "observed": [
             0.0858,
             0.0889
+          ],
+          "observed_charged": [
+            0.0858,
+            0.0889
+          ],
+          "steady_state": [
+            0.0814,
+            0.0819
           ]
         },
         "limit": {
@@ -1212,6 +1244,14 @@
           "observed": [
             0.0658,
             0.0746
+          ],
+          "observed_charged": [
+            0.0658,
+            0.0746
+          ],
+          "steady_state": [
+            0.0653,
+            0.0745
           ]
         },
         "limit": null
@@ -1311,6 +1351,14 @@
           "observed": [
             0.0683,
             0.0695
+          ],
+          "observed_charged": [
+            0.0683,
+            0.0695
+          ],
+          "steady_state": [
+            0.0634,
+            0.065
           ]
         },
         "limit": {
@@ -1428,6 +1476,14 @@
           "observed": [
             0.0626,
             0.0664
+          ],
+          "observed_charged": [
+            0.0626,
+            0.0664
+          ],
+          "steady_state": [
+            0.0606,
+            0.0659
           ]
         },
         "limit": {
@@ -1546,6 +1602,14 @@
           "observed": [
             0.0577,
             0.0589
+          ],
+          "observed_charged": [
+            0.0577,
+            0.0589
+          ],
+          "steady_state": [
+            0.0557,
+            0.0561
           ]
         },
         "limit": {
@@ -1666,6 +1730,14 @@
           "observed": [
             0.0401,
             0.0442
+          ],
+          "observed_charged": [
+            0.0401,
+            0.0442
+          ],
+          "steady_state": [
+            0.0379,
+            0.0433
           ]
         },
         "limit": {
@@ -1802,6 +1874,14 @@
           "observed": [
             0.0412,
             0.0468
+          ],
+          "observed_charged": [
+            0.0412,
+            0.0468
+          ],
+          "steady_state": [
+            0.0395,
+            0.0471
           ]
         },
         "limit": {
@@ -1938,6 +2018,14 @@
           "observed": [
             0.1492,
             0.1518
+          ],
+          "observed_charged": [
+            0.1492,
+            0.1518
+          ],
+          "steady_state": [
+            0.131,
+            0.1327
           ]
         },
         "limit": {
@@ -2099,6 +2187,14 @@
           "observed": [
             0.1494,
             0.1505
+          ],
+          "observed_charged": [
+            0.1494,
+            0.1505
+          ],
+          "steady_state": [
+            0.1307,
+            0.1328
           ]
         },
         "limit": {
@@ -2257,6 +2353,14 @@
           "observed": [
             0.0878,
             0.0894
+          ],
+          "observed_charged": [
+            0.0878,
+            0.0894
+          ],
+          "steady_state": [
+            0.0788,
+            0.0801
           ]
         },
         "limit": null
@@ -2401,6 +2505,14 @@
           "observed": [
             0.0888,
             0.09
+          ],
+          "observed_charged": [
+            0.0888,
+            0.09
+          ],
+          "steady_state": [
+            0.0784,
+            0.0794
           ]
         },
         "limit": null
@@ -2530,6 +2642,14 @@
             "observed": [
               0.1022,
               0.1085
+            ],
+            "observed_charged": [
+              0.1022,
+              0.1085
+            ],
+            "steady_state": [
+              0.0897,
+              0.0906
             ]
           }
         },
@@ -2549,6 +2669,14 @@
             "observed": [
               0.1027,
               0.1054
+            ],
+            "observed_charged": [
+              0.1027,
+              0.1054
+            ],
+            "steady_state": [
+              0.0891,
+              0.0917
             ]
           }
         }
@@ -2574,6 +2702,14 @@
             "observed": [
               0.0866,
               0.0908
+            ],
+            "observed_charged": [
+              0.0866,
+              0.0908
+            ],
+            "steady_state": [
+              0.0813,
+              0.0833
             ]
           }
         },
@@ -2593,6 +2729,14 @@
             "observed": [
               0.0858,
               0.0889
+            ],
+            "observed_charged": [
+              0.0858,
+              0.0889
+            ],
+            "steady_state": [
+              0.0814,
+              0.0819
             ]
           }
         }
@@ -2618,6 +2762,14 @@
             "observed": [
               0.0658,
               0.0746
+            ],
+            "observed_charged": [
+              0.0658,
+              0.0746
+            ],
+            "steady_state": [
+              0.0653,
+              0.0745
             ]
           }
         },
@@ -2637,6 +2789,14 @@
             "observed": [
               0.0683,
               0.0695
+            ],
+            "observed_charged": [
+              0.0683,
+              0.0695
+            ],
+            "steady_state": [
+              0.0634,
+              0.065
             ]
           }
         }
@@ -2662,6 +2822,14 @@
             "observed": [
               0.0626,
               0.0664
+            ],
+            "observed_charged": [
+              0.0626,
+              0.0664
+            ],
+            "steady_state": [
+              0.0606,
+              0.0659
             ]
           }
         },
@@ -2681,6 +2849,14 @@
             "observed": [
               0.0577,
               0.0589
+            ],
+            "observed_charged": [
+              0.0577,
+              0.0589
+            ],
+            "steady_state": [
+              0.0557,
+              0.0561
             ]
           }
         }
@@ -2706,6 +2882,14 @@
             "observed": [
               0.0401,
               0.0442
+            ],
+            "observed_charged": [
+              0.0401,
+              0.0442
+            ],
+            "steady_state": [
+              0.0379,
+              0.0433
             ]
           }
         },
@@ -2725,6 +2909,14 @@
             "observed": [
               0.0412,
               0.0468
+            ],
+            "observed_charged": [
+              0.0412,
+              0.0468
+            ],
+            "steady_state": [
+              0.0395,
+              0.0471
             ]
           }
         }
@@ -2750,6 +2942,14 @@
             "observed": [
               0.1492,
               0.1518
+            ],
+            "observed_charged": [
+              0.1492,
+              0.1518
+            ],
+            "steady_state": [
+              0.131,
+              0.1327
             ]
           }
         },
@@ -2769,6 +2969,14 @@
             "observed": [
               0.1494,
               0.1505
+            ],
+            "observed_charged": [
+              0.1494,
+              0.1505
+            ],
+            "steady_state": [
+              0.1307,
+              0.1328
             ]
           }
         }
@@ -2794,6 +3002,14 @@
             "observed": [
               0.0878,
               0.0894
+            ],
+            "observed_charged": [
+              0.0878,
+              0.0894
+            ],
+            "steady_state": [
+              0.0788,
+              0.0801
             ]
           }
         },
@@ -2813,6 +3029,14 @@
             "observed": [
               0.0888,
               0.09
+            ],
+            "observed_charged": [
+              0.0888,
+              0.09
+            ],
+            "steady_state": [
+              0.0784,
+              0.0794
             ]
           }
         }

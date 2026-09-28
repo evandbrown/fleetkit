@@ -11,15 +11,22 @@
     specs,
     text,
     errors,
+    held = 0,
     others,
     onshow,
+    onreveal = () => {},
   }: {
     est: Plan | null;
     specs: [string, Obj][];
     text: string;
+    /** Problems shown to the reader, which block the copy. */
     errors: number;
+    /** Problems held back until the reader edits (a new campaign's empty name and question): the copy button reveals
+     * them instead of copying. */
+    held?: number;
     others: { msg: Msg; fix?: { label: string; run: () => void } }[];
     onshow: () => void;
+    onreveal?: () => void;
   } = $props();
 
   const differs = $derived(differing(specs));
@@ -183,7 +190,7 @@
   {/if}
 
   <div class="copy">
-    <button type="button" class="primary big" disabled={errors > 0} onclick={copy}>Copy definition</button>
+    <button type="button" class="primary big" disabled={errors > 0} onclick={() => (held > 0 ? onreveal() : copy())}>Copy definition</button>
     {#if errors}
       <p class="small err">
         {plural(errors, 'problem')} to fix <button type="button" class="link" onclick={onshow}>Show</button>

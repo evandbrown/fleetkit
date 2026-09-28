@@ -136,6 +136,8 @@ def build_run(src: S.RunSource, *, campaign: str, run_id: str, spec_name: str, r
     rds = rule_defs(src)
     ncpu = host["vcpus"]
     interval_ms = float(src.run["spec"].get("sample_interval_ms") or 200)
+    interval_s = interval_ms / 1000
+    util = src.host.get(("host", "cpu_util"), [])      # the host's busy samples, the whole run
     settle_s = spec["procedure"]["settle_s"]
     overhead_mib = num(hypervisor_info(src).get("mem_overhead_mib", 0))
 
@@ -234,12 +236,38 @@ def build_run(src: S.RunSource, *, campaign: str, run_id: str, spec_name: str, r
             mem_peak = rng([x["cgroup_memory_peak_bytes"] / MIB for x in vm_attr.values()
                             if x.get("cgroup_memory_peak_bytes") is not None])
 
+        vm_rows = src.microvm_rows.get(ts_.id, {})
         cost = None
         if counts and marks["release_ms"] is not None and marks["last_return_ms"] is not None and marks["clean_ms"] is not None:
             exec_s = float(stamps["last_task_return"]) - float(stamps["barrier_release"])
             obs_s = float(stamps["verify_clean_pass"]) - cs
+            # A warm start waits between all ready and the release. The charged burst leaves the wait out of the
+            # observed window and adds back the host CPU used during it (rule 5).
+            rws, rwe = stamps.get("release_wait_start"), stamps.get("release_wait_end")
+            wait_s = float(rwe) - float(rws) if rws and rwe else 0.0
+            wait_busy = R.host_busy_s(util, float(rws), float(rwe), interval_s) * ncpu if wait_s else 0.0
+            # Host CPU per task over the microVMs' whole lives, first create to last destroy (rule 5, steady state).
+            # A microVM without a destroy time lives until its last sample.
+            created = [float(m["created_ts"]) for m in vm_rows.values() if m.get("created_ts")]
+            destroyed = [float(m["destroyed_ts"]) if m.get("destroyed_ts")
+                         else (src.host.get((m["microvm_id"], "cpu_usage_usec")) or [(None, None)])[-1][0]
+                         for m in vm_rows.values()]
+            per_task = None
+            if created and destroyed and None not in destroyed:
+                t_first, t_last = min(created), max(destroyed)
+                if R.host_samples_cover(util, t_first, t_last, interval_s):
+                    per_task = R.host_busy_s(util, t_first, t_last, interval_s) * ncpu / density
+            # The model's inputs are published at summary precision, and the steady-state cost is computed from
+            # the published values, so the contract can recompute it. Whether a trial gets one is decided per
+            # density, once every trial there is known (below).
+            busy_fraction = (r4(host_summary["cpu_util_pct"] / 100) if host_summary and host_summary["cpu_util_pct"] is not None
+                             else None)
             cost = {"execution": r4(R.cost_per_1000(price, exec_s, density)),
-                    "observed": r4(R.cost_per_1000(price, obs_s, density))}
+                    "observed": r4(R.cost_per_1000(price, obs_s, density)),
+                    "observed_charged": r4(R.observed_charged_per_1000(price, obs_s, wait_s, wait_busy, ncpu, density)),
+                    "steady_state": None,
+                    "host_cpu_per_task_s": r4(per_task),
+                    "host_busy_fraction": busy_fraction}
             theirs = rt.get("cost_usd_per_task") or {}
             if theirs.get("execution_only"):
                 expect = theirs["execution_only"] * 1000
@@ -261,7 +289,6 @@ def build_run(src: S.RunSource, *, campaign: str, run_id: str, spec_name: str, r
 
         # microVM lanes, the run's task and step columns, the trial's series
         lanes, vm_series, guest_series = [], [], []
-        vm_rows = src.microvm_rows.get(ts_.id, {})
         task_rows = src.task_rows.get(ts_.id, {})
         by_slot = {int(m["slot"]): m for m in tj.get("microvms") or []}
         vm_ids = []
@@ -382,7 +409,6 @@ def build_run(src: S.RunSource, *, campaign: str, run_id: str, spec_name: str, r
         lo, hi_t = cs + window[0] / 1000, cs + window[1] / 1000
         hs = {"t_ms": [], "cpu_util_pct": [], "mem_used_gib": [], "cpu_pressure_pct": [], "mem_pressure_pct": [],
               "io_pressure_pct": [], "steal_pct": [], "cores": {k: [] for k in R.CONSUMERS}}
-        util = src.host.get(("host", "cpu_util"), [])
         mem_total = dict(src.host.get(("host", "mem_total"), []))
         mem_av = dict(src.host.get(("host", "mem_available"), []))
         steal = dict(src.host.get(("host", "steal"), []))
@@ -435,8 +461,18 @@ def build_run(src: S.RunSource, *, campaign: str, run_id: str, spec_name: str, r
     if clamped:
         log(f"  {run_id}: unattributed host CPU clamped at 0 in {clamped} samples")
 
-    # by density (rule 3), checked against the harness's per-density results
+    # Rule 5, steady state: a density that kept the host full (its trials averaged at least 85% busy over the task
+    # window) gives each of its trials with a known host CPU per task a steady-state cost.
     densities = spec["densities"]
+    for dens in densities:
+        at = [t for t in summaries if t["counts"] and t["cost_per_1000_tasks"] and t["density"] == dens]
+        if R.host_full([t["cost_per_1000_tasks"]["host_busy_fraction"] for t in at]):
+            for t in at:
+                per_task = t["cost_per_1000_tasks"]["host_cpu_per_task_s"]
+                if per_task is not None:
+                    t["cost_per_1000_tasks"]["steady_state"] = r4(R.steady_state_per_1000(price, ncpu, per_task))
+
+    # by density (rule 3), checked against the harness's per-density results
     briefs = R.density_briefs(densities, summaries)
     theirs = {int(x["density"]): x.get("passed") for x in src.report.get("densities") or []}
     by_density = []
@@ -459,7 +495,11 @@ def build_run(src: S.RunSource, *, campaign: str, run_id: str, spec_name: str, r
         row["mem_allocated_gib"] = r4(dens * (spec["microvm"]["memory_mib"] + overhead_mib) / 1024)
         row["verdicts"] = R.union_verdicts([t["attribution"]["verdicts"] for t in at if t["attribution"]]) if at else []
         if b["result"] == "passed" and all(t["cost_per_1000_tasks"] for t in at):
-            row["cost_per_1000_tasks"] = {k: rng([t["cost_per_1000_tasks"][k] for t in at]) for k in ("execution", "observed")}
+            costs = [t["cost_per_1000_tasks"] for t in at]
+            row["cost_per_1000_tasks"] = {k: rng([c[k] for c in costs]) for k in ("execution", "observed", "observed_charged")}
+            # The steady-state cost at a density needs every trial there to have one (the host full in each).
+            row["cost_per_1000_tasks"]["steady_state"] = (rng([c["steady_state"] for c in costs])
+                                                          if all(c["steady_state"] is not None for c in costs) else None)
         if dens in theirs and theirs[dens] is not None and bool(theirs[dens]) != (b["result"] == "passed"):
             raise BuildError(f"{run_id} density {dens}: recomputed {b['result']}, the harness says passed={theirs[dens]}")
         by_density.append(row)

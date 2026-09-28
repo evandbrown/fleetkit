@@ -47,6 +47,8 @@ Two kinds of value are never inputs:
 - **Values derivable from other inputs.** The host kind follows from the instance type.
 - **Measured facts.** The worker host's CPU model and the guest kernel's digest are examples. A run records them beside its spec, as what it observed.
 
+**The recommended guest (D91).** The design's default guest, and the control for the campaigns that follow it, is the tuned guest: microVMs of 1 vCPU and 1 GiB, a quiet console with no keyboard probe (`microvm.console`: `quiet-i8042`), transparent huge pages (`microvm.memory_pages`: `thp`) and lean Chromium (`workload.chromium_extra_flags`: `--disable-features=PreloadTopChromeWebUI,WebUIOmniboxPopup,WebUIOmniboxAimPopup,WebUIOmniboxFullPopup`, which stops the browser preloading its own address-bar pages). A new campaign in the experiment builder starts from it on c8i.xlarge, the host where it was cheapest per task. A production host must have transparent huge pages at `madvise` or `always`; at `never` the guest's huge pages are not granted, and the harness refuses to run. The guest fields stay optional with their original meaning when left out (a verbose console, 4 KiB pages, no extra flags), so every spec recorded before they existed still reads as it ran.
+
 ### Measures
 
 | Measure | Meaning |
@@ -100,6 +102,8 @@ A **trial passes** only if it meets every criterion in its spec. The criteria ar
 - every step met its latency targets over the trial's N tasks
 - the whole task met its latency target
 - nothing was left on the host
+
+The standard targets are the spec schema's defaults: each step's median at most 2 s, each step's 95th percentile at most 3 s, the whole task's 95th percentile at most 10 s, and every microVM ready within 180 s. They are the SLOs the design recommends. A campaign may set its own targets in its spec, and Results names the standard beside any that differs. Campaigns run before 28 September 2026 were judged at 1 s / 2 s / 5 s, the standard at the time, and Results says so beside each.
 
 A **density passes** only if every trial at it passed.
 

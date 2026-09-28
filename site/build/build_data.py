@@ -188,7 +188,8 @@ def outcome(spec_name: str, entries: list[dict]) -> dict:
                      "tested_successfully": r["tested_successfully"], "first_failed": r["first_failed"],
                      "stopped_early": e["stopped_early"], "per_host_vcpu": r["per_host_vcpu"],
                      "midpoint_per_host_vcpu": r["midpoint_per_host_vcpu"],
-                     "cost_per_1000_tasks": {"execution": cost["execution"], "observed": cost["observed"]} if cost else None})
+                     "cost_per_1000_tasks": ({k: cost[k] for k in ("execution", "observed", "observed_charged", "steady_state")}
+                                             if cost else None)})
     mid = R.mean_midpoint([x["midpoint_per_host_vcpu"] for x in reps])
     return {"spec": spec_name, "replicas": reps, "midpoint_per_host_vcpu": R.r4(mid) if mid is not None else None}
 

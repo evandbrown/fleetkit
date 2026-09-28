@@ -7,7 +7,7 @@
   "ended": "2026-09-28T09:24Z",
   "status": "complete",
   "definition_path": "experiments/campaigns/browser-lean-1.json",
-  "answer": "Yes: without the preload c8i.xlarge held 3–4 microVMs instead of 2, at $0.035–0.037 instead of $0.050–0.055 per 1,000 tasks. On m8i.4xlarge it held 13 instead of 9, at $0.047 instead of $0.062–0.069; host CPU ran out first everywhere.",
+  "answer": "Yes: without the preload c8i.xlarge held 3–4 microVMs instead of 2, at $0.092–0.106 instead of $0.105–0.109 per 1,000 tasks. On m8i.4xlarge it held 13 instead of 9, at $0.130–0.134 instead of $0.144–0.149; host CPU ran out first everywhere.",
   "definition": {
     "name": "browser-lean-1",
     "question": "Does turning off headless Chromium's hidden omnibox preload lower CPU per task?",
@@ -468,6 +468,14 @@
           "observed": [
             0.1382,
             0.1395
+          ],
+          "observed_charged": [
+            0.1382,
+            0.1395
+          ],
+          "steady_state": [
+            0.105,
+            0.1088
           ]
         },
         "limit": {
@@ -579,6 +587,14 @@
           "observed": [
             0.1384,
             0.1424
+          ],
+          "observed_charged": [
+            0.1384,
+            0.1424
+          ],
+          "steady_state": [
+            0.1078,
+            0.109
           ]
         },
         "limit": {
@@ -691,6 +707,14 @@
           "observed": [
             0.1071,
             0.1103
+          ],
+          "observed_charged": [
+            0.1071,
+            0.1103
+          ],
+          "steady_state": [
+            0.0924,
+            0.093
           ]
         },
         "limit": {
@@ -806,6 +830,14 @@
           "observed": [
             0.1055,
             0.1081
+          ],
+          "observed_charged": [
+            0.1055,
+            0.1081
+          ],
+          "steady_state": [
+            0.104,
+            0.1057
           ]
         },
         "limit": {
@@ -926,6 +958,14 @@
           "observed": [
             0.1785,
             0.1823
+          ],
+          "observed_charged": [
+            0.1785,
+            0.1823
+          ],
+          "steady_state": [
+            0.144,
+            0.1494
           ]
         },
         "limit": {
@@ -1079,6 +1119,14 @@
           "observed": [
             0.1819,
             0.1862
+          ],
+          "observed_charged": [
+            0.1819,
+            0.1862
+          ],
+          "steady_state": [
+            0.1455,
+            0.147
           ]
         },
         "limit": {
@@ -1230,6 +1278,14 @@
           "observed": [
             0.1504,
             0.1547
+          ],
+          "observed_charged": [
+            0.1504,
+            0.1547
+          ],
+          "steady_state": [
+            0.1331,
+            0.1343
           ]
         },
         "limit": {
@@ -1390,6 +1446,14 @@
           "observed": [
             0.1483,
             0.1496
+          ],
+          "observed_charged": [
+            0.1483,
+            0.1496
+          ],
+          "steady_state": [
+            0.1302,
+            0.1324
           ]
         },
         "limit": {
@@ -1537,6 +1601,14 @@
             "observed": [
               0.1382,
               0.1395
+            ],
+            "observed_charged": [
+              0.1382,
+              0.1395
+            ],
+            "steady_state": [
+              0.105,
+              0.1088
             ]
           }
         },
@@ -1556,6 +1628,14 @@
             "observed": [
               0.1384,
               0.1424
+            ],
+            "observed_charged": [
+              0.1384,
+              0.1424
+            ],
+            "steady_state": [
+              0.1078,
+              0.109
             ]
           }
         }
@@ -1581,6 +1661,14 @@
             "observed": [
               0.1071,
               0.1103
+            ],
+            "observed_charged": [
+              0.1071,
+              0.1103
+            ],
+            "steady_state": [
+              0.0924,
+              0.093
             ]
           }
         },
@@ -1600,6 +1688,14 @@
             "observed": [
               0.1055,
               0.1081
+            ],
+            "observed_charged": [
+              0.1055,
+              0.1081
+            ],
+            "steady_state": [
+              0.104,
+              0.1057
             ]
           }
         }
@@ -1625,6 +1721,14 @@
             "observed": [
               0.1785,
               0.1823
+            ],
+            "observed_charged": [
+              0.1785,
+              0.1823
+            ],
+            "steady_state": [
+              0.144,
+              0.1494
             ]
           }
         },
@@ -1644,6 +1748,14 @@
             "observed": [
               0.1819,
               0.1862
+            ],
+            "observed_charged": [
+              0.1819,
+              0.1862
+            ],
+            "steady_state": [
+              0.1455,
+              0.147
             ]
           }
         }
@@ -1669,6 +1781,14 @@
             "observed": [
               0.1504,
               0.1547
+            ],
+            "observed_charged": [
+              0.1504,
+              0.1547
+            ],
+            "steady_state": [
+              0.1331,
+              0.1343
             ]
           }
         },
@@ -1688,6 +1808,14 @@
             "observed": [
               0.1483,
               0.1496
+            ],
+            "observed_charged": [
+              0.1483,
+              0.1496
+            ],
+            "steady_state": [
+              0.1302,
+              0.1324
             ]
           }
         }

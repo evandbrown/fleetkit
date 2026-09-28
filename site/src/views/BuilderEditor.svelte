@@ -1,9 +1,9 @@
 <script lang="ts">
   // The experiment builder, loaded on its own when the page opens (Builder.svelte): define a campaign (a question, a base spec, named specs written as their changes from
-  // the base, and replicas), see what it runs and costs, and copy the definition into Claude Code. It always starts
-  // from something real: a campaign in experiments/campaigns/, a published campaign or run a link names
-  // (?from=campaign:<c> or run:<c>/<run>), or pasted JSON. The draft is kept in this browser. The checks come from
-  // lib/campaign.ts, which matches expand.py.
+  // the base, and replicas), see what it runs and costs, and copy the definition into Claude Code. It starts from a
+  // new campaign on the recommended guest (D91) or from something real: a campaign in experiments/campaigns/, a
+  // published campaign or run a link names (?from=campaign:<c> or run:<c>/<run>), or pasted JSON. The draft is kept
+  // in this browser. The checks come from lib/campaign.ts, which matches expand.py.
   import { tick, untrack } from 'svelte';
   import { nav } from '../lib/nav.svelte';
   import {
@@ -29,7 +29,9 @@
     type Obj,
   } from '../lib/campaign';
   import {
+    ALL_STARTS,
     DEFAULT_START,
+    NEW_START,
     STARTS,
     at,
     bundled,
@@ -81,6 +83,23 @@
   const resolved = $derived(names.map((n): [string, Obj] => [n, isObj(specs[n]) ? merge(base, specs[n] as Obj) : base]));
   const edited = $derived(!!source && !same(snap, source));
   const why = $derived(isObj(snap.why) ? snap.why : {});
+
+  // A new campaign opens as an empty form, not a broken one: the name's and the question's errors wait until the
+  // reader has edited that field, or tries to copy the definition. A loaded campaign shows every problem at once.
+  const HELD = ['name', 'question'];
+  let touched = $state(new Set<string>());
+  const held = $derived(label === NEW_START.key ? HELD.filter((p) => !touched.has(p)) : []);
+  const heldErrors = $derived(msgs.filter((m) => m.error && held.includes(m.path)).length);
+  const shownErrors = $derived(result.errors.length - heldErrors);
+  /** A field's messages, without the errors held back. */
+  const msgsFor = (path: string) => (held.includes(path) ? at(msgs, path).filter((m) => !m.error) : at(msgs, path));
+  function touch(path: string) {
+    if (!touched.has(path)) touched = new Set([...touched, path]);
+  }
+  function reveal() {
+    touched = new Set([...touched, ...HELD]);
+    tick().then(showProblem);
+  }
 
   $effect(() => saveDraft({ def: snap, label, source }));
 
@@ -179,6 +198,7 @@
     comparing = null;
     showAll = false;
     showTimer = false;
+    touched = new Set();
     say(what, before);
   }
 
@@ -332,8 +352,10 @@
       pasteError = `Couldn't read it: ${(e as Error).message}`;
     }
   }
+  /** What the menu calls a start, for the toasts: "New campaign", a campaign's title, or the label as it is. */
+  const titleOf = (key: string) => ALL_STARTS.find((x) => x.key === key)?.title ?? key;
   function pick(key: string) {
-    const s = STARTS.find((x) => x.key === key);
+    const s = ALL_STARTS.find((x) => x.key === key);
     if (!s) return;
     load(fromStart(s), `Loaded ${s.title}.`);
     handled = `campaign:${s.key}`;
@@ -354,8 +376,9 @@
 <div class="builder">
   <div class="startbar">
     <span class="startname"><label for="start">Start from</label><Help id="start-about" label="Start from" text={START_HELP} /></span>
-    <select id="start" aria-describedby="start-about" value={STARTS.some((s) => s.key === label) ? label : ''} onchange={(e) => pick(e.currentTarget.value)}>
-      {#if !STARTS.some((s) => s.key === label)}<option value="">{label}</option>{/if}
+    <select id="start" aria-describedby="start-about" value={ALL_STARTS.some((s) => s.key === label) ? label : ''} onchange={(e) => pick(e.currentTarget.value)}>
+      {#if !ALL_STARTS.some((s) => s.key === label)}<option value="">{label}</option>{/if}
+      <option value={NEW_START.key}>{NEW_START.title}</option>
       <optgroup label="Campaigns">
         {#each STARTS.filter((s) => !s.example) as s (s.key)}<option value={s.key}>{s.title}</option>{/each}
       </optgroup>
@@ -368,7 +391,7 @@
       <span class="muted small" role="status">Opening {loading.replace(/^\w+:/, '')}…</span>
     {:else if edited}
       <span class="edited small">Edited</span>
-      <button type="button" class="link small" onclick={() => source && load({ def: structuredClone(source), label, source }, `Reset ${label}.`)}>
+      <button type="button" class="link small" onclick={() => source && load({ def: structuredClone(source), label, source }, `Reset ${titleOf(label)}.`)}>
         Reset
       </button>
     {/if}
@@ -404,15 +427,30 @@
             id="c-name"
             field={CAMPAIGN_FIELDS.name}
             value={snap.name}
-            onchange={(v) => (def.name = v)}
-            msgs={at(msgs, 'name')}
+            onchange={(v) => {
+              def.name = v;
+              touch('name');
+            }}
+            msgs={msgsFor('name')}
+            placeholder="lowercase letters, digits, hyphens"
           />
           {#if clash}
             <p class="hint">
               Name taken by a campaign <button type="button" class="link" onclick={() => (def.name = clash)}>Use {clash}</button>
             </p>
           {/if}
-          <Field id="c-question" field={CAMPAIGN_FIELDS.question} value={snap.question} onchange={(v) => (def.question = v)} msgs={at(msgs, 'question')} multiline />
+          <Field
+            id="c-question"
+            field={CAMPAIGN_FIELDS.question}
+            value={snap.question}
+            onchange={(v) => {
+              def.question = v;
+              touch('question');
+            }}
+            msgs={msgsFor('question')}
+            placeholder="One question the campaign answers"
+            multiline
+          />
         </div>
       </section>
 
@@ -525,14 +563,14 @@
     </div>
 
     <aside class="side" bind:this={side}>
-      <Review {est} specs={resolved} {text} errors={result.errors.length} {others} onshow={showProblem} />
+      <Review {est} specs={resolved} {text} errors={shownErrors} held={heldErrors} {others} onshow={showProblem} onreveal={reveal} />
     </aside>
   </div>
 
   <div class="phonebar" class:away={sideInView}>
     <span>
       {est ? `${est.runs.length} runs · ${usd(est.expected_usd)} · worst ${usd(est.worst_case_usd)}` : '–'}
-      {#if result.errors.length}<span class="err"> · {result.errors.length} to fix</span>{/if}
+      {#if shownErrors}<span class="err"> · {shownErrors} to fix</span>{/if}
     </span>
     <button type="button" class="primary" onclick={() => side?.scrollIntoView({ behavior: 'smooth' })}>Review</button>
   </div>

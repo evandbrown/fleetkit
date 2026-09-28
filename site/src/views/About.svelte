@@ -95,7 +95,7 @@
     { name: 'Latency', text: 'How long each step and the whole task took: the median (p50) and the slowest 5% (p95).' },
     { name: 'Time to ready', text: 'From starting a microVM to its browser answering, for every microVM.' },
     { name: 'Host pressure', text: 'CPU, memory and IO on the host, sampled 5 times a second, and which ran out first.' },
-    { name: 'Cost', text: 'Dollars per 1,000 tasks at on-demand prices, from the host\'s hourly price and how long the tasks took.' },
+    { name: 'Cost', text: 'Dollars per 1,000 tasks at on-demand prices: what a full fleet pays per task, boot included; the cost of one burst beside it.' },
     { name: 'Max density', text: 'The most microVMs that ran at once with every SLO met. Also per host vCPU, so hosts of different sizes compare.' },
     { name: 'Midpoint', text: 'The middle of the gap between the last density that passed and the first that failed, per host vCPU. Specs are ranked by it.' },
   ];
@@ -162,7 +162,8 @@
 
   <section aria-labelledby="task">
     <h2 id="task">The task</h2>
-    <p class="sub">Five steps on the test shopping site, the same in every browser.</p>
+    <!-- The public copy of the fixture (evan.mx/fleetkit-fixture): the one link off the site besides GitHub. -->
+    <p class="sub">Five steps on <a href="https://evan.mx/fleetkit-fixture/" target="_blank" rel="noopener">the test shopping site</a>, the same in every browser.</p>
     <ol class="film">
       {#each frames as fr, i (fr.step)}
         <li style:--step="var(--step-{fr.step.replaceAll('_', '-')})">
@@ -193,7 +194,8 @@
 
   <section aria-labelledby="slos">
     <h2 id="slos">SLOs</h2>
-    <p class="sub">The standard five. Every trial must meet all of them.</p>
+    <!-- The design's SLOs, read from the schema's defaults. Campaigns run before they changed carry a tag on Results. -->
+    <p class="sub">The design's targets. Every campaign published so far was judged by targets of its own, tighter for most (step p50 ≤ 1 s, step p95 ≤ 2 s, task p95 ≤ 5 s); Results says so beside each.</p>
     <SloBadges criteria={STANDARD_CRITERIA} />
   </section>
 

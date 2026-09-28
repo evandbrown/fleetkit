@@ -7,7 +7,7 @@
   "ended": "2026-09-28T13:47Z",
   "status": "complete",
   "definition_path": "experiments/campaigns/metal-stack-1.json",
-  "answer": "No: on m8i.metal-48xl the tuned guest held at least 200 microVMs, 1.04 microVMs per host vCPU, at $0.052–0.054 per 1,000 tasks against $0.019–0.027 on c8i.xlarge. With 4 KiB pages it held 192 at $0.063–0.064, host CPU running out at 200; the harness caps a host at 200.",
+  "answer": "No: on m8i.metal-48xl the tuned guest held at least 200 microVMs; one burst cost $0.163–0.165 per 1,000 tasks against $0.039–0.049 on c8i.xlarge. With 4 KiB pages it held 192 at $0.178–0.187 per 1,000 tasks, host CPU running out at 200; the harness caps a host at 200.",
   "definition": {
     "name": "metal-stack-1",
     "question": "Is the full stack cheaper per task on a metal host than on c8i.xlarge?",
@@ -236,7 +236,12 @@
           "observed": [
             0.1629,
             0.1654
-          ]
+          ],
+          "observed_charged": [
+            0.1629,
+            0.1654
+          ],
+          "steady_state": null
         },
         "limit": null
       },
@@ -344,7 +349,12 @@
           "observed": [
             0.178,
             0.1871
-          ]
+          ],
+          "observed_charged": [
+            0.178,
+            0.1871
+          ],
+          "steady_state": null
         },
         "limit": {
           "density": 200,
@@ -452,7 +462,12 @@
             "observed": [
               0.1629,
               0.1654
-            ]
+            ],
+            "observed_charged": [
+              0.1629,
+              0.1654
+            ],
+            "steady_state": null
           }
         }
       ],
@@ -477,7 +492,12 @@
             "observed": [
               0.178,
               0.1871
-            ]
+            ],
+            "observed_charged": [
+              0.178,
+              0.1871
+            ],
+            "steady_state": null
           }
         }
       ],

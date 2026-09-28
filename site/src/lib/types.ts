@@ -107,9 +107,26 @@ export interface ReplicaResult {
   cost_per_1000_tasks: CostRanges | null;
 }
 
+/** USD per 1,000 tasks, each the range over the trials at a density (DATA.md, rule 5). */
 export interface CostRanges {
   execution: Range;
   observed: Range;
+  /** The burst, minus a warm start's wait plus the CPU used in it: what one burst is charged. */
+  observed_charged: Range;
+  /** What a full fleet pays per task (D81); null where the host wasn't full or the samples fall short. */
+  steady_state: Range | null;
+}
+
+/** One counting trial's costs (DATA.md, rule 5) and the steady-state model's inputs. */
+export interface TrialCost {
+  execution: number;
+  observed: number;
+  observed_charged: number;
+  steady_state: number | null;
+  /** vCPU-seconds of host CPU per task over the microVMs' lives; null when the samples don't cover them. */
+  host_cpu_per_task_s: number | null;
+  /** Host CPU busy over the task window, 0 to 1; null without host attribution. */
+  host_busy_fraction: number | null;
 }
 
 // ---- campaign.json ------------------------------------------------------------------------------
@@ -292,7 +309,7 @@ export interface TrialSummary {
     steal_pct: number | null;
   } | null;
   microvm_mem_peak_mib: Range | null;
-  cost_per_1000_tasks: { execution: number; observed: number } | null;
+  cost_per_1000_tasks: TrialCost | null;
   excluded_because?: string;
 }
 

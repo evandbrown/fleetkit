@@ -7,7 +7,7 @@
   "ended": "2026-09-28T10:42Z",
   "status": "complete",
   "definition_path": "experiments/campaigns/stack-warm-1.json",
-  "answer": "Yes: warm, the tuned guest held 6 microVMs on c8i.xlarge at $0.020–0.027 per 1,000 tasks, against 4 at $0.034–0.036 for 2 vCPU / 2 GiB. Plain 1 vCPU / 1 GiB microVMs held 4–5 at $0.029–0.031; host CPU ran out first, and cold the tuned guest also held 6.",
+  "answer": "Yes: warm, the tuned guest held 6 microVMs on c8i.xlarge at $0.039–0.049 per 1,000 tasks, against 4 at $0.103–0.107 for 2 vCPU / 2 GiB. Plain 1 vCPU / 1 GiB microVMs held 4–5 at $0.076–0.081; host CPU ran out first, and cold the tuned guest also held 6.",
   "definition": {
     "name": "stack-warm-1",
     "question": "With a 5 s warm start, does the full stack cost less per task than lean 2-vCPU microVMs?",
@@ -514,6 +514,14 @@
           "observed": [
             0.1667,
             0.169
+          ],
+          "observed_charged": [
+            0.1053,
+            0.1082
+          ],
+          "steady_state": [
+            0.1033,
+            0.1072
           ]
         },
         "limit": {
@@ -631,6 +639,14 @@
           "observed": [
             0.17,
             0.1717
+          ],
+          "observed_charged": [
+            0.1078,
+            0.1102
+          ],
+          "steady_state": [
+            0.1039,
+            0.1075
           ]
         },
         "limit": {
@@ -748,6 +764,14 @@
           "observed": [
             0.1693,
             0.1716
+          ],
+          "observed_charged": [
+            0.1084,
+            0.1096
+          ],
+          "steady_state": [
+            0.1062,
+            0.1065
           ]
         },
         "limit": {
@@ -867,6 +891,14 @@
           "observed": [
             0.1443,
             0.1451
+          ],
+          "observed_charged": [
+            0.0817,
+            0.0824
+          ],
+          "steady_state": [
+            0.0763,
+            0.0773
           ]
         },
         "limit": {
@@ -1011,6 +1043,14 @@
           "observed": [
             0.1335,
             0.1339
+          ],
+          "observed_charged": [
+            0.083,
+            0.0841
+          ],
+          "steady_state": [
+            0.0791,
+            0.0795
           ]
         },
         "limit": {
@@ -1145,6 +1185,14 @@
           "observed": [
             0.1458,
             0.1485
+          ],
+          "observed_charged": [
+            0.0834,
+            0.086
+          ],
+          "steady_state": [
+            0.0791,
+            0.0807
           ]
         },
         "limit": {
@@ -1292,6 +1340,14 @@
           "observed": [
             0.0823,
             0.0901
+          ],
+          "observed_charged": [
+            0.0411,
+            0.0481
+          ],
+          "steady_state": [
+            0.0392,
+            0.0453
           ]
         },
         "limit": {
@@ -1427,6 +1483,14 @@
           "observed": [
             0.0833,
             0.0889
+          ],
+          "observed_charged": [
+            0.0422,
+            0.0467
+          ],
+          "steady_state": [
+            0.0406,
+            0.046
           ]
         },
         "limit": {
@@ -1562,6 +1626,14 @@
           "observed": [
             0.0875,
             0.093
+          ],
+          "observed_charged": [
+            0.0455,
+            0.0508
+          ],
+          "steady_state": [
+            0.0433,
+            0.0487
           ]
         },
         "limit": {
@@ -1698,6 +1770,14 @@
           "observed": [
             0.2328,
             0.238
+          ],
+          "observed_charged": [
+            0.1451,
+            0.1504
+          ],
+          "steady_state": [
+            0.1285,
+            0.1324
           ]
         },
         "limit": {
@@ -1870,6 +1950,14 @@
           "observed": [
             0.229,
             0.2305
+          ],
+          "observed_charged": [
+            0.1471,
+            0.1505
+          ],
+          "steady_state": [
+            0.1355,
+            0.1388
           ]
         },
         "limit": {
@@ -2041,6 +2129,14 @@
           "observed": [
             0.2333,
             0.2408
+          ],
+          "observed_charged": [
+            0.1456,
+            0.1528
+          ],
+          "steady_state": [
+            0.1308,
+            0.1342
           ]
         },
         "limit": {
@@ -2191,6 +2287,14 @@
             "observed": [
               0.1667,
               0.169
+            ],
+            "observed_charged": [
+              0.1053,
+              0.1082
+            ],
+            "steady_state": [
+              0.1033,
+              0.1072
             ]
           }
         },
@@ -2210,6 +2314,14 @@
             "observed": [
               0.17,
               0.1717
+            ],
+            "observed_charged": [
+              0.1078,
+              0.1102
+            ],
+            "steady_state": [
+              0.1039,
+              0.1075
             ]
           }
         },
@@ -2229,6 +2341,14 @@
             "observed": [
               0.1693,
               0.1716
+            ],
+            "observed_charged": [
+              0.1084,
+              0.1096
+            ],
+            "steady_state": [
+              0.1062,
+              0.1065
             ]
           }
         }
@@ -2254,6 +2374,14 @@
             "observed": [
               0.1443,
               0.1451
+            ],
+            "observed_charged": [
+              0.0817,
+              0.0824
+            ],
+            "steady_state": [
+              0.0763,
+              0.0773
             ]
           }
         },
@@ -2273,6 +2401,14 @@
             "observed": [
               0.1335,
               0.1339
+            ],
+            "observed_charged": [
+              0.083,
+              0.0841
+            ],
+            "steady_state": [
+              0.0791,
+              0.0795
             ]
           }
         },
@@ -2292,6 +2428,14 @@
             "observed": [
               0.1458,
               0.1485
+            ],
+            "observed_charged": [
+              0.0834,
+              0.086
+            ],
+            "steady_state": [
+              0.0791,
+              0.0807
             ]
           }
         }
@@ -2317,6 +2461,14 @@
             "observed": [
               0.0823,
               0.0901
+            ],
+            "observed_charged": [
+              0.0411,
+              0.0481
+            ],
+            "steady_state": [
+              0.0392,
+              0.0453
             ]
           }
         },
@@ -2336,6 +2488,14 @@
             "observed": [
               0.0833,
               0.0889
+            ],
+            "observed_charged": [
+              0.0422,
+              0.0467
+            ],
+            "steady_state": [
+              0.0406,
+              0.046
             ]
           }
         },
@@ -2355,6 +2515,14 @@
             "observed": [
               0.0875,
               0.093
+            ],
+            "observed_charged": [
+              0.0455,
+              0.0508
+            ],
+            "steady_state": [
+              0.0433,
+              0.0487
             ]
           }
         }
@@ -2380,6 +2548,14 @@
             "observed": [
               0.2328,
               0.238
+            ],
+            "observed_charged": [
+              0.1451,
+              0.1504
+            ],
+            "steady_state": [
+              0.1285,
+              0.1324
             ]
           }
         },
@@ -2399,6 +2575,14 @@
             "observed": [
               0.229,
               0.2305
+            ],
+            "observed_charged": [
+              0.1471,
+              0.1505
+            ],
+            "steady_state": [
+              0.1355,
+              0.1388
             ]
           }
         },
@@ -2418,6 +2602,14 @@
             "observed": [
               0.2333,
               0.2408
+            ],
+            "observed_charged": [
+              0.1456,
+              0.1528
+            ],
+            "steady_state": [
+              0.1308,
+              0.1342
             ]
           }
         }

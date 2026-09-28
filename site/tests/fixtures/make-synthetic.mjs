@@ -308,10 +308,20 @@ function makeTrial({ role, density, pass, failMode }, host, sp) {
     missing: [],
   };
   const counts = role === 'ladder' || role === 'boundary';
+  // Rule 5. The synthetic host is busyCores busy over the microVMs' lives (first process start to last destroy),
+  // which gives the steady-state model its host CPU per task; the specs have no warm start, so the charged burst is
+  // the observed cost. The steady-state cost itself is filled in per density below, once every trial there is
+  // known: only a density that kept the host full (its trials averaging at least 85% busy) has one.
+  const observed = r4((1000 * host.price * (marks.clean_ms / 1000)) / 3600 / density);
+  const lifeS = (Math.max(...microvms.map((m) => m.destroy.end_ms)) - Math.min(...microvms.map((m) => m.boot.process_started_ms))) / 1000;
   const cost = counts
     ? {
         execution: r4((1000 * host.price * ((marks.last_return_ms - marks.release_ms) / 1000)) / 3600 / density),
-        observed: r4((1000 * host.price * (marks.clean_ms / 1000)) / 3600 / density),
+        observed,
+        observed_charged: observed,
+        steady_state: null,
+        host_cpu_per_task_s: r4((busyCores * lifeS) / density),
+        host_busy_fraction: r4(util / 100),
       }
     : null;
 
@@ -559,10 +569,22 @@ function makeRun(camp, specName, replica, sp) {
       mem_allocated_gib: r4((density * (sp.microvm.memory_mib + OVERHEAD_MIB)) / 1024),
       verdicts: at.length ? unionVerdicts(at.map((t) => t.attribution.verdicts)) : [],
     };
+    // Rule 5, steady state: a density that kept the host full (its trials averaging at least 85% busy over the task
+    // window) gives each of its trials a steady-state cost from its host CPU per task.
+    const busy = at.map((t) => t.cost_per_1000_tasks.host_busy_fraction);
+    if (busy.length && busy.reduce((a, b) => a + b, 0) / busy.length >= 0.85) {
+      for (const t of at) {
+        t.cost_per_1000_tasks.steady_state = r4((((1000 * hostSpec.price) / 3600 / hostSpec.vcpus) * t.cost_per_1000_tasks.host_cpu_per_task_s) / 0.9);
+      }
+    }
     if (result === 'passed') {
+      // Each cost's range over the trials at the density; the steady-state range only when every trial has one.
+      const costs = at.map((t) => t.cost_per_1000_tasks);
       d.cost_per_1000_tasks = {
-        execution: r4range(at.map((t) => t.cost_per_1000_tasks.execution)),
-        observed: r4range(at.map((t) => t.cost_per_1000_tasks.observed)),
+        execution: r4range(costs.map((c) => c.execution)),
+        observed: r4range(costs.map((c) => c.observed)),
+        observed_charged: r4range(costs.map((c) => c.observed_charged)),
+        steady_state: costs.every((c) => c.steady_state !== null) ? r4range(costs.map((c) => c.steady_state)) : null,
       };
     }
     return d;
@@ -744,6 +766,11 @@ const real = join(PUBLISHED, 'campaigns', 'cap-baseline-1');
 if (existsSync(real)) {
   rmSync(join(DATA, 'campaigns', 'cap-baseline-1'), { recursive: true, force: true });
   cpSync(real, join(DATA, 'campaigns', 'cap-baseline-1'), { recursive: true });
+  // The fixture copy carries no written answer (the index entry below carries none either), so the site's generated
+  // fallback sentence stays tested on a real campaign.
+  const doc = join(DATA, 'campaigns', 'cap-baseline-1', 'campaign.json');
+  const { answer: _answer, ...rest } = JSON.parse(readFileSync(doc, 'utf8'));
+  writeFileSync(doc, JSON.stringify(rest, null, 2) + '\n');
   console.log('copied cap-baseline-1 from public/data');
 }
 

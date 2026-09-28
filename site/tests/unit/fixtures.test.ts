@@ -84,6 +84,29 @@ describe('the contract refuses what breaks a rule', () => {
     bad.outcomes[0].replicas[0].tested_successfully = 99;
     expect(checkCampaign(bad, entry).join('\n')).toMatch(/outcome for m8i-4xlarge/);
   });
+  it('a steady-state cost where the host was not full, or none where it was (rule 5, D81)', () => {
+    const run = read<RunDoc>('campaigns', 'nested-sizes-synthetic', 'runs', 'm8i-4xlarge-r1.json');
+    const costs = run.trials.filter((t) => t.cost_per_1000_tasks);
+    // The fixture has both: densities that kept the host full, with a steady-state cost, and ones that didn't.
+    const full = costs.find((t) => t.cost_per_1000_tasks!.steady_state !== null)!;
+    const idle = costs.find((t) => t.cost_per_1000_tasks!.steady_state === null)!;
+    expect(full && idle).toBeTruthy();
+    const bad = structuredClone(run);
+    bad.trials.find((t) => t.id === full.id)!.cost_per_1000_tasks!.steady_state = null;
+    expect(checkRun(bad, c).join('\n')).toMatch(new RegExp(`trial ${full.id}: a steady-state cost exactly when`));
+    const bad2 = structuredClone(run);
+    bad2.trials.find((t) => t.id === idle.id)!.cost_per_1000_tasks!.steady_state = 0.1;
+    expect(checkRun(bad2, c).join('\n')).toMatch(new RegExp(`trial ${idle.id}: a steady-state cost exactly when`));
+    // One that follows the wrong formula, and a charged burst above the observed cost.
+    const bad3 = structuredClone(run);
+    const t3 = bad3.trials.find((t) => t.id === full.id)!.cost_per_1000_tasks!;
+    t3.steady_state = t3.steady_state! * 1.1;
+    expect(checkRun(bad3, c).join('\n')).toMatch(/steady-state cost doesn't follow rule 5/);
+    const bad4 = structuredClone(run);
+    const t4 = bad4.trials.find((t) => t.id === full.id)!.cost_per_1000_tasks!;
+    t4.observed_charged = t4.observed * 1.5;
+    expect(checkRun(bad4, c).join('\n')).toMatch(/charged burst/);
+  });
 });
 
 describe('a named spec that changes a list-valued field', () => {

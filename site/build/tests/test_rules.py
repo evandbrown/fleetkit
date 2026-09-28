@@ -93,3 +93,38 @@ def test_rule_10_full_size_screenshots_at_the_last_pass_the_first_failure_and_th
     assert R.full_size_trials([warmup, *walked_down, illustration], 3, 4) == {"d3-t1", "d4-t3", "illustration"}
     assert R.full_size_trials([tr(1, 1, True), tr(2, 1, True)], 2, None) == {"d2-t1"}
     assert R.full_size_trials([warmup, tr(1, 1, False)], None, 1) == {"d1-t1"}
+
+
+def test_rule_5_host_cpu_between_two_times_is_each_samples_share_of_the_interval_it_stands_for():
+    """Busy host-seconds over [start, end]: each sample inside the span counts its busy fraction for the time since
+    the sample before it (capped at 3 s; the first sample of a series stands for one interval)."""
+    samples = [(10.0, 50), (10.2, 100), (10.4, 100), (10.6, 0), (20.0, 100)]
+    assert round(R.host_busy_s(samples, 10.1, 10.5), 6) == 0.4            # two full samples at 100%
+    assert round(R.host_busy_s(samples, 10.0, 10.6), 6) == 0.5            # the first stands for one interval, at 50%
+    assert round(R.host_busy_s(samples, 10.5, 25.0), 6) == 3.0            # the 9.4 s gap is capped at 3 s
+    assert R.host_busy_s(samples, 30.0, 40.0) == 0.0
+
+
+def test_rule_5_steady_state_and_charged_burst():
+    # A c8i.xlarge (4 vCPUs) at $0.18743/h, 2.5037 vCPU-s of host CPU per task, at 0.9 utilisation: $0.0362 per 1,000
+    assert round(R.steady_state_per_1000(0.18743, 4, 2.5037), 4) == 0.0362
+    # A density keeps the host full when its trials averaged at least 85% busy; unknown fractions are left out.
+    assert R.host_full([0.96, 0.96, 0.79]) and R.host_full([0.85]) and R.host_full([None, 0.9])
+    assert not R.host_full([0.84, 0.84, 0.86]) and not R.host_full([None]) and not R.host_full([])
+    # The samples must span the microVMs' lives, with no gap over 3 s inside them.
+    samples = [(10.0, 50), (10.2, 100), (10.4, 100), (10.6, 0)]
+    assert R.host_samples_cover(samples, 10.1, 10.5, 0.2)
+    assert R.host_samples_cover(samples, 10.1, 10.9, 0.2)            # the end within two intervals of the last sample
+    assert not R.host_samples_cover(samples, 9.0, 10.5, 0.2)         # starts before the first sample
+    assert not R.host_samples_cover(samples, 10.1, 11.1, 0.2)        # ends too far past the last sample
+    gappy = samples + [(14.0, 100), (14.2, 100)]
+    assert R.host_samples_cover(gappy, 14.1, 14.2, 0.2)
+    assert not R.host_samples_cover(gappy, 10.5, 14.1, 0.2)          # the 3.4 s gap sits inside the span
+    # The first sample inside the span stands for the time since the one before it, so a gap ending at the span's
+    # first sample would claim CPU from before the span: it voids the trial too.
+    assert not R.host_samples_cover(gappy, 14.0, 14.2, 0.2)
+    assert not R.host_samples_cover([], 10.0, 11.0, 0.2)
+    # The charged burst: a 10 s observed window with a 5 s wait in which the 4-vCPU host was busy 4 vCPU-s (one
+    # vCPU's worth of the wait): charged for 10 - 5 + 1 = 6 s. With no wait it is the observed cost.
+    assert R.observed_charged_per_1000(0.36, 10.0, 5.0, 4.0, 4, 2) == R.cost_per_1000(0.36, 6.0, 2)
+    assert R.observed_charged_per_1000(0.36, 10.0, 0.0, 0.0, 4, 2) == R.cost_per_1000(0.36, 10.0, 2)

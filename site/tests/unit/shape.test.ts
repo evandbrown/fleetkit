@@ -163,11 +163,15 @@ describe('what we tested', () => {
 describe('how it performed', () => {
   it('gives each spec four figures: density, per vCPU, cost and what ran out', () => {
     const [big, small] = specResults(refs(syn), docs).map(headline);
-    expect(big).toEqual({ density: '8', densityNote: null, perVcpu: '0.50', cost: '$0.081–0.086', ranOut: 'Host CPU', ranOutNote: 'at 12', ranOutDensity: 12 });
-    // Its replicas ran out at 6 and at 4: the note gives both ends, never only the lowest.
-    expect(small).toMatchObject({ density: '3–4', perVcpu: '0.38–0.50', ranOut: 'Host CPU', ranOutNote: 'at 4–6', ranOutDensity: 4 });
+    // The cost is the steady-state cost (D81), with what one burst is charged beside it.
+    expect(big).toEqual({
+      density: '8', densityNote: null, perVcpu: '0.50', cost: '$0.193–0.211', burst: '$0.206–0.212', ranOut: 'Host CPU', ranOutNote: 'at 12', ranOutDensity: 12,
+    });
+    // Its replicas ran out at 6 and at 4: the note gives both ends, never only the lowest. Neither replica's host
+    // was full at its result, so there is no steady-state cost: the burst stands alone.
+    expect(small).toMatchObject({ density: '3–4', perVcpu: '0.38–0.50', cost: null, burst: '$0.204–0.251', ranOut: 'Host CPU', ranOutNote: 'at 4–6', ranOutDensity: 4 });
     expect(headline(specResults(refs(cap), docs)[0])).toEqual({
-      density: '8', densityNote: null, perVcpu: '0.50', cost: '$0.068–0.083', ranOut: 'Host CPU', ranOutNote: 'at 12', ranOutDensity: 12,
+      density: '8', densityNote: null, perVcpu: '0.50', cost: '$0.141–0.142', burst: '$0.184–0.201', ranOut: 'Host CPU', ranOutNote: 'at 12', ranOutDensity: 12,
     });
   });
 
@@ -184,7 +188,7 @@ describe('how it performed', () => {
     expect(small.midpoint).toBeCloseTo(0.53125, 4);
     expect(small.limits).toEqual([{ verdict: 'host_cpu', runs: 2, density: 4, densityMax: 6 }]);
     expect(big.limits).toEqual([{ verdict: 'host_cpu', runs: 2, density: 12, densityMax: 12 }]);
-    expect(small.cost![0]).toBeLessThanOrEqual(small.cost![1]);
+    expect(small.cost!.burst[0]).toBeLessThanOrEqual(small.cost!.burst[1]);
   });
 
   it('compares specs in one table: density, per vCPU, midpoint and its distance from the highest (D60, D62)', () => {

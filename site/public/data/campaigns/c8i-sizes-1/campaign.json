@@ -7,7 +7,7 @@
   "ended": "2026-09-28T05:37Z",
   "status": "complete",
   "definition_path": "experiments/campaigns/c8i-sizes-1.json",
-  "answer": "Only the smallest did: c8i.xlarge held 2 microVMs at $0.047–0.057 per 1,000 tasks, against $0.055–0.069 on the larger hosts, all 0.50–0.56 microVMs per host vCPU. Host CPU ran out first everywhere: c8i.2xlarge held 4, c8i.4xlarge 8–9, m8i.4xlarge 9.",
+  "answer": "Only the smallest did: c8i.xlarge held 2 microVMs at $0.105–0.111 per 1,000 tasks, against $0.117–0.147 on the larger hosts, all 0.50–0.56 microVMs per host vCPU. Host CPU ran out first everywhere: c8i.2xlarge held 4, c8i.4xlarge 8–9, m8i.4xlarge 9.",
   "definition": {
     "name": "c8i-sizes-1",
     "question": "Does a smaller c8i host cost less per 1,000 tasks?",
@@ -415,6 +415,14 @@
           "observed": [
             0.1786,
             0.1843
+          ],
+          "observed_charged": [
+            0.1786,
+            0.1843
+          ],
+          "steady_state": [
+            0.1456,
+            0.1466
           ]
         },
         "limit": {
@@ -572,6 +580,14 @@
           "observed": [
             0.1795,
             0.1844
+          ],
+          "observed_charged": [
+            0.1795,
+            0.1844
+          ],
+          "steady_state": [
+            0.1451,
+            0.147
           ]
         },
         "limit": {
@@ -725,6 +741,14 @@
           "observed": [
             0.1601,
             0.1605
+          ],
+          "observed_charged": [
+            0.1601,
+            0.1605
+          ],
+          "steady_state": [
+            0.1193,
+            0.1202
           ]
         },
         "limit": {
@@ -868,6 +892,14 @@
           "observed": [
             0.158,
             0.162
+          ],
+          "observed_charged": [
+            0.158,
+            0.162
+          ],
+          "steady_state": [
+            0.1267,
+            0.1284
           ]
         },
         "limit": {
@@ -1018,6 +1050,14 @@
           "observed": [
             0.1534,
             0.1557
+          ],
+          "observed_charged": [
+            0.1534,
+            0.1557
+          ],
+          "steady_state": [
+            0.117,
+            0.1189
           ]
         },
         "limit": {
@@ -1158,6 +1198,14 @@
           "observed": [
             0.151,
             0.1535
+          ],
+          "observed_charged": [
+            0.151,
+            0.1535
+          ],
+          "steady_state": [
+            0.1167,
+            0.1184
           ]
         },
         "limit": {
@@ -1298,6 +1346,14 @@
           "observed": [
             0.1372,
             0.1452
+          ],
+          "observed_charged": [
+            0.1372,
+            0.1452
+          ],
+          "steady_state": [
+            0.1051,
+            0.1094
           ]
         },
         "limit": {
@@ -1409,6 +1465,14 @@
           "observed": [
             0.1408,
             0.1445
+          ],
+          "observed_charged": [
+            0.1408,
+            0.1445
+          ],
+          "steady_state": [
+            0.1074,
+            0.1108
           ]
         },
         "limit": {
@@ -1503,6 +1567,14 @@
             "observed": [
               0.1786,
               0.1843
+            ],
+            "observed_charged": [
+              0.1786,
+              0.1843
+            ],
+            "steady_state": [
+              0.1456,
+              0.1466
             ]
           }
         },
@@ -1522,6 +1594,14 @@
             "observed": [
               0.1795,
               0.1844
+            ],
+            "observed_charged": [
+              0.1795,
+              0.1844
+            ],
+            "steady_state": [
+              0.1451,
+              0.147
             ]
           }
         }
@@ -1547,6 +1627,14 @@
             "observed": [
               0.1601,
               0.1605
+            ],
+            "observed_charged": [
+              0.1601,
+              0.1605
+            ],
+            "steady_state": [
+              0.1193,
+              0.1202
             ]
           }
         },
@@ -1566,6 +1654,14 @@
             "observed": [
               0.158,
               0.162
+            ],
+            "observed_charged": [
+              0.158,
+              0.162
+            ],
+            "steady_state": [
+              0.1267,
+              0.1284
             ]
           }
         }
@@ -1591,6 +1687,14 @@
             "observed": [
               0.1534,
               0.1557
+            ],
+            "observed_charged": [
+              0.1534,
+              0.1557
+            ],
+            "steady_state": [
+              0.117,
+              0.1189
             ]
           }
         },
@@ -1610,6 +1714,14 @@
             "observed": [
               0.151,
               0.1535
+            ],
+            "observed_charged": [
+              0.151,
+              0.1535
+            ],
+            "steady_state": [
+              0.1167,
+              0.1184
             ]
           }
         }
@@ -1635,6 +1747,14 @@
             "observed": [
               0.1372,
               0.1452
+            ],
+            "observed_charged": [
+              0.1372,
+              0.1452
+            ],
+            "steady_state": [
+              0.1051,
+              0.1094
             ]
           }
         },
@@ -1654,6 +1774,14 @@
             "observed": [
               0.1408,
               0.1445
+            ],
+            "observed_charged": [
+              0.1408,
+              0.1445
+            ],
+            "steady_state": [
+              0.1074,
+              0.1108
             ]
           }
         }

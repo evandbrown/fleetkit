@@ -118,7 +118,10 @@ interface ReplicaResult {
   cost_per_1000_tasks: CostRanges | null;  // modelled, at tested_successfully
 }
 
-interface CostRanges { execution: Range; observed: Range }   // USD per 1,000 tasks, over the trials at a density
+// USD per 1,000 tasks, each the range over the trials at a density (rule 5). The site's "$ / 1k tasks" is
+// steady_state, with observed_charged (the burst) beside it; steady_state is null at a density that didn't keep
+// the host full (its trials averaged under 85% busy) or where the samples don't cover a trial's microVMs' lives.
+interface CostRanges { execution: Range; observed: Range; observed_charged: Range; steady_state: Range | null }
 ```
 
 ## campaigns/\<campaign\>/campaign.json
@@ -291,8 +294,21 @@ interface TrialSummary {
   host: { cpu_util_pct: number; cpu_pressure_pct: number | null; busy_cores: number;
           mem_used_gib: number; steal_pct: number | null } | null;
   microvm_mem_peak_mib: Range | null;
-  cost_per_1000_tasks: { execution: number; observed: number } | null;   // counting trials only
+  cost_per_1000_tasks: TrialCost | null;   // counting trials only
   excluded_because?: string;           // a labelled trial: why it isn't judged
+}
+
+interface TrialCost {                  // USD per 1,000 tasks (rule 5), and the steady-state model's inputs
+  execution: number;                   // modelled: release to last return
+  observed: number;                    // modelled: the burst, first create to a clean host
+  observed_charged: number;            // modelled: the burst minus a warm start's wait, plus the CPU used in it
+  steady_state: number | null;         // modelled: what a full fleet pays per task; null unless its density kept
+                                       // the host full (rule 5) and host_cpu_per_task_s is known
+  host_cpu_per_task_s: number | null;  // measured: vCPU-seconds of host CPU per task over the microVMs' lives,
+                                       // first create to last destroy; null when the samples don't cover them
+                                       // or a gap between samples inside them is longer than 3 s
+  host_busy_fraction: number | null;   // measured: host CPU busy over the task window, 0 to 1 (host.cpu_util_pct
+                                       // ÷ 100); null when the trial has no host attribution
 }
 
 interface TrialMarks { all_ready_ms: number | null; release_ms: number | null; last_return_ms: number | null;
@@ -354,7 +370,7 @@ The builder applies these rules, and `contract.ts` checks them on every document
 2. **Trial numbers** at each density run 1, 2, 3… in execution order with no gaps.
 3. **A density passes** if at least one trial ran at it and every trial at it passed. It's `not_tested` if no counting trial ran at it, and `failed` otherwise.
 4. **A run's result** (`tested_successfully`) is the highest listed density that passed with every lower listed density passing too; it's never called a maximum. `first_failed` is the lowest density that failed; `gap` the integers strictly between the two; `not_tested` the listed densities no counting trial reached. A run that stopped early has a result from the densities it did test.
-5. **Cost** per 1,000 tasks = 1,000 × price per hour ÷ 3,600 × window seconds ÷ density. The **execution** window runs from release to last return, the **observed** window from the trial's start to a clean host. Cost is given only at densities that passed, at the assumed price for the instance type.
+5. **Cost** per 1,000 tasks, at the assumed on-demand price for the instance type, is given only at densities that passed. Two windows: 1,000 × price per hour ÷ 3,600 × window seconds ÷ density, the **execution** window from release to last return, the **observed** window from the trial's start to a clean host (the burst). The **charged burst** (`observed_charged`) is the observed window minus a warm start's wait, plus the host CPU used during that wait spread over the host's vCPUs, priced the same way; with no wait it equals `observed`. The **steady-state** cost (`steady_state`, D81) is what a full fleet pays per task, boot included: 1,000 × price per hour ÷ 3,600 ÷ host vCPUs × host CPU per task ÷ 0.9, where host CPU per task (`host_cpu_per_task_s`) is the host's busy vCPU-seconds from the trial's first create to its last destroy (each host sample times the interval it stands for, capped at 3 s), divided by the density, and 0.9 is the model's assumed fleet utilisation. It is a model, valid only where the host was full: a density keeps the host full when its trials averaged at least 85% busy over the task window (`host_busy_fraction`, judged per density so one trial's timing can't void a density the host does fill); a trial has a steady-state cost only at such a density, and only when the host's samples span its microVMs' lives with no gap over 3 s (else `host_cpu_per_task_s` is null); a density has one only when every trial at it does. The site ranks price/performance by `steady_state` and shows `observed_charged` beside it as the burst; where `steady_state` is null it shows the burst alone, labelled.
 6. **Comparing specs (D52, D60):** `per_host_vcpu` = `tested_successfully` ÷ host vCPUs. A replica's span runs from `tested_successfully` (0 if nothing passed) to `first_failed`, each ÷ host vCPUs, and its midpoint is the middle of that span; with no failure there is no midpoint, and the result reads "at least". A spec's midpoint is the mean of its replicas' midpoints, and null if any replica has none. Specs are compared by their midpoints, with every replica's span shown beside them: on Results and Compare, each replica is a bar to its span's end and the spec's midpoint a tick across its bars. Where a spec's midpoint is null but some replicas have one, the tick is the mean of those replicas, and its label says how many have none ("1 replica stopped early"); the dataset's value stays null.
 7. **Failures outside the experiment are never results (D63).** When a trial fails because of something the spec doesn't test (the support host overloaded, a harness error, an AWS problem), the harness sets it aside under the run's `ops/` directory, notes the cause in its operational log, and runs it again. The builder reads only the run's own trials, so a set-aside trial never appears and leaves no gap in the numbering. If no clean trial was possible at a density, that density and those above it are `not_tested`; the run isn't "stopped early". Smoke, case and fault trials test the harness and are never published either.
 8. **Consistency:** `by_density` lists exactly the spec's densities; a run document's entry equals the campaign's; `outcomes` equal the runs' results; a complete campaign has specs × replicas runs, none stopped early.

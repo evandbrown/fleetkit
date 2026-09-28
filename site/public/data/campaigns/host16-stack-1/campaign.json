@@ -7,7 +7,7 @@
   "ended": "2026-09-28T12:07Z",
   "status": "complete",
   "definition_path": "experiments/campaigns/host16-stack-1.json",
-  "answer": "The 4-vCPU host is cheaper: c8i.xlarge held 6–7 microVMs at $0.019–0.027 per 1,000 tasks, c8i.4xlarge 25–28 at $0.025–0.030. Host CPU ran out first on both.",
+  "answer": "The 4-vCPU host is cheaper: c8i.xlarge held 6–7 microVMs at $0.038–0.047 per 1,000 tasks, c8i.4xlarge 25–28 at $0.046–0.053. Host CPU ran out first on both.",
   "definition": {
     "name": "host16-stack-1",
     "question": "Is the full stack cheaper per task on a 4-vCPU or a 16-vCPU c8i host?",
@@ -489,6 +489,14 @@
           "observed": [
             0.0389,
             0.0459
+          ],
+          "observed_charged": [
+            0.0389,
+            0.0459
+          ],
+          "steady_state": [
+            0.0379,
+            0.0457
           ]
         },
         "limit": {
@@ -625,6 +633,14 @@
           "observed": [
             0.0397,
             0.0446
+          ],
+          "observed_charged": [
+            0.0397,
+            0.0446
+          ],
+          "steady_state": [
+            0.0381,
+            0.0444
           ]
         },
         "limit": {
@@ -760,6 +776,14 @@
           "observed": [
             0.0412,
             0.0493
+          ],
+          "observed_charged": [
+            0.0412,
+            0.0493
+          ],
+          "steady_state": [
+            0.0399,
+            0.0466
           ]
         },
         "limit": {
@@ -894,6 +918,14 @@
           "observed": [
             0.0399,
             0.0484
+          ],
+          "observed_charged": [
+            0.0399,
+            0.0484
+          ],
+          "steady_state": [
+            0.0398,
+            0.0455
           ]
         },
         "limit": {
@@ -1031,6 +1063,14 @@
           "observed": [
             0.0426,
             0.0477
+          ],
+          "observed_charged": [
+            0.0426,
+            0.0477
+          ],
+          "steady_state": [
+            0.0424,
+            0.0466
           ]
         },
         "limit": {
@@ -1172,6 +1212,14 @@
           "observed": [
             0.0556,
             0.0562
+          ],
+          "observed_charged": [
+            0.0556,
+            0.0562
+          ],
+          "steady_state": [
+            0.0511,
+            0.0526
           ]
         },
         "limit": {
@@ -1366,6 +1414,14 @@
           "observed": [
             0.0496,
             0.0521
+          ],
+          "observed_charged": [
+            0.0496,
+            0.0521
+          ],
+          "steady_state": [
+            0.0463,
+            0.0477
           ]
         },
         "limit": {
@@ -1565,6 +1621,14 @@
           "observed": [
             0.0491,
             0.053
+          ],
+          "observed_charged": [
+            0.0491,
+            0.053
+          ],
+          "steady_state": [
+            0.0461,
+            0.0464
           ]
         },
         "limit": {
@@ -1762,6 +1826,14 @@
           "observed": [
             0.0508,
             0.0517
+          ],
+          "observed_charged": [
+            0.0508,
+            0.0517
+          ],
+          "steady_state": [
+            0.0457,
+            0.0464
           ]
         },
         "limit": {
@@ -1958,6 +2030,14 @@
           "observed": [
             0.0496,
             0.0503
+          ],
+          "observed_charged": [
+            0.0496,
+            0.0503
+          ],
+          "steady_state": [
+            0.0462,
+            0.0465
           ]
         },
         "limit": {
@@ -2153,6 +2233,14 @@
           "observed": [
             0.1495,
             0.1503
+          ],
+          "observed_charged": [
+            0.1495,
+            0.1503
+          ],
+          "steady_state": [
+            0.1313,
+            0.1339
           ]
         },
         "limit": {
@@ -2314,6 +2402,14 @@
           "observed": [
             0.1502,
             0.1535
+          ],
+          "observed_charged": [
+            0.1502,
+            0.1535
+          ],
+          "steady_state": [
+            0.133,
+            0.135
           ]
         },
         "limit": {
@@ -2475,6 +2571,14 @@
           "observed": [
             0.1489,
             0.1504
+          ],
+          "observed_charged": [
+            0.1489,
+            0.1504
+          ],
+          "steady_state": [
+            0.1302,
+            0.1325
           ]
         },
         "limit": {
@@ -2635,6 +2739,14 @@
           "observed": [
             0.1505,
             0.1522
+          ],
+          "observed_charged": [
+            0.1505,
+            0.1522
+          ],
+          "steady_state": [
+            0.129,
+            0.1325
           ]
         },
         "limit": {
@@ -2800,6 +2912,14 @@
           "observed": [
             0.1508,
             0.1516
+          ],
+          "observed_charged": [
+            0.1508,
+            0.1516
+          ],
+          "steady_state": [
+            0.1328,
+            0.1354
           ]
         },
         "limit": {
@@ -2943,6 +3063,14 @@
             "observed": [
               0.0389,
               0.0459
+            ],
+            "observed_charged": [
+              0.0389,
+              0.0459
+            ],
+            "steady_state": [
+              0.0379,
+              0.0457
             ]
           }
         },
@@ -2962,6 +3090,14 @@
             "observed": [
               0.0397,
               0.0446
+            ],
+            "observed_charged": [
+              0.0397,
+              0.0446
+            ],
+            "steady_state": [
+              0.0381,
+              0.0444
             ]
           }
         },
@@ -2981,6 +3117,14 @@
             "observed": [
               0.0412,
               0.0493
+            ],
+            "observed_charged": [
+              0.0412,
+              0.0493
+            ],
+            "steady_state": [
+              0.0399,
+              0.0466
             ]
           }
         },
@@ -3000,6 +3144,14 @@
             "observed": [
               0.0399,
               0.0484
+            ],
+            "observed_charged": [
+              0.0399,
+              0.0484
+            ],
+            "steady_state": [
+              0.0398,
+              0.0455
             ]
           }
         },
@@ -3019,6 +3171,14 @@
             "observed": [
               0.0426,
               0.0477
+            ],
+            "observed_charged": [
+              0.0426,
+              0.0477
+            ],
+            "steady_state": [
+              0.0424,
+              0.0466
             ]
           }
         }
@@ -3044,6 +3204,14 @@
             "observed": [
               0.0556,
               0.0562
+            ],
+            "observed_charged": [
+              0.0556,
+              0.0562
+            ],
+            "steady_state": [
+              0.0511,
+              0.0526
             ]
           }
         },
@@ -3063,6 +3231,14 @@
             "observed": [
               0.0496,
               0.0521
+            ],
+            "observed_charged": [
+              0.0496,
+              0.0521
+            ],
+            "steady_state": [
+              0.0463,
+              0.0477
             ]
           }
         },
@@ -3082,6 +3258,14 @@
             "observed": [
               0.0491,
               0.053
+            ],
+            "observed_charged": [
+              0.0491,
+              0.053
+            ],
+            "steady_state": [
+              0.0461,
+              0.0464
             ]
           }
         },
@@ -3101,6 +3285,14 @@
             "observed": [
               0.0508,
               0.0517
+            ],
+            "observed_charged": [
+              0.0508,
+              0.0517
+            ],
+            "steady_state": [
+              0.0457,
+              0.0464
             ]
           }
         },
@@ -3120,6 +3312,14 @@
             "observed": [
               0.0496,
               0.0503
+            ],
+            "observed_charged": [
+              0.0496,
+              0.0503
+            ],
+            "steady_state": [
+              0.0462,
+              0.0465
             ]
           }
         }
@@ -3145,6 +3345,14 @@
             "observed": [
               0.1495,
               0.1503
+            ],
+            "observed_charged": [
+              0.1495,
+              0.1503
+            ],
+            "steady_state": [
+              0.1313,
+              0.1339
             ]
           }
         },
@@ -3164,6 +3372,14 @@
             "observed": [
               0.1502,
               0.1535
+            ],
+            "observed_charged": [
+              0.1502,
+              0.1535
+            ],
+            "steady_state": [
+              0.133,
+              0.135
             ]
           }
         },
@@ -3183,6 +3399,14 @@
             "observed": [
               0.1489,
               0.1504
+            ],
+            "observed_charged": [
+              0.1489,
+              0.1504
+            ],
+            "steady_state": [
+              0.1302,
+              0.1325
             ]
           }
         },
@@ -3202,6 +3426,14 @@
             "observed": [
               0.1505,
               0.1522
+            ],
+            "observed_charged": [
+              0.1505,
+              0.1522
+            ],
+            "steady_state": [
+              0.129,
+              0.1325
             ]
           }
         },
@@ -3221,6 +3453,14 @@
             "observed": [
               0.1508,
               0.1516
+            ],
+            "observed_charged": [
+              0.1508,
+              0.1516
+            ],
+            "steady_state": [
+              0.1328,
+              0.1354
             ]
           }
         }

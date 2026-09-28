@@ -664,13 +664,16 @@ export const HELP: Record<string, string> = {
     "How each microVM's virtual disk and network devices connect to its guest kernel. Firecracker can use mmio or pci; Cloud Hypervisor needs pci.",
   'hypervisor.virtio_rng':
     'Gives each microVM a virtual device that supplies random numbers from the host. Optional for Firecracker; Cloud Hypervisor always has one.',
-  'microvm.vcpus': 'Virtual CPUs given to each microVM. Each microVM runs one headless Chrome and one browser task per trial.',
+  // The guest fields say what the design recommends and why (D91); the recommendation is what a new campaign starts
+  // with, not the schema's default, which keeps the meaning of the specs recorded before the field existed.
+  'microvm.vcpus':
+    'Virtual CPUs given to each microVM, which runs one headless Chrome and one browser task per trial. Recommended: 1, which with 1 GiB of memory cost 15% less per task than 2 vCPUs and 2 GiB, with every task inside its targets.',
   'microvm.memory_mib':
-    "Memory given to each microVM, in MiB (1,024 MiB is 1 GiB). If the microVMs' memory adds up to more than the host's, memory runs out before CPU.",
+    "Memory given to each microVM, in MiB (1,024 MiB is 1 GiB); if the microVMs' memory adds up to more than the host's, memory runs out before CPU. Recommended: 1,024, since a guest touched at most 0.7 GiB during its task and no task failed for memory.",
   'microvm.console':
-    'What each guest kernel prints on its serial console at boot, which costs host CPU per character. Verbose prints the whole boot log; quiet only critical messages, such as a panic; quiet-i8042 also skips probing a keyboard the microVM never uses.',
+    'What the guest kernel prints on its serial console at boot: the whole log (verbose), critical only (quiet), or those and no keyboard probe (quiet-i8042); each character costs host CPU. Recommended: quiet-i8042, about 10% cheaper per task (guest_boot_tuning).',
   'microvm.memory_pages':
-    'How the host backs each microVM’s memory: 4k asks for nothing special, thp asks for transparent huge pages, which can cut the work of mapping guest memory. The host grants them only if its huge-page setting allows.',
+    'How the host backs a microVM’s memory: 4k asks for nothing, thp for transparent huge pages, granted if the host’s mode is madvise or always. Recommended: thp, 24–40% cheaper per task on nested hosts (guest_boot_tuning), about 10% on metal (tuned_guest_metal).',
   densities:
     'How many microVMs each trial starts at once; the run tests them in order and stops at the first that fails. Space them closely where you expect the limit: the result is only as precise as the gap between the last pass and the first failure.',
   'criteria.step_p50_target_ms':
@@ -694,7 +697,7 @@ export const HELP: Record<string, string> = {
   'support_host.instance_type':
     'The EC2 instance that serves the test shopping site and collects telemetry, one per run. It grows with the worker host so it is never what runs out.',
   'workload.chromium_extra_flags':
-    'Chromium flags added to the ones every run has, one per line, to compare browsers set up differently. Only flags that change how Chromium uses memory and CPU, never what a task does, are allowed; chromium-flags.json lists them and why.',
+    'Chromium flags added to the ones every run has, one per line; only those in chromium-flags.json, which change how Chromium uses memory and CPU, not what a task does. Recommended: the one a new campaign starts with, 8–10% cheaper per task (chromium_no_preload).',
   name: 'The campaign’s short name; its results are saved under results/<name>. 2–40 lowercase letters, digits or hyphens, starting with a letter.',
   question: 'The one question this campaign’s runs answer together, in a line. It heads the campaign on Results.',
   replicas:
