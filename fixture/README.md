@@ -45,6 +45,17 @@ nginx config is required or assumed. Stock nginx sends `Last-Modified` and
 `ETag` but no `Cache-Control` and does not gzip, which the manifest's byte
 model assumes (see below). `dist/` is gitignored; `make fixture` rebuilds it.
 
+**Public copy.** A copy for looking at, not for measuring, is at
+https://evan.mx/fleetkit-fixture/. `publish.sh` builds it fresh, re-roots every
+URL under `/fleetkit-fixture` (`reroot.py`: the build's references are
+root-absolute, and it refuses a copy with a dangling reference), uploads it with
+content types and a five-minute cache life, and invalidates the prefix. It runs
+by hand with the two values from `infra/site`, the same ones
+`site/scripts/deploy.sh` uses; the evan.mx router, a CloudFront Function outside
+this repository, must list the prefix. CloudFront compresses and caches the
+copy, so its bytes differ from `manifest.json`, which describes the root-served
+build the guests get from nginx.
+
 ## The task path and its contract
 
 | Step | Page | What the fixture guarantees |
@@ -145,6 +156,7 @@ the network, never as a browser failure (design section 13).
   add-to-cart delay into `app.js`, so the static pages and the client-side
   rendering share one template.
 - `check.py`: local server plus the three verification layers.
+- `reroot.py`, `publish.sh`: the public copy (above).
 - `tests/`: pytest, builds into a temporary directory.
 - `dist/` (generated): `index.html`, `search.html`, `cart.html`, `p/*.html`,
   `catalog.json` and `catalog.js`, `task-products.json`, `manifest.json`,

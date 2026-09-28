@@ -151,3 +151,36 @@ def test_js_ranking_matches_python(dist, tasks, products):
     result = check.node_rank(dist, queries)
     for q in queries:
         assert result[q] == [[p["id"], m] for p, m in build.search_page_cards(products, q)], q
+
+
+# --- reroot.py: the public copy under a prefix -----------------------------------------------
+
+import reroot  # noqa: E402
+
+
+def test_reroot_moves_every_reference_under_the_prefix(dist, tmp_path):
+    out = tmp_path / "public"
+    n = reroot.reroot(dist, out, "/fleetkit-fixture")
+    assert n > 1000
+    home = (out / "index.html").read_text()
+    assert 'action="/fleetkit-fixture/search.html"' in home
+    assert 'href="/fleetkit-fixture/styles.css"' in home
+    assert 'href="/"' not in home and 'src="/img' not in home
+    app_js = (out / "app.js").read_text()
+    assert 'href=\\"/fleetkit-fixture/p/{id}.html\\"' in app_js
+    catalog = json.loads((out / "catalog.json").read_text())
+    assert all(p["image"].startswith("/fleetkit-fixture/img/p/") for p in catalog["products"])
+    # The source, the images and the manifest are untouched.
+    assert (dist / "index.html").read_bytes() != home.encode()
+    assert (out / "manifest.json").read_bytes() == (dist / "manifest.json").read_bytes()
+    assert (out / "img" / "hero.png").read_bytes() == (dist / "img" / "hero.png").read_bytes()
+
+
+def test_reroot_refuses_a_dangling_reference(dist, tmp_path):
+    out = tmp_path / "public"
+    reroot.reroot(dist, out, "fleetkit-fixture/")
+    (out / "styles.css").unlink()
+    with pytest.raises(reroot.RerootError, match="styles.css"):
+        reroot.check(out, "/fleetkit-fixture")
+    with pytest.raises(reroot.RerootError):
+        reroot.normalise("/")
