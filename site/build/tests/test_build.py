@@ -452,3 +452,19 @@ def test_the_catalog_checks_the_words_the_site_shows(tmp_path):
             load(**bad)
     with pytest.raises(C.CatalogError, match="already used"):
         load({"id": "nested-hv-1", "title": "m8i_host_size"})
+
+
+def test_rewritten_commits_map_to_ids_github_has():
+    """D90: a harness commit the public history rewrote is linked as its rewritten id, which must be on origin."""
+    repo = Path(__file__).resolve().parents[3]
+    m = build_data.rewritten()
+    assert m, "the map is empty"
+    hexid = re.compile(r"^[0-9a-f]{10}$")
+    for old, new in m.items():
+        assert hexid.match(old) and hexid.match(new)
+        full = build_data.resolves_to(repo, new)
+        assert full and build_data.on_github(repo, full), f"{new} isn't one commit on origin's branches"
+    old, new = next(iter(m.items()))
+    built = [{"entry": {"id": "r1", "harness_commit": build_data.resolves_to(repo, old) or old + "0" * 30}, "doc": {}}]
+    build_data.publish_harness_commits(built, repo)
+    assert built[0]["entry"]["harness_commit"] == new

@@ -207,7 +207,7 @@
       "stopped_early": false,
       "started": "2026-09-28T13:15Z",
       "duration_s": 275,
-      "harness_commit": "281992269f",
+      "harness_commit": "4943c97d91",
       "host": {
         "instance_type": "m8i.metal-48xl",
         "host_kind": "metal",
@@ -312,7 +312,7 @@
       "stopped_early": false,
       "started": "2026-09-28T13:41Z",
       "duration_s": 336,
-      "harness_commit": "281992269f",
+      "harness_commit": "4943c97d91",
       "host": {
         "instance_type": "m8i.metal-48xl",
         "host_kind": "metal",

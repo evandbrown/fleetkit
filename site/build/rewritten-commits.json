@@ -1,0 +1,14 @@
+{
+  "note": "D90 (2026-09-28): the public history from 4ce5449 on was rewritten to drop site/node_modules, a symlink committed by mistake whose target named a local path. Each rewritten commit has the same tree, message, author and dates as the original. A run's records keep the commit id they recorded (results/ is evidence); the builder links the rewritten id, which is the same code on GitHub. Ids are abbreviated to 10 characters, as the dataset abbreviates them (a full id can hold a 12-digit run, which the leak check reads as an account id).",
+  "commits": {
+    "4ce5449126": "9fa82e21a5",
+    "01cff9454e": "6b08cf3c36",
+    "d646229557": "ff978d34bd",
+    "483516f926": "1f85126cc3",
+    "97cc928ef1": "db92d2958d",
+    "585025d47b": "479a2e45b3",
+    "281992269f": "4943c97d91",
+    "889fda13d2": "a93f7f6e1c",
+    "3db48d33b3": "bc571b9608"
+  }
+}

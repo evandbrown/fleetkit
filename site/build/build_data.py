@@ -116,14 +116,34 @@ def definition_path(c: dict, definition: dict, preregistration: dict | None, rep
     return rel
 
 
+REWRITTEN = Path(__file__).with_name("rewritten-commits.json")
+
+
+@cache
+def rewritten() -> dict[str, str]:
+    """Commit ids the public history no longer has, each mapped to the id that replaced it (D90: a rewrite that
+    dropped a file committed by mistake; the code at each pair is the same), both abbreviated to SHORT_COMMIT
+    characters as the dataset abbreviates them. Empty when there is no map."""
+    if not REWRITTEN.exists():
+        return {}
+    return dict(json.loads(REWRITTEN.read_text())["commits"])
+
+
 def publish_harness_commits(built: list[dict], repo: Path) -> None:
     """Each run's harness commit as the dataset carries it (D73): the full id the run recorded (assemble.py has
     checked its records agree and that it is a full id) is linked only if GitHub has it, and is published
-    abbreviated, as long as the abbreviation names that commit alone; otherwise the run links none."""
+    abbreviated, as long as the abbreviation names that commit alone; otherwise the run links none. A commit the
+    public history rewrote (D90) is linked as its rewritten id: the same code, at the id GitHub has."""
     for b in built:
         commit = b["entry"]["harness_commit"]
         if not commit:
             continue
+        if abbreviated(commit) in rewritten():
+            new = resolves_to(repo, rewritten()[abbreviated(commit)])
+            if new:
+                log(f"  note: {b['entry']['id']}: harness commit {abbreviated(commit)} was rewritten (D90); linking "
+                    f"{abbreviated(new)}")
+                commit = new
         short = abbreviated(commit)
         if not on_github(repo, commit):
             log(f"  note: {b['entry']['id']}: harness commit {short} isn't on any of origin's branches "
