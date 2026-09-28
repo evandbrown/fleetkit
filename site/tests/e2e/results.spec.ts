@@ -276,7 +276,7 @@ test('drills from results to a run, a trial and a microVM', async ({ page }) => 
 
 test('links what is public on GitHub from campaign, run and trial pages, and nothing for synthetic data (D73)', async ({ page }) => {
   const GH = 'https://github.com/evandbrown/fleetkit';
-  const COMMIT = '652f26d88cda86a453e31e29f9def2e771dd4971';
+  const COMMIT = '652f26d88c'; // as the dataset carries it: 10 characters, which GitHub resolves
   const DATA = `${GH}/blob/main/site/public/data/campaigns/${CAP}`;
   const source = page.getByRole('navigation', { name: 'Source' });
   const expectLinks = async (want: [string, string][]) => {

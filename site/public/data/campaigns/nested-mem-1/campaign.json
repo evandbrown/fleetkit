@@ -195,7 +195,7 @@
       "stopped_early": false,
       "started": "2026-09-28T01:13Z",
       "duration_s": 217,
-      "harness_commit": "aaab966ba19a7836c8b3e7b6f9415825c2fa80bf",
+      "harness_commit": "aaab966ba1",
       "host": {
         "instance_type": "m8i.4xlarge",
         "host_kind": "nested",
@@ -358,7 +358,7 @@
       "stopped_early": false,
       "started": "2026-09-28T01:13Z",
       "duration_s": 194,
-      "harness_commit": "aaab966ba19a7836c8b3e7b6f9415825c2fa80bf",
+      "harness_commit": "aaab966ba1",
       "host": {
         "instance_type": "m8i.4xlarge",
         "host_kind": "nested",
@@ -508,7 +508,7 @@
       "stopped_early": false,
       "started": "2026-09-28T01:14Z",
       "duration_s": 217,
-      "harness_commit": "aaab966ba19a7836c8b3e7b6f9415825c2fa80bf",
+      "harness_commit": "aaab966ba1",
       "host": {
         "instance_type": "c8i.4xlarge",
         "host_kind": "nested",
@@ -671,7 +671,7 @@
       "stopped_early": false,
       "started": "2026-09-28T01:14Z",
       "duration_s": 217,
-      "harness_commit": "aaab966ba19a7836c8b3e7b6f9415825c2fa80bf",
+      "harness_commit": "aaab966ba1",
       "host": {
         "instance_type": "c8i.4xlarge",
         "host_kind": "nested",

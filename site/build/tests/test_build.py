@@ -15,6 +15,7 @@ import pytest
 import assemble as A
 import build_data
 import source as S
+from scrub import Scrubber
 from words import retired_word_in, without_legacy_blocks
 
 BUILD = Path(__file__).resolve().parents[1]
@@ -22,6 +23,8 @@ SITE = BUILD.parent
 REPO = SITE.parent
 RUN = REPO / "results/cap-baseline-1/host/capacity"
 CAP_COMMIT = "652f26d88cda86a453e31e29f9def2e771dd4971"   # the harness cap-baseline-1 ran (its manifest)
+CAP_SHORT = CAP_COMMIT[:10]                                # as the dataset carries it (DATA.md, rule 9)
+FULL_COMMIT = re.compile(rb"[0-9a-f]{40}")
 BIG = shutil.ignore_patterns("*.jsonl", "console-logs", "guest-logs", "hostd.log", "otlp", "*.tgz")
 
 needs_results = pytest.mark.skipif(not RUN.exists(), reason="results/cap-baseline-1 isn't downloaded here")
@@ -124,11 +127,11 @@ def test_the_campaign_of_one(data):
     assert s["host"] == {"instance_type": "m8i.4xlarge", "host_kind": "nested", "vcpus": 16, "memory_gib": 64,
                          "price_usd_per_hour": 0.84672, "price_estimated": False}
     assert "price" not in json.dumps(s["spec"])           # derived from the instance type, never a spec input
-    assert c["preregistration"]["path"] == "docs/capacity-experiment.md"
+    assert c["preregistration"] == {"path": "docs/capacity-experiment.md", "commit": "652f26d88c"}   # abbreviated
     # D73: no definition file of its own, so its pre-registration stands in; the harness commit its manifest records.
     assert c["definition_path"] == "docs/capacity-experiment.md"
-    assert c["runs"][0]["harness_commit"] == CAP_COMMIT
-    assert read(data, "campaigns/cap-baseline-1/runs/baseline-r1.json")["harness_commit"] == CAP_COMMIT
+    assert c["runs"][0]["harness_commit"] == CAP_SHORT
+    assert read(data, "campaigns/cap-baseline-1/runs/baseline-r1.json")["harness_commit"] == CAP_SHORT
     assert [r["key"] for r in c["rules"]][:2] == ["host_cpu_pressure_pct", "host_cpu_util_pct"]
     assert c["outcomes"] == [{"spec": "baseline", "midpoint_per_host_vcpu": 0.625, "replicas": [{
         "run": "baseline-r1", "host_vcpus": 16, "tested_successfully": 8, "first_failed": 12, "stopped_early": False,
@@ -150,9 +153,19 @@ def assert_links_on_github(c: dict, run_commit):
         assert json.loads(text) == c["definition"], f"{want} on main isn't the definition as launched"
     for r in c["runs"]:
         commit = r["harness_commit"]
-        assert re.fullmatch(r"[0-9a-f]{40}", commit or ""), (c["id"], r["id"], commit)
+        assert re.fullmatch(r"[0-9a-f]{10}", commit or ""), (c["id"], r["id"], commit)
         assert run_commit(c["id"], r["id"]) == commit
-        assert build_data.on_github(REPO, commit), f"{c['id']}/{r['id']}: {commit} isn't on any of origin's branches"
+        full = build_data.resolves_to(REPO, commit)
+        assert full and full.startswith(commit), f"{c['id']}/{r['id']}: {commit} doesn't name one commit alone"
+        assert build_data.on_github(REPO, full), f"{c['id']}/{r['id']}: {full} isn't on any of origin's branches"
+
+
+def assert_no_full_commit(root: Path):
+    """No published byte holds a full 40-character commit id (DATA.md, rule 9): only the 10-character abbreviation,
+    which can't hold the 12 digits in a row the scrubber and the repository's leak check take for an account id."""
+    hits = [f"{p.relative_to(root)}: {m.group(0).decode()}" for p in sorted(root.rglob("*.json"))
+            for m in FULL_COMMIT.finditer(p.read_bytes())]
+    assert not hits, hits
 
 
 @needs_results
@@ -161,6 +174,7 @@ def test_every_campaign_links_its_definition_and_every_run_its_harness_commit(da
     for e in read(data, "index.json")["campaigns"]:
         assert_links_on_github(read(data, "campaigns", e["id"], "campaign.json"),
                                lambda c, r: read(data, "campaigns", c, "runs", f"{r}.json")["harness_commit"])
+    assert_no_full_commit(data)
 
 
 @needs_clone
@@ -170,6 +184,7 @@ def test_the_published_dataset_links_only_what_github_has():
     for e in read(pub, "index.json")["campaigns"]:
         assert_links_on_github(read(pub, "campaigns", e["id"], "campaign.json"),
                                lambda c, r: read(pub, "campaigns", c, "runs", f"{r}.json")["harness_commit"])
+    assert_no_full_commit(pub)
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -241,17 +256,40 @@ def test_the_definition_path_is_the_file_launched_as_github_has_it(tmp_path):
     assert build_data.definition_path(old, definition, pre, repo) == "docs/pre.md"
 
 
-def test_a_harness_commit_github_lacks_is_not_linked(tmp_path):
+def _built(*commits):
+    return [{"entry": {"id": f"r{i}", "harness_commit": x}, "doc": {"harness_commit": x}} for i, x in enumerate(commits)]
+
+
+def test_a_harness_commit_is_checked_in_full_and_published_abbreviated(tmp_path):
     repo = _clone(tmp_path)
     (repo / "a").write_text("a")
     pushed = _commit_and_maybe_push(repo, push=True)
     (repo / "a").write_text("b")
     local = _commit_and_maybe_push(repo, push=False)
-    built = [{"entry": {"id": f"r{i}", "harness_commit": x}, "doc": {"harness_commit": x}}
-             for i, x in enumerate([pushed, local, None, "d" * 40])]
-    build_data.unpushed_commits_unlinked(built, repo)
-    assert [b["entry"]["harness_commit"] for b in built] == [pushed, None, None, None]
-    assert [b["doc"]["harness_commit"] for b in built] == [pushed, None, None, None]
+    # GitHub has the first; the second was never pushed; the third recorded none; the fourth isn't in the repo.
+    built = _built(pushed, local, None, "d" * 40)
+    build_data.publish_harness_commits(built, repo)
+    assert [b["entry"]["harness_commit"] for b in built] == [pushed[:10], None, None, None]
+    assert [b["doc"]["harness_commit"] for b in built] == [pushed[:10], None, None, None]
+
+
+def test_an_abbreviation_that_names_more_than_one_commit_is_not_linked(tmp_path, monkeypatch):
+    repo = _clone(tmp_path)
+    (repo / "a").write_text("a")
+    pushed = _commit_and_maybe_push(repo, push=True)
+    assert build_data.resolves_to(repo, pushed[:10]) == pushed
+    monkeypatch.setattr(build_data, "resolves_to", lambda repo, short: None)     # as git answers an ambiguous one
+    built = _built(pushed)
+    build_data.publish_harness_commits(built, repo)
+    assert (built[0]["entry"]["harness_commit"], built[0]["doc"]["harness_commit"]) == (None, None)
+
+
+def test_a_commit_with_twelve_digits_in_a_row_is_published_whole_in_its_ten_characters():
+    """The case that made the dataset abbreviate (research round 2): the full id's tail is 12 digits, which the
+    scrubber would alias as an account id; its 10 characters are published as they are."""
+    commit = "d7741153048fa13d8bacb99f2f968064" "072039a4"    # written apart so the repository's leak check passes
+    assert Scrubber().text(commit) != commit
+    assert Scrubber().text(build_data.abbreviated(commit)) == "d774115304"
 
 
 # ---- the new results layout: results/<campaign>/campaign.json and <spec>-r<k>/ --------------------------------
@@ -306,7 +344,7 @@ def test_a_campaign_in_the_new_layout(tmp_path):
     c = read(out, "campaigns/copies-test/campaign.json")
     assert c["definition"]["name"] == "copies-test" and c["specs"][0]["why"].startswith("The spec cap-baseline-1")
     assert c["definition_path"] is None           # D73: its file is only in this copy, not on GitHub's main branch
-    assert [r["harness_commit"] for r in c["runs"]] == [CAP_COMMIT, CAP_COMMIT]
+    assert [r["harness_commit"] for r in c["runs"]] == [CAP_SHORT, CAP_SHORT]
     assert [r["id"] for r in c["runs"]] == ["baseline-r1", "baseline-r2"]
     o = c["outcomes"][0]
     assert [x["midpoint_per_host_vcpu"] for x in o["replicas"]] == [0.625, 0.625]

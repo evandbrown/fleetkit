@@ -10,7 +10,7 @@
   "reconstructed": true,
   "preregistration": {
     "path": "docs/capacity-experiment.md",
-    "commit": "652f26d88cda86a453e31e29f9def2e771dd4971"
+    "commit": "652f26d88c"
   },
   "definition_path": "docs/capacity-experiment.md",
   "definition": {
@@ -54,6 +54,9 @@
       },
       "support_host": {
         "instance_type": "m8i.xlarge"
+      },
+      "workload": {
+        "chromium_extra_flags": []
       }
     },
     "specs": {
@@ -102,6 +105,9 @@
         },
         "support_host": {
           "instance_type": "m8i.xlarge"
+        },
+        "workload": {
+          "chromium_extra_flags": []
         }
       },
       "host": {
@@ -122,7 +128,7 @@
       "stopped_early": false,
       "started": "2026-09-27T17:09Z",
       "duration_s": 182,
-      "harness_commit": "652f26d88cda86a453e31e29f9def2e771dd4971",
+      "harness_commit": "652f26d88c",
       "host": {
         "instance_type": "m8i.4xlarge",
         "host_kind": "nested",

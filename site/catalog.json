@@ -48,6 +48,14 @@
     {
       "id": "c8i-sizes-1",
       "title": "Smaller c8i hosts"
+    },
+    {
+      "id": "shape-cold-1",
+      "title": "MicroVM shape, cold start"
+    },
+    {
+      "id": "shape-warm-1",
+      "title": "MicroVM shape, warm start"
     }
   ],
   "gate_allow": []

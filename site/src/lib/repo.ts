@@ -1,6 +1,8 @@
 // Links to what is already public on GitHub (D73): a campaign's definition, the dataset file a page shows, and the
 // harness code at the exact commit a run used. The dataset holds only repository paths and commits (it never ships
 // a URL); these turn them into links. The raw evidence under results/ stays private, so nothing here points at it.
+// A commit comes abbreviated to 10 hex characters (DATA.md, rule 9); GitHub resolves it, as the builder checked it
+// names one commit alone.
 import { campaignPath, runPath, trialPath } from './data';
 import type { CampaignDoc, RunDoc } from './types';
 
@@ -15,8 +17,9 @@ export interface SourceLink {
 
 /** A file on the default branch. */
 export const blobUrl = (path: string) => `${REPO_URL}/blob/main/${path}`;
-/** The repository at one commit. */
+/** The repository at one commit (the dataset's 10 characters). */
 export const treeUrl = (commit: string) => `${REPO_URL}/tree/${commit}`;
+/** A commit's label: its first 7 characters. */
 export const shortCommit = (commit: string) => commit.slice(0, 7);
 
 /** The harness commits, each once, in the order given; runs that recorded none are skipped. */

@@ -422,8 +422,8 @@ test.describe('links what is public on GitHub (D73)', () => {
     test(`${k.id}: its campaign and each run link the definition, their data and the harness commit`, async ({ page }) => {
       const c = read<CampaignDoc>('campaigns', k.id, 'campaign.json');
       const commits = [...new Set(c.runs.map((r) => r.harness_commit))];
-      for (const x of commits) expect(x).toMatch(/^[0-9a-f]{40}$/);
-      if (k.id === 'cap-baseline-1') expect(commits).toEqual(['652f26d88cda86a453e31e29f9def2e771dd4971']);
+      for (const x of commits) expect(x).toMatch(/^[0-9a-f]{10}$/); // abbreviated, as the dataset carries a commit
+      if (k.id === 'cap-baseline-1') expect(commits).toEqual(['652f26d88c']);
       const definition: [string, string] = ['Definition', `${GH}/blob/main/${k.definition}`];
       const harness = (x: string): [string, string] => [`Harness @ ${x.slice(0, 7)}`, `${GH}/tree/${x}`];
 

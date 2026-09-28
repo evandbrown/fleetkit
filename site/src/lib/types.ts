@@ -108,6 +108,7 @@ export interface CampaignDoc {
   synthetic?: true;
   before_campaigns?: true;
   reconstructed?: true;
+  /** The document that fixed the criteria first, and the commit that added it (10 characters). */
   preregistration?: { path: string; commit: string };
   /** D73: the definition's path in the repository, experiments/campaigns/<campaign>.json; for a reconstructed
    *  definition, its pre-registration's; null when neither is public. */
@@ -161,7 +162,8 @@ export interface RunEntry {
   stopped_early: boolean;
   started: string;
   duration_s: number;
-  /** D73: the full commit of the harness code the run used; null when it recorded none, or one with uncommitted changes. */
+  /** D73: the commit of the harness code the run used, abbreviated to its first 10 hex characters; null when it
+   *  recorded none, one with uncommitted changes, or one GitHub doesn't have. */
   harness_commit: string | null;
   host: HostFacts;
   result: RunResult;

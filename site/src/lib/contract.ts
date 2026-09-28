@@ -18,7 +18,8 @@ import { retiredWordsInJson } from './words';
 
 const ID = /^[a-z0-9][a-z0-9-]*$/;
 const WHEN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z$/;
-const COMMIT = /^[0-9a-f]{40}$/;
+/** A commit as the dataset carries it: its first 10 hex characters (DATA.md, rule 9), never the full id. */
+const COMMIT = /^[0-9a-f]{10}$/;
 const close = (a: number | null | undefined, b: number | null | undefined, tol = 1e-3) =>
   a === b || (typeof a === 'number' && typeof b === 'number' && Math.abs(a - b) <= tol * Math.max(1, Math.abs(b)));
 /** Deep equality that ignores key order. */
@@ -111,7 +112,10 @@ export function checkCampaign(doc: CampaignDoc, entry?: Index['campaigns'][numbe
   if (def.shutdown_after_minutes === undefined && !doc.reconstructed) p.push(`${w}: only a reconstructed definition lacks shutdown_after_minutes`);
 
   // D73: what the site links on GitHub. A synthetic campaign links nothing; a real one its definition's file (a
-  // reconstructed definition, its pre-registration), and each run the full commit of the harness it used.
+  // reconstructed definition, its pre-registration), and each run the commit of the harness it used, abbreviated.
+  if (doc.preregistration && !COMMIT.test(doc.preregistration.commit)) {
+    p.push(`${w}: preregistration.commit should be a commit abbreviated to 10 characters`);
+  }
   const defPath = doc.reconstructed ? doc.preregistration?.path : `experiments/campaigns/${doc.id}.json`;
   if (doc.definition_path === undefined) p.push(`${w}: definition_path is missing (null when there is none)`);
   else if (doc.definition_path !== null && (doc.synthetic || doc.definition_path !== defPath)) {
@@ -120,7 +124,7 @@ export function checkCampaign(doc: CampaignDoc, entry?: Index['campaigns'][numbe
   for (const r of doc.runs) {
     if (r.harness_commit === undefined) p.push(`${w} run ${r.id}: harness_commit is missing (null when there is none)`);
     else if (r.harness_commit !== null && (doc.synthetic || !COMMIT.test(r.harness_commit))) {
-      p.push(`${w} run ${r.id}: harness_commit should be ${doc.synthetic ? 'null in a synthetic campaign' : 'a full commit id or null'}`);
+      p.push(`${w} run ${r.id}: harness_commit should be ${doc.synthetic ? 'null in a synthetic campaign' : 'a commit abbreviated to 10 characters, or null'}`);
     }
   }
 

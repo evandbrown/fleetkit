@@ -1,7 +1,521 @@
 {
   "schema": "fleetkit-site-data/2",
-  "featured": "c8i-sizes-1",
+  "featured": "shape-cold-1",
   "campaigns": [
+    {
+      "id": "shape-cold-1",
+      "title": "MicroVM shape, cold start",
+      "question": "Does a 1-vCPU microVM cost less per task than a 2-vCPU one?",
+      "started": "2026-09-28T06:57Z",
+      "status": "complete",
+      "replicas": 2,
+      "specs": [
+        {
+          "name": "c8i-xlarge",
+          "label": "c8i.xlarge, 2 vCPUs"
+        },
+        {
+          "name": "c8i-xlarge-1vcpu",
+          "label": "c8i.xlarge, 1 vCPU"
+        },
+        {
+          "name": "m8i-4xlarge",
+          "label": "m8i.4xlarge, 2 vCPUs"
+        }
+      ],
+      "runs": 6,
+      "outcomes": [
+        {
+          "spec": "c8i-xlarge",
+          "replicas": [
+            {
+              "run": "c8i-xlarge-r1",
+              "host_vcpus": 4,
+              "tested_successfully": 2,
+              "first_failed": 3,
+              "stopped_early": false,
+              "per_host_vcpu": 0.5,
+              "midpoint_per_host_vcpu": 0.625,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0495,
+                  0.0564
+                ],
+                "observed": [
+                  0.1387,
+                  0.1403
+                ]
+              }
+            },
+            {
+              "run": "c8i-xlarge-r2",
+              "host_vcpus": 4,
+              "tested_successfully": 2,
+              "first_failed": 3,
+              "stopped_early": false,
+              "per_host_vcpu": 0.5,
+              "midpoint_per_host_vcpu": 0.625,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0483,
+                  0.0544
+                ],
+                "observed": [
+                  0.1369,
+                  0.139
+                ]
+              }
+            }
+          ],
+          "midpoint_per_host_vcpu": 0.625
+        },
+        {
+          "spec": "c8i-xlarge-1vcpu",
+          "replicas": [
+            {
+              "run": "c8i-xlarge-1vcpu-r1",
+              "host_vcpus": 4,
+              "tested_successfully": 2,
+              "first_failed": 3,
+              "stopped_early": false,
+              "per_host_vcpu": 0.5,
+              "midpoint_per_host_vcpu": 0.625,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0576,
+                  0.0591
+                ],
+                "observed": [
+                  0.1477,
+                  0.1492
+                ]
+              }
+            },
+            {
+              "run": "c8i-xlarge-1vcpu-r2",
+              "host_vcpus": 4,
+              "tested_successfully": 1,
+              "first_failed": 2,
+              "stopped_early": false,
+              "per_host_vcpu": 0.25,
+              "midpoint_per_host_vcpu": 0.375,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.1135,
+                  0.1201
+                ],
+                "observed": [
+                  0.2844,
+                  0.2879
+                ]
+              }
+            }
+          ],
+          "midpoint_per_host_vcpu": 0.5
+        },
+        {
+          "spec": "m8i-4xlarge",
+          "replicas": [
+            {
+              "run": "m8i-4xlarge-r1",
+              "host_vcpus": 16,
+              "tested_successfully": 9,
+              "first_failed": 10,
+              "stopped_early": false,
+              "per_host_vcpu": 0.5625,
+              "midpoint_per_host_vcpu": 0.5938,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0661,
+                  0.0685
+                ],
+                "observed": [
+                  0.1797,
+                  0.1842
+                ]
+              }
+            },
+            {
+              "run": "m8i-4xlarge-r2",
+              "host_vcpus": 16,
+              "tested_successfully": 9,
+              "first_failed": 10,
+              "stopped_early": false,
+              "per_host_vcpu": 0.5625,
+              "midpoint_per_host_vcpu": 0.5938,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0651,
+                  0.0714
+                ],
+                "observed": [
+                  0.1807,
+                  0.1876
+                ]
+              }
+            }
+          ],
+          "midpoint_per_host_vcpu": 0.5938
+        }
+      ]
+    },
+    {
+      "id": "shape-warm-1",
+      "title": "MicroVM shape, warm start",
+      "question": "Does a warm start lower the cost per task, once its wait is charged?",
+      "started": "2026-09-28T06:57Z",
+      "status": "complete",
+      "replicas": 4,
+      "specs": [
+        {
+          "name": "c8i-xlarge",
+          "label": "c8i.xlarge, 2 vCPUs, 2 GiB"
+        },
+        {
+          "name": "c8i-xlarge-1vcpu",
+          "label": "c8i.xlarge, 1 vCPU, 2 GiB"
+        },
+        {
+          "name": "c8i-xlarge-1vcpu-1gib",
+          "label": "c8i.xlarge, 1 vCPU, 1 GiB"
+        },
+        {
+          "name": "m8i-4xlarge",
+          "label": "m8i.4xlarge, 2 vCPUs, 2 GiB"
+        }
+      ],
+      "runs": 16,
+      "outcomes": [
+        {
+          "spec": "c8i-xlarge",
+          "replicas": [
+            {
+              "run": "c8i-xlarge-r1",
+              "host_vcpus": 4,
+              "tested_successfully": 2,
+              "first_failed": 3,
+              "stopped_early": false,
+              "per_host_vcpu": 0.5,
+              "midpoint_per_host_vcpu": 0.625,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0433,
+                  0.0458
+                ],
+                "observed": [
+                  0.2648,
+                  0.266
+                ]
+              }
+            },
+            {
+              "run": "c8i-xlarge-r2",
+              "host_vcpus": 4,
+              "tested_successfully": 3,
+              "first_failed": 4,
+              "stopped_early": false,
+              "per_host_vcpu": 0.75,
+              "midpoint_per_host_vcpu": 0.875,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0423,
+                  0.0438
+                ],
+                "observed": [
+                  0.2045,
+                  0.2085
+                ]
+              }
+            },
+            {
+              "run": "c8i-xlarge-r3",
+              "host_vcpus": 4,
+              "tested_successfully": 3,
+              "first_failed": 4,
+              "stopped_early": false,
+              "per_host_vcpu": 0.75,
+              "midpoint_per_host_vcpu": 0.875,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0428,
+                  0.0435
+                ],
+                "observed": [
+                  0.2044,
+                  0.2093
+                ]
+              }
+            },
+            {
+              "run": "c8i-xlarge-r4",
+              "host_vcpus": 4,
+              "tested_successfully": 2,
+              "first_failed": 3,
+              "stopped_early": false,
+              "per_host_vcpu": 0.5,
+              "midpoint_per_host_vcpu": 0.625,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0414,
+                  0.0477
+                ],
+                "observed": [
+                  0.2556,
+                  0.2699
+                ]
+              }
+            }
+          ],
+          "midpoint_per_host_vcpu": 0.75
+        },
+        {
+          "spec": "c8i-xlarge-1vcpu",
+          "replicas": [
+            {
+              "run": "c8i-xlarge-1vcpu-r1",
+              "host_vcpus": 4,
+              "tested_successfully": 3,
+              "first_failed": 4,
+              "stopped_early": false,
+              "per_host_vcpu": 0.75,
+              "midpoint_per_host_vcpu": 0.875,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0504,
+                  0.0522
+                ],
+                "observed": [
+                  0.2014,
+                  0.2126
+                ]
+              }
+            },
+            {
+              "run": "c8i-xlarge-1vcpu-r2",
+              "host_vcpus": 4,
+              "tested_successfully": 4,
+              "first_failed": 5,
+              "stopped_early": false,
+              "per_host_vcpu": 1,
+              "midpoint_per_host_vcpu": 1.125,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0348,
+                  0.0352
+                ],
+                "observed": [
+                  0.1501,
+                  0.1532
+                ]
+              }
+            },
+            {
+              "run": "c8i-xlarge-1vcpu-r3",
+              "host_vcpus": 4,
+              "tested_successfully": 4,
+              "first_failed": 5,
+              "stopped_early": false,
+              "per_host_vcpu": 1,
+              "midpoint_per_host_vcpu": 1.125,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0355,
+                  0.0365
+                ],
+                "observed": [
+                  0.1525,
+                  0.1545
+                ]
+              }
+            },
+            {
+              "run": "c8i-xlarge-1vcpu-r4",
+              "host_vcpus": 4,
+              "tested_successfully": 4,
+              "first_failed": 5,
+              "stopped_early": false,
+              "per_host_vcpu": 1,
+              "midpoint_per_host_vcpu": 1.125,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0355,
+                  0.036
+                ],
+                "observed": [
+                  0.1516,
+                  0.1543
+                ]
+              }
+            }
+          ],
+          "midpoint_per_host_vcpu": 1.0625
+        },
+        {
+          "spec": "c8i-xlarge-1vcpu-1gib",
+          "replicas": [
+            {
+              "run": "c8i-xlarge-1vcpu-1gib-r1",
+              "host_vcpus": 4,
+              "tested_successfully": 4,
+              "first_failed": 5,
+              "stopped_early": false,
+              "per_host_vcpu": 1,
+              "midpoint_per_host_vcpu": 1.125,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0354,
+                  0.0366
+                ],
+                "observed": [
+                  0.1528,
+                  0.1542
+                ]
+              }
+            },
+            {
+              "run": "c8i-xlarge-1vcpu-1gib-r2",
+              "host_vcpus": 4,
+              "tested_successfully": 4,
+              "first_failed": 5,
+              "stopped_early": false,
+              "per_host_vcpu": 1,
+              "midpoint_per_host_vcpu": 1.125,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.035,
+                  0.036
+                ],
+                "observed": [
+                  0.1516,
+                  0.1524
+                ]
+              }
+            },
+            {
+              "run": "c8i-xlarge-1vcpu-1gib-r3",
+              "host_vcpus": 4,
+              "tested_successfully": 4,
+              "first_failed": 5,
+              "stopped_early": false,
+              "per_host_vcpu": 1,
+              "midpoint_per_host_vcpu": 1.125,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0357,
+                  0.0361
+                ],
+                "observed": [
+                  0.1512,
+                  0.1526
+                ]
+              }
+            },
+            {
+              "run": "c8i-xlarge-1vcpu-1gib-r4",
+              "host_vcpus": 4,
+              "tested_successfully": 4,
+              "first_failed": 5,
+              "stopped_early": false,
+              "per_host_vcpu": 1,
+              "midpoint_per_host_vcpu": 1.125,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0372,
+                  0.0385
+                ],
+                "observed": [
+                  0.1542,
+                  0.1549
+                ]
+              }
+            }
+          ],
+          "midpoint_per_host_vcpu": 1.125
+        },
+        {
+          "spec": "m8i-4xlarge",
+          "replicas": [
+            {
+              "run": "m8i-4xlarge-r1",
+              "host_vcpus": 16,
+              "tested_successfully": 11,
+              "first_failed": 12,
+              "stopped_early": false,
+              "per_host_vcpu": 0.6875,
+              "midpoint_per_host_vcpu": 0.7188,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0554,
+                  0.0569
+                ],
+                "observed": [
+                  0.2682,
+                  0.2709
+                ]
+              }
+            },
+            {
+              "run": "m8i-4xlarge-r2",
+              "host_vcpus": 16,
+              "tested_successfully": 10,
+              "first_failed": 11,
+              "stopped_early": false,
+              "per_host_vcpu": 0.625,
+              "midpoint_per_host_vcpu": 0.6562,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0571,
+                  0.0584
+                ],
+                "observed": [
+                  0.2856,
+                  0.2887
+                ]
+              }
+            },
+            {
+              "run": "m8i-4xlarge-r3",
+              "host_vcpus": 16,
+              "tested_successfully": 11,
+              "first_failed": 12,
+              "stopped_early": false,
+              "per_host_vcpu": 0.6875,
+              "midpoint_per_host_vcpu": 0.7188,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0569,
+                  0.058
+                ],
+                "observed": [
+                  0.272,
+                  0.2748
+                ]
+              }
+            },
+            {
+              "run": "m8i-4xlarge-r4",
+              "host_vcpus": 16,
+              "tested_successfully": 10,
+              "first_failed": 11,
+              "stopped_early": false,
+              "per_host_vcpu": 0.625,
+              "midpoint_per_host_vcpu": 0.6562,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0562,
+                  0.0578
+                ],
+                "observed": [
+                  0.285,
+                  0.287
+                ]
+              }
+            }
+          ],
+          "midpoint_per_host_vcpu": 0.6875
+        }
+      ]
+    },
     {
       "id": "c8i-sizes-1",
       "title": "Smaller c8i hosts",

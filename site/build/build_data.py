@@ -43,13 +43,24 @@ def log(msg: str) -> None:
 
 
 def first_commit(repo: Path, path: str) -> str | None:
-    """The commit that first held ``path`` (a pre-registration)."""
+    """The commit that first held ``path`` (a pre-registration), in full."""
     try:
         out = subprocess.run(["git", "-C", str(repo), "log", "--diff-filter=A", "--format=%H", "--", path],
                              capture_output=True, text=True, check=True).stdout.split()
     except (OSError, subprocess.CalledProcessError):
         return None
     return out[-1] if out else None
+
+
+# The dataset carries a commit abbreviated to its first 10 hex characters, never the full 40 (DATA.md, rule 9). A
+# full id sometimes holds 12 digits in a row, which the scrubber would rewrite as an account id and the repository's
+# leak check would refuse; 10 characters can't. GitHub resolves an abbreviation that is unambiguous. Every check on
+# a commit is made on the full id first; only what is published is abbreviated.
+SHORT_COMMIT = 10
+
+
+def abbreviated(commit: str) -> str:
+    return commit[:SHORT_COMMIT]
 
 
 # The site links github.com/evandbrown/fleetkit (D73): files on its main branch, and the harness at a commit. What
@@ -69,6 +80,13 @@ def git(repo: Path, *args: str) -> str | None:
 def on_github(repo: Path, commit: str) -> bool:
     """Whether GitHub has ``commit``: it's on one of origin's branches."""
     return bool((git(repo, "branch", "-r", "--list", "origin/*", "--contains", commit) or "").strip())
+
+
+@cache
+def resolves_to(repo: Path, short: str) -> str | None:
+    """The one commit the abbreviation ``short`` names in ``repo``; None when it names none, or several."""
+    out = git(repo, "rev-parse", "--verify", "--quiet", f"{short}^{{commit}}")
+    return out.strip() if out else None
 
 
 def on_main(repo: Path, rel: str) -> str | None:
@@ -98,14 +116,23 @@ def definition_path(c: dict, definition: dict, preregistration: dict | None, rep
     return rel
 
 
-def unpushed_commits_unlinked(built: list[dict], repo: Path) -> None:
-    """A run's harness commit is linked only if GitHub has it (D73); otherwise the run links none."""
+def publish_harness_commits(built: list[dict], repo: Path) -> None:
+    """Each run's harness commit as the dataset carries it (D73): the full id the run recorded (assemble.py has
+    checked its records agree and that it is a full id) is linked only if GitHub has it, and is published
+    abbreviated, as long as the abbreviation names that commit alone; otherwise the run links none."""
     for b in built:
         commit = b["entry"]["harness_commit"]
-        if commit and not on_github(repo, commit):
-            log(f"  note: {b['entry']['id']}: harness commit {commit[:7]} isn't on any of origin's branches "
+        if not commit:
+            continue
+        short = abbreviated(commit)
+        if not on_github(repo, commit):
+            log(f"  note: {b['entry']['id']}: harness commit {short} isn't on any of origin's branches "
                 "(push it, then rebuild); none linked")
-            b["entry"]["harness_commit"] = b["doc"]["harness_commit"] = None
+            short = None
+        elif resolves_to(repo, short) != commit:
+            log(f"  note: {b['entry']['id']}: {short} doesn't name harness commit {commit} alone here; none linked")
+            short = None
+        b["entry"]["harness_commit"] = b["doc"]["harness_commit"] = short
 
 
 def reconstructed_definition(c: dict, recorded: dict) -> dict:
@@ -193,7 +220,7 @@ def build_campaign(c: dict, images: Images, repo: Path) -> tuple[dict, dict, lis
             + (", stopped early" if b["entry"]["stopped_early"] else ""))
         built.append(b)
 
-    unpushed_commits_unlinked(built, REPO)       # links are checked against this clone, whatever --repo reads
+    publish_harness_commits(built, REPO)         # links are checked against this clone, whatever --repo reads
     rules = built[0]["rules"] if built else []
     for b in built[1:]:
         if b["rules"] != rules:
@@ -213,7 +240,7 @@ def build_campaign(c: dict, images: Images, repo: Path) -> tuple[dict, dict, lis
     if c.get("preregistration"):
         commit = first_commit(repo, c["preregistration"])
         if commit:
-            doc["preregistration"] = {"path": c["preregistration"], "commit": commit}
+            doc["preregistration"] = {"path": c["preregistration"], "commit": abbreviated(commit)}
         else:
             log(f"  note: no commit found for {c['preregistration']}; preregistration left out")
     doc["definition_path"] = definition_path(c, definition, doc.get("preregistration"), REPO)

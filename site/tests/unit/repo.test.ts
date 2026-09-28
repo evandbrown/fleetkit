@@ -11,8 +11,10 @@ const FIXTURES = join(__dirname, '../fixtures/data');
 const PUBLISHED = join(__dirname, '../../public/data');
 const read = <T>(root: string, ...p: string[]): T => JSON.parse(readFileSync(join(root, ...p), 'utf8')) as T;
 const GH = 'https://github.com/evandbrown/fleetkit';
-const CAP_COMMIT = '652f26d88cda86a453e31e29f9def2e771dd4971';
-const OTHER_COMMIT = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+// Commits as the dataset carries them: the first 10 hex characters (DATA.md, rule 9).
+const CAP_COMMIT = '652f26d88c';
+const CAP_FULL = '652f26d88cda86a453e31e29f9def2e771dd4971'; // the commit in full, which the dataset never carries
+const OTHER_COMMIT = 'bbbbbbbbbb';
 
 describe('source links', () => {
   const cap = read<CampaignDoc>(FIXTURES, 'campaigns', 'cap-baseline-1', 'campaign.json');
@@ -56,7 +58,7 @@ describe('source links', () => {
     expect(runSource(syn, run)).toEqual([]);
   });
 
-  it('link every published campaign to its definition file and every run to a full commit', () => {
+  it('link every published campaign to its definition file and every run to a commit, abbreviated', () => {
     const index = read<Index>(PUBLISHED, 'index.json');
     for (const e of index.campaigns) {
       const c = read<CampaignDoc>(PUBLISHED, 'campaigns', e.id, 'campaign.json');
@@ -64,7 +66,8 @@ describe('source links', () => {
       expect(labels.slice(0, 2)).toEqual(['Definition', 'Data']);
       expect(labels.slice(2).length).toBeGreaterThan(0);
       if (!c.reconstructed) expect(c.definition_path).toBe(`experiments/campaigns/${c.id}.json`);
-      for (const r of c.runs) expect(r.harness_commit).toMatch(/^[0-9a-f]{40}$/);
+      for (const r of c.runs) expect(r.harness_commit).toMatch(/^[0-9a-f]{10}$/);
+      if (c.preregistration) expect(c.preregistration.commit).toMatch(/^[0-9a-f]{10}$/);
     }
   });
 });
@@ -74,12 +77,19 @@ describe('the contract checks the links (rule 9)', () => {
   const run = read<RunDoc>(FIXTURES, 'campaigns', 'cap-baseline-1', 'runs', 'baseline-r1.json');
   const syn = read<CampaignDoc>(FIXTURES, 'campaigns', 'nested-sizes-synthetic', 'campaign.json');
 
-  it('refuses a short or dirty harness commit', () => {
-    for (const bad of ['652f26d', `${CAP_COMMIT}-dirty`]) {
+  it('refuses a harness commit that is not 10 lowercase hex characters: the full id, a shorter one, dirty, upper case', () => {
+    expect(checkCampaign(cap)).toEqual([]);
+    for (const bad of [CAP_FULL, '652f26d', `${CAP_COMMIT}-dirty`, CAP_COMMIT.toUpperCase()]) {
       const c = structuredClone(cap);
       c.runs[0].harness_commit = bad;
-      expect(checkCampaign(c).join('\n')).toMatch(/harness_commit should be a full commit id or null/);
+      expect(checkCampaign(c).join('\n')).toMatch(/harness_commit should be a commit abbreviated to 10 characters, or null/);
     }
+  });
+  it('refuses a pre-registration commit published in full', () => {
+    expect(cap.preregistration?.commit).toBe(CAP_COMMIT);
+    const c = structuredClone(cap);
+    c.preregistration!.commit = CAP_FULL;
+    expect(checkCampaign(c)).toContain('campaign cap-baseline-1: preregistration.commit should be a commit abbreviated to 10 characters');
   });
   it('refuses a missing field, which must be null instead', () => {
     const c = structuredClone(cap) as Partial<CampaignDoc>;
