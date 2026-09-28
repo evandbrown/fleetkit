@@ -1,7 +1,7 @@
 #cloud-config
-# Support host for the capacity experiment: the fixture web server and the
+# Support host for a campaign run: the fixture web server and the
 # observability backend (LGTM), off the experiment host so neither competes with
-# the microVMs for CPU. Rendered by infra/experiments/support.tf with
+# the microVMs for CPU. Rendered by infra/experiments/campaign/main.tf with
 # templatefile(), so the dollar-brace references below are Terraform template
 # variables, filled from the stack's variables and from images/lock.env. Shell
 # code in this file uses $VAR and $(...) without braces, which Terraform leaves
@@ -11,7 +11,7 @@
 
 bootcmd:
   # The hard stop on cost, armed before anything else and on every boot. The
-  # instance terminates on shutdown (support.tf), so this ends the instance.
+  # instance terminates on shutdown (campaign/main.tf), so this ends the instance.
   - shutdown -h +${shutdown_after_minutes}
 
 # The AMI's frozen package snapshot is what the pin in ami.lock.json means.

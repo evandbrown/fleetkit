@@ -1,7 +1,7 @@
 # Evidence from experiment runs: probe output, console logs, evidence bundles.
 # Private, versioned, encrypted, TLS only. The hosts write to it through their own
 # role (iam.tf); everything else reads it with the member-account profile. The
-# bucket outlives the hosts: host_count = 0 removes the instances and leaves it.
+# bucket outlives the hosts, which each campaign creates and destroys (campaign/).
 
 resource "aws_s3_bucket" "results" {
   bucket = "fleetkit-results-${data.aws_caller_identity.member.account_id}"

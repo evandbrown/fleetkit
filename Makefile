@@ -11,7 +11,6 @@
 #   make down         stop them (results/dev/lgtm is kept)
 #   make lgtm-check   send one span, expect it in results/dev/lgtm/otlp/traces.jsonl, ping Grafana
 #   make hostd        run the host daemon in the foreground on :8090
-#   make host-setup   set up an AWS worker host (Linux, as root; prints a skip on macOS)
 #   make smoke        driver smoke suite against BACKEND (docker by default)
 #   make clean        build outputs, caches, stray microVM containers
 #   make distclean    clean + venv + results/dev/lgtm
@@ -57,7 +56,7 @@ HOSTD_LOG_DIR ?= $(RESULTS)/hostd
 HAVE_COMPOSE := $(shell docker compose version >/dev/null 2>&1 && echo 1)
 COMPOSE := docker compose -f observability/compose.yaml
 
-.PHONY: help venv test ignore-check guest-image rootfs fixture up down lgtm-check hostd host-setup smoke clean clean-lgtm distclean
+.PHONY: help venv test ignore-check guest-image rootfs fixture up down lgtm-check hostd smoke clean clean-lgtm distclean
 
 help: ## list targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(firstword $(MAKEFILE_LIST)) | sed 's/:.*## /\t/' | sort | column -t -s $$'\t'
@@ -148,13 +147,6 @@ lgtm-check: ## prove the pipeline: one span in, a line in results/dev/lgtm/otlp/
 
 hostd: venv ## run the host daemon in the foreground (BACKEND=docker|firecracker, HOSTD_ARGS=...)
 	$(PY) -m hostd --backend $(BACKEND) --log-dir $(HOSTD_LOG_DIR) $(HOSTD_NO_LGTM) $(HOSTD_ARGS)
-
-host-setup: ## set up the worker host: venv, fixture, guest image, rootfs, hostd unit (images/host/setup.sh)
-ifeq ($(UNAME_S),Darwin)
-	@echo "host-setup: skipped on macOS; it sets up the Linux worker host (as root, from /opt/fleetkit)."
-else
-	bash images/host/setup.sh
-endif
 
 smoke: venv ## run the driver smoke suite against a running host daemon
 	$(PY) -m driver smoke --backend $(BACKEND) --out $(RESULTS)/smoke-$(RUN_ID) $(NO_LGTM) $(DRIVER_ARGS)

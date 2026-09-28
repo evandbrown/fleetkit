@@ -107,10 +107,10 @@ Re-mount: extract into an empty `results/dev/lgtm/data` and `make up`.
 
 ## On AWS: the support host
 
-On the Mac and in the validation run the stack runs next to the host daemon, as above. In the
-capacity run (`bash images/host/run-validation.sh <run-id> --plan capacity`) it does not run on
-the worker at all: it runs on a separate support host (`aws_instance.support` in
-`infra/experiments`, provisioned by `images/support/cloud-config.yaml`) together with the
+On the Mac the stack runs next to the host daemon, as above. In a campaign run
+(`experiments/launch.sh`) it does not run on the worker at all: it runs on the run's support
+host (`aws_instance.support` in `infra/experiments/campaign`, provisioned by
+`images/support/cloud-config.yaml`) together with the
 fixture, so neither competes with the microVMs for the worker's CPU. There both containers are
 started with plain `docker run` by cloud-init: `fleetkit-fixture` on `0.0.0.0:8081` pinned to
 CPU 0, `fleetkit-lgtm` pinned to the remaining CPUs with OTLP on `0.0.0.0:4317/4318` and

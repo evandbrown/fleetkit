@@ -101,4 +101,6 @@ From a workstation with the experiments stack initialised and the member account
 bash images/host/run-validation.sh <run-id> --plan capacity
 ```
 
+(Note added 2026-09-27: `run-validation.sh` and `experiments/capacity/baseline.env` were removed once campaigns moved to `experiments/launch.sh`. Both are in the git history at the commit this run recorded.)
+
 It creates the worker host and the support host, sets both up, checks the worker host (KVM, a test microVM's health, the guest's egress through NAT to the fixture, OTLP delivery), runs this procedure, reports and bundles the evidence, syncs the support host's telemetry, and destroys both hosts. The evidence lands in `results/<run-id>/` and in the results bucket.

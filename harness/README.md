@@ -74,20 +74,13 @@ cd harness/driver
 
 ## Running on the host (AWS, Firecracker)
 
-The sequence is design section 10; only the driver-facing steps are listed here. Every host
-step runs through SSM Run Command; long driver invocations run as transient systemd units
-(`systemd-run --unit fleetkit-driver ...`) and are polled by reading their status files, so no
-Run Command timeout can kill them.
-
-1. Stage 0 (probe), then the experiments stack, then `make host-setup` over Run Command: guest
-   image, rootfs, fixture on the bridge address, the hostd systemd unit, optional observability.
-2. Boot one VM to `/health` with a 90-second readiness timeout.
-3. `driver trial --backend firecracker --densities 1 --ready-timeout-s 90 --fixture-check-url http://10.200.0.1:8081 --out results/<run-id>`
-4. `driver trial --backend firecracker --densities 2,4 --ready-timeout-s <3 x observed startup_ms, in seconds> --out results/<run-id>`
-   (the same run directory: rows append, and `d1-t1` from step 3 is followed by `d2-t1` and `d4-t1`).
-5. `driver smoke --backend firecracker --out results/<run-id>`
-6. `driver bundle --run results/<run-id> --aws --hostd-dir results/hostd --cloud-init-log /var/log/cloud-init-output.log --hostcheck-output <path> --instance-type m8i.xlarge --vcpu-quota <n> --strict`
-   after every stage and from the shell trap on any exit, then `aws s3 sync results/<run-id> s3://<results bucket>/runs/<run-id>/`.
+A campaign runs on AWS from one command, `experiments/launch.sh experiments/campaigns/<name>.json`
+(`experiments/launcher/launch.py` describes every check and step). For each run it creates a worker
+host and a support host, then over SSM Run Command: `images/host/setup.sh` (venv, fixture, guest
+image, rootfs, the hostd systemd unit), `images/host/hostcheck.sh`, `images/host/stage.sh run`
+(`driver trial --spec ...` as a transient systemd unit, so no Run Command timeout can kill it) and
+`images/host/stage.sh bundle` (`driver report` and `driver bundle`, synced to the results bucket).
+Then it destroys both hosts.
 
 On the firecracker backend the guest reaches the fixture at `http://10.200.0.1:8081` (the driver's
 default `--fixture-base-url` for that backend); on docker it is `http://fixture`. The driver checks

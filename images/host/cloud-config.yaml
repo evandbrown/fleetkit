@@ -1,6 +1,6 @@
 #cloud-config
 # Experiment host, stage 0: only what has to happen before anything else, in
-# under five minutes. Rendered by infra/experiments/host.tf with templatefile(),
+# under five minutes. Rendered by infra/experiments/campaign/main.tf with templatefile(),
 # so the dollar-brace references below are Terraform template variables, filled
 # from the stack's variables and from images/lock.env. Shell code in this file
 # uses $VAR without braces, which Terraform leaves alone. Everything heavier
@@ -9,7 +9,7 @@
 
 bootcmd:
   # The hard stop on cost, armed before anything else and on every boot. The
-  # instance terminates on shutdown (host.tf), so this ends the instance, not
+  # instance terminates on shutdown (campaign/main.tf), so this ends the instance, not
   # just this boot. Cancel with `shutdown -c`, re-arm with `shutdown -h +N`.
   - shutdown -h +${shutdown_after_minutes}
 

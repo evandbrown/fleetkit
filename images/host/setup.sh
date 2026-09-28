@@ -5,8 +5,8 @@
 # image and rootfs, the fixture server on the bridge address, and the host daemon as a
 # systemd unit.
 #
-# Optional environment (the capacity plan of run-validation.sh sets all three;
-# without them the host is set up exactly as for the validation run):
+# Optional environment (the campaign launcher sets all three; without them the fixture
+# is served on the bridge address and the host daemon runs with --no-otlp):
 #   FIXTURE_URL     fixture served by the support host, e.g. http://<ip>:8081. No local
 #                   fixture container is started; the URL must answer and serve the
 #                   same manifest.json as the local build (still built for the report).
