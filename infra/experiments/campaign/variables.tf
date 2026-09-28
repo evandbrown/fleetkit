@@ -17,13 +17,13 @@ variable "runs" {
   default = {}
 
   validation {
-    # The account's instance-type guardrail (infra/org, allowed_instance_families x allowed_instance_sizes).
-    # Metal worker hosts need that guardrail changed first; this list changes with it.
+    # The account's instance-type guardrail (infra/org, allowed_instance_families x allowed_instance_sizes,
+    # plus allowed_extra_instance_types); this list changes with it.
     condition = alltrue([for r in values(var.runs) : alltrue([
       for t in [r.worker_instance_type, r.support_instance_type] :
-      can(regex("^(m8i|c8i|m7i|c7i)\\.(large|xlarge|2xlarge|4xlarge)$", t))
+      can(regex("^((m8i|c8i|m7i|c7i)\\.(large|xlarge|2xlarge|4xlarge)|m8i\\.metal-48xl)$", t))
     ])])
-    error_message = "The instance-type guardrail only allows m8i, c8i, m7i and c7i at large, xlarge, 2xlarge or 4xlarge; metal isn't allowed yet."
+    error_message = "The instance-type guardrail only allows m8i, c8i, m7i and c7i at large, xlarge, 2xlarge or 4xlarge, and m8i.metal-48xl."
   }
 
   validation {

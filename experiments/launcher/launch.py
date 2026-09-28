@@ -73,9 +73,9 @@ MANAGEMENT_PROFILE = os.environ.get("FLEETKIT_MANAGEMENT_PROFILE", "default")
 MEMBER_PROFILE = os.environ.get("FLEETKIT_AWS_PROFILE", "fleetkit")
 VCPU_QUOTA_CODE = "L-1216C47A"  # Running On-Demand Standard (A, C, D, H, I, M, R, T, Z) instances
 PROJECT_START = "2026-09-01"    # the project cap's start (infra/org, project_cap_start)
-# The account's instance-type guardrail (infra/org, allowed_instance_families x allowed_instance_sizes);
-# infra/experiments/campaign/variables.tf checks the same list.
-GUARDRAIL = re.compile(r"^(m8i|c8i|m7i|c7i)\.(large|xlarge|2xlarge|4xlarge)$")
+# The account's instance-type guardrail (infra/org, allowed_instance_families x allowed_instance_sizes,
+# plus allowed_extra_instance_types); infra/experiments/campaign/variables.tf checks the same list.
+GUARDRAIL = re.compile(r"^((m8i|c8i|m7i|c7i)\.(large|xlarge|2xlarge|4xlarge)|m8i\.metal-48xl)$")
 SUPPORT_HEALTH_PORT = 8082
 FK = "/var/lib/fleetkit"
 SUPERSEDED = "superseded"  # results/superseded/<campaign>/ and the bucket's superseded/<campaign>/

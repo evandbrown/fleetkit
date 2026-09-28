@@ -64,12 +64,13 @@ def test_the_per_campaign_limit_is_checked_again():
 
 def test_examples_metal_quota_head_and_earlier_attempts_are_refused():
     plan = plan_of("hv-host-1", quota=1024)
+    plan["runs"][-1] = {**plan["runs"][-1], "worker_instance_type": "c8i.metal-48xl"}
     earlier = {"firecracker-nested-r1": "results/hv-host-1/firecracker-nested-r1/ holds 3 files"}
     why = launch.refusals(CAMPAIGNS / "examples" / "hv-host-1.json", plan,
                           **ok(free_vcpus=32, head_pushed=False, earlier=earlier))
     text = "\n".join(why)
     assert "written, not approved" in text
-    assert "m8i.metal-48xl isn't allowed by the account's instance-type guardrail" in text
+    assert "c8i.metal-48xl isn't allowed by the account's instance-type guardrail" in text
     assert "needs 208 vCPUs with its support host; 32 are free" in text
     assert "HEAD isn't on any remote branch" in text
     assert ("firecracker-nested-r1: an earlier attempt is in the way (results/hv-host-1/firecracker-nested-r1/ "

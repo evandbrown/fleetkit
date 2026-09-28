@@ -68,3 +68,9 @@ variable "allowed_instance_sizes" {
   type        = list(string)
   default     = ["large", "xlarge", "2xlarge", "4xlarge"]
 }
+
+variable "allowed_extra_instance_types" {
+  description = "Exact instance types allowed on top of allowed_instance_families x allowed_instance_sizes: the one metal type, for campaigns whose worker host is a whole machine. Each is named on its own so no other metal or 8xlarge-and-up type gets in with it."
+  type        = list(string)
+  default     = ["m8i.metal-48xl"]
+}

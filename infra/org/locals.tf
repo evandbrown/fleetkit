@@ -31,8 +31,8 @@ locals {
 
   # ec2:InstanceType is compared with StringNotEquals, which is exact-match:
   # a wildcard such as m8i.* would let 8xlarge and larger through.
-  allowed_instance_types = [
+  allowed_instance_types = concat([
     for pair in setproduct(var.allowed_instance_families, var.allowed_instance_sizes) :
     "${pair[0]}.${pair[1]}"
-  ]
+  ], var.allowed_extra_instance_types)
 }
