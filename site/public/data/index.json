@@ -1,7 +1,212 @@
 {
   "schema": "fleetkit-site-data/2",
-  "featured": "hv-host-3",
+  "featured": "c8i-sizes-1",
   "campaigns": [
+    {
+      "id": "c8i-sizes-1",
+      "title": "Smaller c8i hosts",
+      "question": "Does a smaller c8i host cost less per 1,000 tasks?",
+      "started": "2026-09-28T05:31Z",
+      "status": "complete",
+      "replicas": 2,
+      "specs": [
+        {
+          "name": "m8i-4xlarge",
+          "label": "m8i.4xlarge"
+        },
+        {
+          "name": "c8i-4xlarge",
+          "label": "c8i.4xlarge"
+        },
+        {
+          "name": "c8i-2xlarge",
+          "label": "c8i.2xlarge"
+        },
+        {
+          "name": "c8i-xlarge",
+          "label": "c8i.xlarge"
+        }
+      ],
+      "runs": 8,
+      "outcomes": [
+        {
+          "spec": "m8i-4xlarge",
+          "replicas": [
+            {
+              "run": "m8i-4xlarge-r1",
+              "host_vcpus": 16,
+              "tested_successfully": 9,
+              "first_failed": 10,
+              "stopped_early": false,
+              "per_host_vcpu": 0.5625,
+              "midpoint_per_host_vcpu": 0.5938,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0649,
+                  0.0692
+                ],
+                "observed": [
+                  0.1786,
+                  0.1843
+                ]
+              }
+            },
+            {
+              "run": "m8i-4xlarge-r2",
+              "host_vcpus": 16,
+              "tested_successfully": 9,
+              "first_failed": 10,
+              "stopped_early": false,
+              "per_host_vcpu": 0.5625,
+              "midpoint_per_host_vcpu": 0.5938,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0679,
+                  0.0686
+                ],
+                "observed": [
+                  0.1795,
+                  0.1844
+                ]
+              }
+            }
+          ],
+          "midpoint_per_host_vcpu": 0.5938
+        },
+        {
+          "spec": "c8i-4xlarge",
+          "replicas": [
+            {
+              "run": "c8i-4xlarge-r1",
+              "host_vcpus": 16,
+              "tested_successfully": 8,
+              "first_failed": 9,
+              "stopped_early": false,
+              "per_host_vcpu": 0.5,
+              "midpoint_per_host_vcpu": 0.5312,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.056,
+                  0.0608
+                ],
+                "observed": [
+                  0.1601,
+                  0.1605
+                ]
+              }
+            },
+            {
+              "run": "c8i-4xlarge-r2",
+              "host_vcpus": 16,
+              "tested_successfully": 9,
+              "first_failed": 10,
+              "stopped_early": false,
+              "per_host_vcpu": 0.5625,
+              "midpoint_per_host_vcpu": 0.5938,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0576,
+                  0.06
+                ],
+                "observed": [
+                  0.158,
+                  0.162
+                ]
+              }
+            }
+          ],
+          "midpoint_per_host_vcpu": 0.5625
+        },
+        {
+          "spec": "c8i-2xlarge",
+          "replicas": [
+            {
+              "run": "c8i-2xlarge-r1",
+              "host_vcpus": 8,
+              "tested_successfully": 4,
+              "first_failed": 5,
+              "stopped_early": false,
+              "per_host_vcpu": 0.5,
+              "midpoint_per_host_vcpu": 0.5625,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0549,
+                  0.0598
+                ],
+                "observed": [
+                  0.1534,
+                  0.1557
+                ]
+              }
+            },
+            {
+              "run": "c8i-2xlarge-r2",
+              "host_vcpus": 8,
+              "tested_successfully": 4,
+              "first_failed": 5,
+              "stopped_early": false,
+              "per_host_vcpu": 0.5,
+              "midpoint_per_host_vcpu": 0.5625,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0569,
+                  0.0651
+                ],
+                "observed": [
+                  0.151,
+                  0.1535
+                ]
+              }
+            }
+          ],
+          "midpoint_per_host_vcpu": 0.5625
+        },
+        {
+          "spec": "c8i-xlarge",
+          "replicas": [
+            {
+              "run": "c8i-xlarge-r1",
+              "host_vcpus": 4,
+              "tested_successfully": 2,
+              "first_failed": 3,
+              "stopped_early": false,
+              "per_host_vcpu": 0.5,
+              "midpoint_per_host_vcpu": 0.625,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0466,
+                  0.0519
+                ],
+                "observed": [
+                  0.1372,
+                  0.1452
+                ]
+              }
+            },
+            {
+              "run": "c8i-xlarge-r2",
+              "host_vcpus": 4,
+              "tested_successfully": 2,
+              "first_failed": 3,
+              "stopped_early": false,
+              "per_host_vcpu": 0.5,
+              "midpoint_per_host_vcpu": 0.625,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0527,
+                  0.0571
+                ],
+                "observed": [
+                  0.1408,
+                  0.1445
+                ]
+              }
+            }
+          ],
+          "midpoint_per_host_vcpu": 0.625
+        }
+      ]
+    },
     {
       "id": "hv-host-3",
       "title": "Metal, nested SLO",

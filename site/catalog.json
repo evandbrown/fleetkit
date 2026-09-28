@@ -44,6 +44,10 @@
         "The same SLO as the nested campaigns: each step's p50 within 1 s and p95 within 2 s.",
         "Densities are close together between 128 and 144, around where hv-host-2's trials would have crossed this SLO."
       ]
+    },
+    {
+      "id": "c8i-sizes-1",
+      "title": "Smaller c8i hosts"
     }
   ],
   "gate_allow": []
