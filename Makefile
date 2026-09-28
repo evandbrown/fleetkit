@@ -83,7 +83,8 @@ test: venv ignore-check ## offline pytest suites under harness/*, experiments/sc
 # Paths the root .gitignore must ignore, and the site's dataset builder (site/build), which is source and must
 # not be; a bare build/ rule anywhere would hide it. Checked against the root file alone, then the checkout.
 IGNORED := build/x harness/driver/build/x results/x private/x CLAUDE.local.md site/build/.staging/index.json \
-	site/build/.staging/img/a.jpg site/build/__pycache__/x.pyc site/build/tests/__pycache__/x.pyc site/build/.pytest_cache/x
+	site/build/.staging/img/a.jpg site/build/__pycache__/x.pyc site/build/tests/__pycache__/x.pyc site/build/.pytest_cache/x \
+	results harness/.venv site/node_modules
 NOT_IGNORED := site/build/build_data.py site/build/tests/test_build.py site/build/.gitignore site/build/README.md
 
 ignore-check: ## check the root .gitignore: generated files ignored, site/build's source not

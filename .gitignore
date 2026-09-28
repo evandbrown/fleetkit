@@ -32,6 +32,11 @@ CLAUDE.local.md
 
 # Evidence pulled down from the results bucket after an experiment.
 results/
+# Worktrees link these three to the main checkout. A pattern ending in / matches only a
+# directory, never a link, so the links need their own anchored patterns.
+/results
+/harness/.venv
+/site/node_modules
 build/
 # ...except the site's dataset builder, which is source. Its staging output stays ignored
 # (caches are covered by __pycache__/ and .pytest_cache/). `make ignore-check` tests these rules.
