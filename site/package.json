@@ -2,7 +2,7 @@
   "name": "fleetkit-site",
   "private": true,
   "version": "0.1.0",
-  "description": "The fleetkit site: campaign results, the experiment builder, the method.",
+  "description": "The fleetkit site: results, the experiment builder, and what we test and how.",
   "license": "Apache-2.0",
   "type": "module",
   "engines": {
@@ -31,7 +31,6 @@
     "@types/d3-scale": "4.0.9",
     "@types/d3-shape": "3.2.0",
     "@types/node": "22.20.4",
-    "marked": "18.0.14",
     "svelte": "5.57.1",
     "svelte-check": "4.7.6",
     "typescript": "5.9.3",

@@ -1,10 +1,168 @@
 {
-  "schema": "fleetkit-site-data/1",
-  "latest": "nested-sizes-synthetic",
+  "schema": "fleetkit-site-data/2",
+  "featured": "nested-sizes-synthetic",
   "campaigns": [
     {
+      "id": "nested-hv-synthetic",
+      "title": "Synthetic hypervisors",
+      "question": "On a nested m8i.4xlarge, does Cloud Hypervisor reach the same density as Firecracker when both have the same devices?",
+      "started": "2026-09-27T20:00Z",
+      "status": "partial",
+      "synthetic": true,
+      "replicas": 2,
+      "specs": [
+        {
+          "name": "firecracker",
+          "label": "Firecracker, pci, random-number device"
+        },
+        {
+          "name": "cloud-hypervisor",
+          "label": "Cloud Hypervisor, pci, random-number device"
+        },
+        {
+          "name": "firecracker-mmio",
+          "label": "Firecracker, mmio, no random-number device"
+        }
+      ],
+      "runs": 6,
+      "outcomes": [
+        {
+          "spec": "firecracker",
+          "replicas": [
+            {
+              "run": "firecracker-r1",
+              "host_vcpus": 16,
+              "tested_successfully": 10,
+              "first_failed": 11,
+              "stopped_early": false,
+              "per_host_vcpu": 0.625,
+              "midpoint_per_host_vcpu": 0.6563,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0743,
+                  0.08
+                ],
+                "observed": [
+                  0.1735,
+                  0.1808
+                ]
+              }
+            },
+            {
+              "run": "firecracker-r2",
+              "host_vcpus": 16,
+              "tested_successfully": 10,
+              "first_failed": 11,
+              "stopped_early": false,
+              "per_host_vcpu": 0.625,
+              "midpoint_per_host_vcpu": 0.6563,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0758,
+                  0.0773
+                ],
+                "observed": [
+                  0.1783,
+                  0.1804
+                ]
+              }
+            }
+          ],
+          "midpoint_per_host_vcpu": 0.6563
+        },
+        {
+          "spec": "cloud-hypervisor",
+          "replicas": [
+            {
+              "run": "cloud-hypervisor-r1",
+              "host_vcpus": 16,
+              "tested_successfully": 9,
+              "first_failed": 10,
+              "stopped_early": false,
+              "per_host_vcpu": 0.5625,
+              "midpoint_per_host_vcpu": 0.5938,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.08,
+                  0.082
+                ],
+                "observed": [
+                  0.1877,
+                  0.1965
+                ]
+              }
+            },
+            {
+              "run": "cloud-hypervisor-r2",
+              "host_vcpus": 16,
+              "tested_successfully": 9,
+              "first_failed": null,
+              "stopped_early": true,
+              "per_host_vcpu": 0.5625,
+              "midpoint_per_host_vcpu": null,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0791,
+                  0.0791
+                ],
+                "observed": [
+                  0.1919,
+                  0.1919
+                ]
+              }
+            }
+          ],
+          "midpoint_per_host_vcpu": null
+        },
+        {
+          "spec": "firecracker-mmio",
+          "replicas": [
+            {
+              "run": "firecracker-mmio-r1",
+              "host_vcpus": 16,
+              "tested_successfully": 8,
+              "first_failed": 9,
+              "stopped_early": false,
+              "per_host_vcpu": 0.5,
+              "midpoint_per_host_vcpu": 0.5313,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0816,
+                  0.0873
+                ],
+                "observed": [
+                  0.2009,
+                  0.2142
+                ]
+              }
+            },
+            {
+              "run": "firecracker-mmio-r2",
+              "host_vcpus": 16,
+              "tested_successfully": 9,
+              "first_failed": null,
+              "stopped_early": true,
+              "per_host_vcpu": 0.5625,
+              "midpoint_per_host_vcpu": null,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0821,
+                  0.0838
+                ],
+                "observed": [
+                  0.1934,
+                  0.1954
+                ]
+              }
+            }
+          ],
+          "midpoint_per_host_vcpu": null
+        }
+      ]
+    },
+    {
       "id": "nested-sizes-synthetic",
-      "title": "Synthetic: two host sizes",
+      "title": "Synthetic host sizes",
       "question": "Does density per host vCPU stay the same when the worker host doubles from 8 to 16 vCPUs, with 2 vCPU / 2 GiB Firecracker microVMs?",
       "started": "2026-09-27T18:00Z",
       "status": "complete",
@@ -13,88 +171,102 @@
       "specs": [
         {
           "name": "m8i-4xlarge",
-          "label": "m8i.4xlarge (16 vCPUs)"
+          "label": "m8i.4xlarge"
         },
         {
           "name": "m8i-2xlarge",
-          "label": "m8i.2xlarge (8 vCPUs)"
+          "label": "m8i.2xlarge"
         }
       ],
       "runs": 4,
       "outcomes": [
         {
           "spec": "m8i-4xlarge",
-          "runs": [
-            "m8i-4xlarge-r1",
-            "m8i-4xlarge-r2"
-          ],
-          "tested_successfully": [
-            8,
-            8
-          ],
-          "per_host_vcpu": [
-            0.5,
-            0.5
-          ],
-          "cost_per_1000_tasks": [
+          "replicas": [
             {
-              "execution": [
-                0.0872,
-                0.0898
-              ],
-              "observed": [
-                0.2107,
-                0.214
-              ]
+              "run": "m8i-4xlarge-r1",
+              "host_vcpus": 16,
+              "tested_successfully": 8,
+              "first_failed": 12,
+              "stopped_early": false,
+              "per_host_vcpu": 0.5,
+              "midpoint_per_host_vcpu": 0.625,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0808,
+                  0.0856
+                ],
+                "observed": [
+                  0.206,
+                  0.2121
+                ]
+              }
             },
             {
-              "execution": [
-                0.0839,
-                0.0867
-              ],
-              "observed": [
-                0.2063,
-                0.2117
-              ]
+              "run": "m8i-4xlarge-r2",
+              "host_vcpus": 16,
+              "tested_successfully": 8,
+              "first_failed": 12,
+              "stopped_early": false,
+              "per_host_vcpu": 0.5,
+              "midpoint_per_host_vcpu": 0.625,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0835,
+                  0.0847
+                ],
+                "observed": [
+                  0.2063,
+                  0.2095
+                ]
+              }
             }
-          ]
+          ],
+          "midpoint_per_host_vcpu": 0.625
         },
         {
           "spec": "m8i-2xlarge",
-          "runs": [
-            "m8i-2xlarge-r1",
-            "m8i-2xlarge-r2"
-          ],
-          "tested_successfully": [
-            4,
-            3
-          ],
-          "per_host_vcpu": [
-            0.5,
-            0.375
-          ],
-          "cost_per_1000_tasks": [
+          "replicas": [
             {
-              "execution": [
-                0.0808,
-                0.0829
-              ],
-              "observed": [
-                0.1998,
-                0.203
-              ]
+              "run": "m8i-2xlarge-r1",
+              "host_vcpus": 8,
+              "tested_successfully": 4,
+              "first_failed": 6,
+              "stopped_early": false,
+              "per_host_vcpu": 0.5,
+              "midpoint_per_host_vcpu": 0.625,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0847,
+                  0.0894
+                ],
+                "observed": [
+                  0.2044,
+                  0.2099
+                ]
+              }
             },
             {
-              "execution": [
-                0.0871,
-                0.0918
-              ],
-              "observed": [
-                0.241,
-                0.2467
-              ]
+              "run": "m8i-2xlarge-r2",
+              "host_vcpus": 8,
+              "tested_successfully": 3,
+              "first_failed": 4,
+              "stopped_early": false,
+              "per_host_vcpu": 0.375,
+              "midpoint_per_host_vcpu": 0.4375,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0868,
+                  0.0902
+                ],
+                "observed": [
+                  0.2386,
+                  0.2507
+                ]
+              }
             }
-          ]
+          ],
+          "midpoint_per_host_vcpu": 0.5313
         }
       ]
     },
@@ -116,27 +288,28 @@
       "outcomes": [
         {
           "spec": "baseline",
-          "runs": [
-            "baseline-r1"
-          ],
-          "tested_successfully": [
-            8
-          ],
-          "per_host_vcpu": [
-            0.5
-          ],
-          "cost_per_1000_tasks": [
+          "replicas": [
             {
-              "execution": [
-                0.0681,
-                0.0827
-              ],
-              "observed": [
-                0.1843,
-                0.2014
-              ]
+              "run": "baseline-r1",
+              "host_vcpus": 16,
+              "tested_successfully": 8,
+              "first_failed": 12,
+              "stopped_early": false,
+              "per_host_vcpu": 0.5,
+              "midpoint_per_host_vcpu": 0.625,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0681,
+                  0.0827
+                ],
+                "observed": [
+                  0.1843,
+                  0.2014
+                ]
+              }
             }
-          ]
+          ],
+          "midpoint_per_host_vcpu": 0.625
         }
       ]
     }

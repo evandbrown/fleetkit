@@ -1,6 +1,6 @@
 {
   "name": "nested-hv-1",
-  "question": "On a nested m8i.4xlarge, with microVMs of 2 vCPUs and 2 GiB that have the same devices (PCI and a random-number device), does Cloud Hypervisor reach the same density as Firecracker? A third spec runs Firecracker as cap-baseline-1 did, to show whether the devices alone move the result.",
+  "question": "Does Cloud Hypervisor fit as many microVMs as Firecracker?",
   "replicas": 2,
   "shutdown_after_minutes": 45,
   "base": {
@@ -29,8 +29,8 @@
     }
   },
   "why": {
-    "firecracker": "Firecracker with the devices Cloud Hypervisor always has, so the two differ only in the hypervisor.",
-    "cloud-hypervisor": "The alternative hypervisor, which only offers PCI devices and always adds a random-number device.",
-    "firecracker-mmio": "Firecracker as cap-baseline-1 ran it, so a difference from the firecracker spec is the devices' doing, and the result links back to that run."
+    "firecracker": "Same devices as Cloud Hypervisor: PCI and RNG.",
+    "cloud-hypervisor": "The alternative hypervisor.",
+    "firecracker-mmio": "Firecracker as the baseline ran it: MMIO."
   }
 }

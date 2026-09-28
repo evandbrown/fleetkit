@@ -1,0 +1,3 @@
+# Copy to terraform.tfvars (gitignored). Find both values with the commands in README.md.
+site_bucket     = "evan-mx-site-<management-account-id>"
+distribution_id = "<ID of the distribution whose alternate domain name is evan.mx>"

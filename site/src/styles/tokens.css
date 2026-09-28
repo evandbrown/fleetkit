@@ -1,20 +1,31 @@
-/* Theme tokens. Light by default; dark from the system unless the viewer chose light, or when they chose dark.
-   Colours for steps, boot phases and the microVM vCPU series are the explorer spec's validated sets. */
+/* Design tokens. Light only: one theme, one accent (blue), warm neutrals.
+   Colours for steps, boot phases and the categorical series are the explorer spec's validated sets; they encode
+   data, so they're not accents. */
 :root {
   color-scheme: light;
-  --bg: #fcfcfb;
-  --surface: #f4f3f0;
-  --surface-2: #ebeae6;
-  --ink: #1f1e1c;
+
+  /* surfaces and ink */
+  --bg: #ffffff;
+  --surface: #f6f5f2;
+  --surface-2: #ecebe6;
+  --ink: #1b1a18;
   --ink-2: #4f4e4a;
-  --muted: #898781;
-  --rule: #dcdbd6;
+  --muted: #86847e;
+  --rule: #e2e0da;
+
+  /* the one accent: marks and fills in --accent, text on white or --highlight in --accent-ink */
   --accent: #2a78d6;
-  --good: #0ca30c;
+  --accent-ink: #1c5fb2;
+  --highlight: #eaf2fc;
+
+  /* pass and fail */
+  --good: #13893a;
+  --good-bg: #e7f5ec;
   --critical: #d03b3b;
+  --critical-bg: #fcebeb;
+
   --synthetic-bg: #fff4d6;
   --synthetic-ink: #6b4a00;
-  --violet: #4a3aa7;
 
   /* steps, in fixed order */
   --step-home: #2a78d6;
@@ -40,90 +51,25 @@
   --series-8: #e34948;
 
   /* chart chrome */
-  --grid: #e1e0d9;
+  --grid: #eceae4;
   --axis: #c3c2b7;
-  --highlight: #e5effb;
 
+  /* form fields */
+  --field-bg: #ffffff;
+  --field-border: #d3d1ca;
+
+  /* type and layout */
   --font: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --gutter: 16px;
-  --measure: 72ch;
+  --measure: 68ch;
   --page: 1080px;
-  --radius: 6px;
+  --radius: 8px;
+  --shadow: 0 1px 2px rgb(27 26 24 / 0.04), 0 4px 16px rgb(27 26 24 / 0.05);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) {
-    color-scheme: dark;
-    --bg: #1a1a19;
-    --surface: #232321;
-    --surface-2: #2d2d2a;
-    --ink: #ecebe7;
-    --ink-2: #bdbcb6;
-    --muted: #8f8e88;
-    --rule: #3a3936;
-    --accent: #3987e5;
-    --good: #2fb82f;
-    --critical: #ef6262;
-    --synthetic-bg: #3d3212;
-    --synthetic-ink: #f5d98a;
-    --violet: #9085e9;
-    --step-home: #3987e5;
-    --step-search: #d95926;
-    --step-open-product: #199e70;
-    --step-add-to-cart: #c98500;
-    --step-verify-cart: #d55181;
-    --ordinal-1: #52514c;
-    --ordinal-2: #6f6e69;
-    --ordinal-3: #8d8c86;
-    --ordinal-4: #abaaa4;
-    --series-1: #3987e5;
-    --series-2: #d95926;
-    --series-3: #199e70;
-    --series-4: #c98500;
-    --series-5: #d55181;
-    --series-6: #008300;
-    --series-7: #9085e9;
-    --series-8: #e66767;
-    --grid: #2c2c2a;
-    --axis: #383835;
-    --highlight: #1d2c40;
+@media (min-width: 720px) {
+  :root {
+    --gutter: 32px;
   }
-}
-
-:root[data-theme='dark'] {
-  color-scheme: dark;
-  --bg: #1a1a19;
-  --surface: #232321;
-  --surface-2: #2d2d2a;
-  --ink: #ecebe7;
-  --ink-2: #bdbcb6;
-  --muted: #8f8e88;
-  --rule: #3a3936;
-  --accent: #3987e5;
-  --good: #2fb82f;
-  --critical: #ef6262;
-  --synthetic-bg: #3d3212;
-  --synthetic-ink: #f5d98a;
-  --violet: #9085e9;
-  --step-home: #3987e5;
-  --step-search: #d95926;
-  --step-open-product: #199e70;
-  --step-add-to-cart: #c98500;
-  --step-verify-cart: #d55181;
-  --ordinal-1: #52514c;
-  --ordinal-2: #6f6e69;
-  --ordinal-3: #8d8c86;
-  --ordinal-4: #abaaa4;
-  --series-1: #3987e5;
-  --series-2: #d95926;
-  --series-3: #199e70;
-  --series-4: #c98500;
-  --series-5: #d55181;
-  --series-6: #008300;
-  --series-7: #9085e9;
-  --series-8: #e66767;
-  --grid: #2c2c2a;
-  --axis: #383835;
-  --highlight: #1d2c40;
 }

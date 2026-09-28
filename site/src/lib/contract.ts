@@ -1,21 +1,23 @@
 // Checks a dataset against DATA.md. Each function returns a list of problems; an empty list means it holds.
-// The builder refuses a document with problems; the tests run these over the fixtures.
+// The builder refuses a dataset with problems; the tests run these over the fixtures.
 import {
   costPer1000,
   countsTowardResult,
   densityBriefs,
   hostKindOf,
+  meanMidpoint,
   meetsEveryCriterion,
+  midpoint,
   parseTrialId,
   runResultCore,
 } from './derive';
-import { getPath, SPEC_PATHS, typedCopy, type TypedField } from './spec';
-import { SCHEMA, type CampaignDoc, type Index, type RunDoc, type TrialDoc } from './types';
+import { flatten } from './spec';
+import { SCHEMA, type CampaignDoc, type Index, type ReplicaResult, type RunDoc, type RunEntry, type TrialDoc } from './types';
 import { retiredWordsInJson } from './words';
 
 const ID = /^[a-z0-9][a-z0-9-]*$/;
 const WHEN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z$/;
-const close = (a: number | null | undefined, b: number | null | undefined, tol = 1e-6) =>
+const close = (a: number | null | undefined, b: number | null | undefined, tol = 1e-3) =>
   a === b || (typeof a === 'number' && typeof b === 'number' && Math.abs(a - b) <= tol * Math.max(1, Math.abs(b)));
 /** Deep equality that ignores key order. */
 function canon(v: unknown): unknown {
@@ -27,15 +29,43 @@ function canon(v: unknown): unknown {
 }
 const same = (a: unknown, b: unknown) => JSON.stringify(canon(a)) === JSON.stringify(canon(b));
 
+/** Deep merge as expand.py does it: objects key by key, lists and values replace. */
+function merge(base: object, changes: object): object {
+  const out: Record<string, unknown> = structuredClone(base) as Record<string, unknown>;
+  for (const [k, v] of Object.entries(changes)) {
+    out[k] =
+      v && typeof v === 'object' && !Array.isArray(v) && out[k] && typeof out[k] === 'object'
+        ? merge(out[k] as object, v as object)
+        : structuredClone(v);
+  }
+  return out;
+}
+
+/** A synthetic campaign's title starts with the word Synthetic ("Synthetic host sizes"). */
+const SYNTHETIC_TITLE = /^Synthetic\b/;
 
 function syntheticMarks(p: string[], where: string, x: { id: string; title?: string; synthetic?: true }) {
   if (x.synthetic) {
     if (!x.id.endsWith('-synthetic')) p.push(`${where}: synthetic, but the id doesn't end in -synthetic`);
-    if (x.title !== undefined && !x.title.startsWith('Synthetic:')) p.push(`${where}: synthetic, but the title doesn't start with "Synthetic:"`);
+    if (x.title !== undefined && !SYNTHETIC_TITLE.test(x.title)) p.push(`${where}: synthetic, but the title doesn't start with "Synthetic"`);
   } else {
     if (x.id.endsWith('-synthetic')) p.push(`${where}: id ends in -synthetic but synthetic is not true`);
-    if (x.title?.startsWith('Synthetic:')) p.push(`${where}: title says Synthetic but synthetic is not true`);
+    if (x.title !== undefined && SYNTHETIC_TITLE.test(x.title)) p.push(`${where}: title says Synthetic but synthetic is not true`);
   }
+}
+
+/** Rule 6 and the outcome's fields, from a run's entry. */
+function replicaOf(r: RunEntry): ReplicaResult {
+  return {
+    run: r.id,
+    host_vcpus: r.host.vcpus,
+    tested_successfully: r.result.tested_successfully,
+    first_failed: r.result.first_failed,
+    stopped_early: r.stopped_early,
+    per_host_vcpu: r.result.per_host_vcpu,
+    midpoint_per_host_vcpu: r.result.midpoint_per_host_vcpu,
+    cost_per_1000_tasks: r.result.cost_per_1000_tasks,
+  };
 }
 
 export function checkIndex(index: Index): string[] {
@@ -43,10 +73,8 @@ export function checkIndex(index: Index): string[] {
   if (index.schema !== SCHEMA) p.push(`index: schema ${index.schema}`);
   const ids = index.campaigns.map((c) => c.id);
   if (new Set(ids).size !== ids.length) p.push('index: duplicate campaign ids');
-  if (index.latest !== null && !ids.includes(index.latest)) p.push(`index: latest ${index.latest} is not listed`);
-  if (index.latest === null && ids.length) p.push('index: latest is null but campaigns are listed');
-  const newest = [...index.campaigns].sort((a, b) => b.started.localeCompare(a.started))[0];
-  if (newest && index.latest !== newest.id) p.push(`index: latest should be ${newest.id}, the most recently started`);
+  if (index.featured !== null && !ids.includes(index.featured)) p.push(`index: featured ${index.featured} is not listed`);
+  if (index.featured === null && ids.length) p.push('index: featured is null but campaigns are listed');
   for (let i = 1; i < index.campaigns.length; i++) {
     if (index.campaigns[i - 1].started < index.campaigns[i].started) p.push('index: campaigns are not newest first');
   }
@@ -55,7 +83,7 @@ export function checkIndex(index: Index): string[] {
     if (!ID.test(c.id)) p.push(`${w}: bad id`);
     if (!WHEN.test(c.started)) p.push(`${w}: started ${c.started} is not ISO UTC to the minute`);
     syntheticMarks(p, w, c);
-    if (c.outcomes.length !== c.specs.length) p.push(`${w}: one outcome per spec`);
+    if (!same(c.outcomes.map((o) => o.spec), c.specs.map((s) => s.name))) p.push(`${w}: one outcome per spec, in spec order`);
   }
   p.push(...retiredWordsInJson(index).map((h) => `index: retired word at ${h}`));
   return p;
@@ -75,50 +103,42 @@ export function checkCampaign(doc: CampaignDoc, entry?: Index['campaigns'][numbe
     if (entry.runs !== doc.runs.length) p.push(`${w}: runs differ from the index entry`);
     if (!same(entry.specs, doc.specs.map((s) => ({ name: s.name, label: s.label })))) p.push(`${w}: specs differ from the index entry`);
   }
-  if (doc.before_campaigns && (doc.specs.length !== 1 || doc.definition.replicas !== 1)) {
-    p.push(`${w}: a campaign of one has one spec and one replica`);
-  }
-  if (doc.definition.id !== doc.id || doc.definition.question !== doc.question) p.push(`${w}: definition id/question differ`);
+  const def = doc.definition;
+  if (def.name !== doc.id || def.question !== doc.question) p.push(`${w}: the definition's name or question differs`);
+  if (doc.before_campaigns && (doc.specs.length !== 1 || def.replicas !== 1)) p.push(`${w}: a campaign of one has one spec and one replica`);
+  if (def.shutdown_after_minutes === undefined && !doc.reconstructed) p.push(`${w}: only a reconstructed definition lacks shutdown_after_minutes`);
 
-  // Specs: names, changes from the base, typed copies.
+  // Specs: the definition's, in order, each the base merged with its changes.
   const names = doc.specs.map((s) => s.name);
-  if (new Set(names).size !== names.length) p.push(`${w}: duplicate spec names`);
-  if (!same(names, doc.definition.specs.map((s) => s.name))) p.push(`${w}: specs differ from the definition's`);
-  const fieldPaths = new Set(doc.spec_fields.map((f) => f.path));
+  if (!same(names, Object.keys(def.specs))) p.push(`${w}: specs differ from the definition's`);
+  const baseFlat = flatten(def.base);
   for (const s of doc.specs) {
     const ws = `${w} spec ${s.name}`;
     if (!ID.test(s.name)) p.push(`${ws}: bad name`);
-    const def = doc.definition.specs.find((d) => d.name === s.name);
-    const declared = Object.entries(def?.changes ?? {});
-    if (!same(declared.map(([k]) => k).sort(), s.changes.map((c) => c.path).sort())) p.push(`${ws}: changes differ from the definition`);
+    if (!same(merge(def.base, def.specs[s.name] ?? {}), s.spec)) p.push(`${ws}: spec isn't the base merged with its changes`);
+    const flat = flatten(s.spec);
+    const differ = Object.keys(flat).filter((k) => !same(flat[k], baseFlat[k]));
+    if (!same(s.changes.map((c) => c.path).sort(), differ.sort())) p.push(`${ws}: changes don't list exactly where it differs from the base`);
     for (const c of s.changes) {
-      if (!fieldPaths.has(c.path)) p.push(`${ws}: change ${c.path} has no spec_fields entry`);
-      if (!same(getPath(doc.definition.base, c.path), c.base)) p.push(`${ws}: change ${c.path}: base value differs from the definition's base`);
-      if (!same(getPath(s.spec, c.path), c.value)) p.push(`${ws}: change ${c.path}: value differs from the resolved spec`);
-      if (!same(def?.changes[c.path], c.value)) p.push(`${ws}: change ${c.path}: value differs from the definition`);
-      if (same(c.base, c.value)) p.push(`${ws}: change ${c.path} doesn't change anything`);
+      if (!same(c.base, baseFlat[c.path]) || !same(c.value, flat[c.path])) p.push(`${ws}: change ${c.path} has the wrong values`);
     }
-    for (const [field, path] of Object.entries(SPEC_PATHS) as [TypedField, string][]) {
-      const v = getPath(s.spec, path);
-      if (v !== undefined && !same(v, typedCopy(s, field))) p.push(`${ws}: typed copy of ${path} differs from the spec`);
-    }
-    if (s.host_kind !== hostKindOf(s.instance_type)) p.push(`${ws}: host_kind isn't derived from the instance type`);
-    if (s.densities.some((d, i) => !Number.isInteger(d) || d < 1 || (i > 0 && d <= s.densities[i - 1]))) {
+    if ((def.why?.[s.name] ?? undefined) !== s.why) p.push(`${ws}: why differs from the definition's`);
+    if (s.host.instance_type !== s.spec.worker_host.instance_type) p.push(`${ws}: host isn't the spec's instance type`);
+    if (s.host.host_kind !== hostKindOf(s.host.instance_type)) p.push(`${ws}: host kind doesn't follow from the instance type`);
+    if (s.spec.densities.some((d, i) => !Number.isInteger(d) || d < 1 || (i > 0 && d <= s.spec.densities[i - 1]))) {
       p.push(`${ws}: densities must be ascending positive integers`);
     }
   }
 
-  // Runs: ids, counts, results recomputed from their densities.
+  // Runs: ids, order, results recomputed from their densities (rules 4 and 6).
   const runIds = doc.runs.map((r) => r.id);
   if (new Set(runIds).size !== runIds.length) p.push(`${w}: duplicate run ids`);
   const expectedOrder = doc.specs.flatMap((s) =>
     doc.runs.filter((r) => r.spec === s.name).sort((a, b) => a.replica - b.replica).map((r) => r.id),
   );
   if (!same(runIds, expectedOrder)) p.push(`${w}: runs are not in spec order, then replica order`);
-  const incomplete = doc.runs.some((r) => r.status === 'incomplete');
-  if (doc.status !== (incomplete || doc.runs.length < doc.specs.length * doc.definition.replicas ? 'partial' : 'complete')) {
-    p.push(`${w}: status should be ${incomplete ? 'partial' : 'complete'}`);
-  }
+  const complete = doc.runs.length === doc.specs.length * def.replicas && !doc.runs.some((r) => r.stopped_early);
+  if (doc.status !== (complete ? 'complete' : 'partial')) p.push(`${w}: status should be ${complete ? 'complete' : 'partial'}`);
   for (const r of doc.runs) {
     const wr = `${w} run ${r.id}`;
     const spec = doc.specs.find((s) => s.name === r.spec);
@@ -127,48 +147,35 @@ export function checkCampaign(doc: CampaignDoc, entry?: Index['campaigns'][numbe
       continue;
     }
     if (r.id !== `${r.spec}-r${r.replica}`) p.push(`${wr}: id should be ${r.spec}-r${r.replica}`);
-    if (r.replica < 1 || r.replica > doc.definition.replicas) p.push(`${wr}: replica out of range`);
-    if (r.host.host_kind !== hostKindOf(r.host.instance_type)) p.push(`${wr}: host_kind isn't derived from the instance type`);
-    if (r.host.instance_type !== spec.instance_type) p.push(`${wr}: measured instance type ${r.host.instance_type} isn't the spec's ${spec.instance_type}`);
-    if (!same(r.by_density.map((b) => b.density), spec.densities)) p.push(`${wr}: by_density doesn't list the spec's densities`);
-    if (r.status === 'incomplete') {
-      if (r.result !== null) p.push(`${wr}: an incomplete run has no result`);
-      continue;
-    }
-    if (!r.result) {
-      p.push(`${wr}: a complete run needs a result`);
-      continue;
+    if (r.replica < 1 || r.replica > def.replicas) p.push(`${wr}: replica out of range`);
+    if (r.host.instance_type !== spec.host.instance_type) p.push(`${wr}: ran on ${r.host.instance_type}, its spec says ${spec.host.instance_type}`);
+    if (r.host.host_kind !== spec.host.host_kind) p.push(`${wr}: host kind differs from its spec's`);
+    if (!same(r.by_density.map((b) => b.density), spec.spec.densities)) p.push(`${wr}: by_density doesn't list the spec's densities`);
+    for (const b of r.by_density) {
+      if (b.trial_results.length !== b.trials || b.trial_results.filter(Boolean).length !== b.passed) {
+        p.push(`${wr} density ${b.density}: trial_results disagree with passed and trials`);
+      }
     }
     const core = runResultCore(r.by_density);
-    for (const k of ['tested_successfully', 'first_failed', 'not_tried', 'not_run'] as const) {
+    for (const k of ['tested_successfully', 'first_failed', 'gap', 'not_tested'] as const) {
       if (!same(core[k], r.result[k])) p.push(`${wr}: result.${k} is ${JSON.stringify(r.result[k])}, rule 4 gives ${JSON.stringify(core[k])}`);
     }
     const t = r.result.tested_successfully;
-    if (!close(r.result.per_host_vcpu, t === null ? null : t / r.host.vcpus)) p.push(`${wr}: per_host_vcpu ≠ tested ÷ host vCPUs`);
-    if (!close(r.result.vcpus_allocated_per_host_vcpu, t === null ? null : (t * spec.microvm.vcpus) / r.host.vcpus)) {
-      p.push(`${wr}: vcpus_allocated_per_host_vcpu is wrong`);
-    }
-    if ((r.result.first_failed === null) !== (r.result.limit === null)) p.push(`${wr}: limit exists exactly when a density failed`);
+    if (!close(r.result.per_host_vcpu, t === null ? null : t / r.host.vcpus)) p.push(`${wr}: per_host_vcpu ≠ result ÷ host vCPUs`);
+    if (!close(r.result.midpoint_per_host_vcpu, midpoint(t, r.result.first_failed, r.host.vcpus))) p.push(`${wr}: midpoint doesn't follow rule 6`);
+    if ((r.result.first_failed === null) !== (r.result.limit === null)) p.push(`${wr}: a limit exists exactly when a density failed`);
     if (r.result.limit && r.result.limit.density !== r.result.first_failed) p.push(`${wr}: limit.density ≠ first_failed`);
-    if ((t === null) !== (r.result.cost_per_1000_tasks === null)) p.push(`${wr}: cost exists exactly when a density passed`);
+    if (t === null && r.result.cost_per_1000_tasks !== null) p.push(`${wr}: cost only when a density passed`);
   }
 
   // Outcomes per spec, from the runs.
   if (!same(doc.outcomes.map((o) => o.spec), names)) p.push(`${w}: one outcome per spec, in spec order`);
   for (const o of doc.outcomes) {
-    const runs = doc.runs.filter((r) => r.spec === o.spec).sort((a, b) => a.replica - b.replica);
-    const want = {
-      spec: o.spec,
-      runs: runs.map((r) => r.id),
-      tested_successfully: runs.map((r) => r.result?.tested_successfully ?? null),
-      per_host_vcpu: runs.map((r) => r.result?.per_host_vcpu ?? null),
-      cost_per_1000_tasks: runs.map((r) =>
-        r.result?.cost_per_1000_tasks
-          ? { execution: r.result.cost_per_1000_tasks.execution, observed: r.result.cost_per_1000_tasks.observed }
-          : null,
-      ),
-    };
-    if (!same(o, want)) p.push(`${w}: outcome for ${o.spec} doesn't match its runs`);
+    const want = doc.runs.filter((r) => r.spec === o.spec).sort((a, b) => a.replica - b.replica).map(replicaOf);
+    if (!same(o.replicas, want)) p.push(`${w}: outcome for ${o.spec} doesn't match its runs`);
+    if (!close(o.midpoint_per_host_vcpu, meanMidpoint(want.map((x) => x.midpoint_per_host_vcpu)))) {
+      p.push(`${w}: ${o.spec}'s midpoint isn't the mean of its replicas'`);
+    }
   }
   p.push(...retiredWordsInJson(doc).map((h) => `${w}: retired word at ${h}`));
   return p;
@@ -183,11 +190,11 @@ export function checkRun(run: RunDoc, campaign: CampaignDoc): string[] {
   const entry = campaign.runs.find((r) => r.id === run.id);
   const spec = campaign.specs.find((s) => s.name === run.spec);
   if (!entry || !spec) return [...p, `${w}: not in its campaign`];
-  for (const k of ['spec', 'replica', 'status', 'note', 'started', 'duration_s', 'host', 'result'] as const) {
+  for (const k of ['spec', 'replica', 'stopped_early', 'started', 'duration_s', 'host', 'result'] as const) {
     if (!same(entry[k], run[k])) p.push(`${w}: ${k} differs from the campaign's entry`);
   }
-  const briefOf = (b: { density: number; result: string; passed: number; trials: number }) =>
-    ({ density: b.density, result: b.result, passed: b.passed, trials: b.trials });
+  const briefOf = (b: RunEntry['by_density'][number]) =>
+    ({ density: b.density, result: b.result, passed: b.passed, trials: b.trials, trial_results: b.trial_results });
   if (!same(entry.by_density, run.by_density.map(briefOf))) p.push(`${w}: by_density differs from the campaign's entry`);
 
   // Trials: ids, order, numbering, pass values.
@@ -214,43 +221,41 @@ export function checkRun(run: RunDoc, campaign: CampaignDoc): string[] {
       else if (t.passed !== meetsEveryCriterion(t)) p.push(`${wt}: passed is ${t.passed} but rule 1 gives ${!t.passed}`);
       if (t.passed === false && t.failed.length === 0) p.push(`${wt}: a failed trial says which criteria it failed`);
       if (t.passed === true && t.failed.length) p.push(`${wt}: a passed trial lists no failures`);
-      if (!spec.densities.includes(t.density)) p.push(`${wt}: density ${t.density} isn't in the spec`);
+      if (!spec.spec.densities.includes(t.density)) p.push(`${wt}: density ${t.density} isn't in the spec`);
     } else {
       if (parsed.role !== t.role) p.push(`${wt}: id doesn't match role ${t.role}`);
       const k = (nth.get(t.role) ?? 0) + 1;
       if (parsed.nth !== k) p.push(`${wt}: should be ${k === 1 ? t.role : `${t.role}-${k}`}`);
       nth.set(t.role, k);
-      if (t.number !== null || t.passed !== null) p.push(`${wt}: a trial that doesn't count has no number and no pass value`);
-      if (!t.excluded_because) p.push(`${wt}: say why it's excluded`);
-      if (t.cost_per_1000_tasks !== null) p.push(`${wt}: no cost for a trial that doesn't count`);
+      if (t.number !== null || t.passed !== null) p.push(`${wt}: a labelled trial has no number and no pass value`);
+      if (!t.excluded_because) p.push(`${wt}: say why it isn't judged`);
+      if (t.cost_per_1000_tasks !== null) p.push(`${wt}: no cost for a labelled trial`);
     }
     if (t.tasks.of > t.density || t.ready.microvms > t.density) p.push(`${wt}: more tasks or microVMs than its density`);
   }
 
   // Per density: rule 3 and the derived columns.
-  const briefs = densityBriefs(spec.densities, run.trials);
-  if (!same(briefs, run.by_density.map(briefOf))) p.push(`${w}: by_density doesn't follow rule 3 from the trials`);
+  const briefs = densityBriefs(spec.spec.densities, run.trials);
+  if (!same(briefs, run.by_density.map(briefOf))) {
+    p.push(`${w}: by_density doesn't follow rule 3 from the trials`);
+  }
   for (const d of run.by_density) {
     const wd = `${w} density ${d.density}`;
     const at = run.trials.filter((t) => t.counts && t.density === d.density).sort((a, b) => a.number! - b.number!);
     if (!same(d.trial_ids, at.map((t) => t.id))) p.push(`${wd}: trial_ids`);
-    if (d.vcpus_allocated !== d.density * spec.microvm.vcpus) p.push(`${wd}: vcpus_allocated`);
-    if (!close(d.mem_allocated_gib, (d.density * (spec.microvm.mem_mib + spec.microvm.mem_overhead_mib)) / 1024, 1e-3)) {
-      p.push(`${wd}: mem_allocated_gib`);
-    }
+    if (!same(d.trial_results, at.map((t) => t.passed))) p.push(`${wd}: trial_results`);
+    if (d.vcpus_allocated !== d.density * spec.spec.microvm.vcpus) p.push(`${wd}: vcpus_allocated`);
     if (d.cost_per_1000_tasks && d.result !== 'passed') p.push(`${wd}: cost only at densities that passed`);
   }
-  const t = run.result?.tested_successfully ?? null;
-  if (t !== null && run.has.cost) {
+  const t = run.result.tested_successfully;
+  if (t !== null) {
     const d = run.by_density.find((b) => b.density === t);
-    if (!same(d?.cost_per_1000_tasks, run.result?.cost_per_1000_tasks)) p.push(`${w}: result cost ≠ cost at the density tested successfully`);
+    if (!same(d?.cost_per_1000_tasks ?? null, run.result.cost_per_1000_tasks)) p.push(`${w}: result cost ≠ cost at its result's density`);
   }
-  if (run.has.cost) {
-    for (const tr of run.trials.filter((x) => x.counts && x.cost_per_1000_tasks && x.marks.release_ms !== null && x.marks.last_return_ms !== null)) {
-      const secs = (tr.marks.last_return_ms! - tr.marks.release_ms!) / 1000;
-      if (!close(tr.cost_per_1000_tasks!.execution, costPer1000(spec.price_usd_per_hour, secs, tr.density), 0.02)) {
-        p.push(`${w} trial ${tr.id}: execution cost doesn't follow rule 5`);
-      }
+  for (const tr of run.trials.filter((x) => x.counts && x.cost_per_1000_tasks && x.marks.release_ms !== null && x.marks.last_return_ms !== null)) {
+    const secs = (tr.marks.last_return_ms! - tr.marks.release_ms!) / 1000;
+    if (!close(tr.cost_per_1000_tasks!.execution, costPer1000(spec.host.price_usd_per_hour, secs, tr.density), 0.02)) {
+      p.push(`${w} trial ${tr.id}: execution cost doesn't follow rule 5`);
     }
   }
 
@@ -263,7 +268,6 @@ export function checkRun(run: RunDoc, campaign: CampaignDoc): string[] {
   cols('steps', run.steps as unknown as Record<string, unknown[]>);
   const known = new Set(ids);
   if (run.tasks.trial.some((x) => !known.has(x)) || run.steps.trial.some((x) => !known.has(x))) p.push(`${w}: a task or step names an unknown trial`);
-  if (run.overview.t_s.length !== run.overview.cpu_util_pct.length) p.push(`${w}: overview columns differ in length`);
   p.push(...retiredWordsInJson(run).map((h) => `${w}: retired word at ${h}`));
   return p;
 }

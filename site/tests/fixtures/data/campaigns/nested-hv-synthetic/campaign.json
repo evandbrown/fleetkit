@@ -1,0 +1,1263 @@
+{
+  "schema": "fleetkit-site-data/2",
+  "id": "nested-hv-synthetic",
+  "title": "Synthetic hypervisors",
+  "question": "On a nested m8i.4xlarge, does Cloud Hypervisor reach the same density as Firecracker when both have the same devices?",
+  "started": "2026-09-27T20:00Z",
+  "ended": "2026-09-27T21:38Z",
+  "status": "partial",
+  "synthetic": true,
+  "definition": {
+    "name": "nested-hv-synthetic",
+    "question": "On a nested m8i.4xlarge, does Cloud Hypervisor reach the same density as Firecracker when both have the same devices?",
+    "replicas": 2,
+    "shutdown_after_minutes": 45,
+    "base": {
+      "worker_host": {
+        "instance_type": "m8i.4xlarge"
+      },
+      "hypervisor": {
+        "name": "firecracker",
+        "virtio_transport": "pci",
+        "virtio_rng": true
+      },
+      "microvm": {
+        "vcpus": 2,
+        "memory_mib": 2048
+      },
+      "densities": [
+        1,
+        4,
+        8,
+        9,
+        10,
+        11,
+        12,
+        14,
+        16
+      ],
+      "criteria": {
+        "step_p50_target_ms": 1000,
+        "step_p95_target_ms": 2000,
+        "task_p95_target_ms": 5000,
+        "ready_timeout_s": 180,
+        "step_timeout_ms": 10000,
+        "task_timeout_ms": 45000
+      },
+      "procedure": {
+        "trials_per_density": 1,
+        "boundary_trials": 2,
+        "settle_s": 10
+      },
+      "support_host": {
+        "instance_type": "m8i.xlarge"
+      }
+    },
+    "specs": {
+      "firecracker": {},
+      "cloud-hypervisor": {
+        "hypervisor": {
+          "name": "cloud-hypervisor"
+        }
+      },
+      "firecracker-mmio": {
+        "hypervisor": {
+          "virtio_transport": "mmio",
+          "virtio_rng": false
+        }
+      }
+    },
+    "why": {
+      "firecracker": "Firecracker with the devices Cloud Hypervisor always has, so the two differ only in the hypervisor.",
+      "cloud-hypervisor": "The alternative hypervisor.",
+      "firecracker-mmio": "Firecracker as the baseline ran it, to show what the devices alone change."
+    }
+  },
+  "specs": [
+    {
+      "name": "firecracker",
+      "label": "Firecracker, pci, random-number device",
+      "why": "Firecracker with the devices Cloud Hypervisor always has, so the two differ only in the hypervisor.",
+      "changes": [],
+      "spec": {
+        "worker_host": {
+          "instance_type": "m8i.4xlarge"
+        },
+        "hypervisor": {
+          "name": "firecracker",
+          "virtio_transport": "pci",
+          "virtio_rng": true
+        },
+        "microvm": {
+          "vcpus": 2,
+          "memory_mib": 2048
+        },
+        "densities": [
+          1,
+          4,
+          8,
+          9,
+          10,
+          11,
+          12,
+          14,
+          16
+        ],
+        "criteria": {
+          "step_p50_target_ms": 1000,
+          "step_p95_target_ms": 2000,
+          "task_p95_target_ms": 5000,
+          "ready_timeout_s": 180,
+          "step_timeout_ms": 10000,
+          "task_timeout_ms": 45000
+        },
+        "procedure": {
+          "trials_per_density": 1,
+          "boundary_trials": 2,
+          "settle_s": 10
+        },
+        "support_host": {
+          "instance_type": "m8i.xlarge"
+        }
+      },
+      "host": {
+        "instance_type": "m8i.4xlarge",
+        "host_kind": "nested",
+        "vcpus": 16,
+        "memory_gib": 64,
+        "price_usd_per_hour": 0.84672,
+        "price_estimated": false
+      }
+    },
+    {
+      "name": "cloud-hypervisor",
+      "label": "Cloud Hypervisor, pci, random-number device",
+      "why": "The alternative hypervisor.",
+      "changes": [
+        {
+          "path": "hypervisor.name",
+          "base": "firecracker",
+          "value": "cloud-hypervisor"
+        }
+      ],
+      "spec": {
+        "worker_host": {
+          "instance_type": "m8i.4xlarge"
+        },
+        "hypervisor": {
+          "name": "cloud-hypervisor",
+          "virtio_transport": "pci",
+          "virtio_rng": true
+        },
+        "microvm": {
+          "vcpus": 2,
+          "memory_mib": 2048
+        },
+        "densities": [
+          1,
+          4,
+          8,
+          9,
+          10,
+          11,
+          12,
+          14,
+          16
+        ],
+        "criteria": {
+          "step_p50_target_ms": 1000,
+          "step_p95_target_ms": 2000,
+          "task_p95_target_ms": 5000,
+          "ready_timeout_s": 180,
+          "step_timeout_ms": 10000,
+          "task_timeout_ms": 45000
+        },
+        "procedure": {
+          "trials_per_density": 1,
+          "boundary_trials": 2,
+          "settle_s": 10
+        },
+        "support_host": {
+          "instance_type": "m8i.xlarge"
+        }
+      },
+      "host": {
+        "instance_type": "m8i.4xlarge",
+        "host_kind": "nested",
+        "vcpus": 16,
+        "memory_gib": 64,
+        "price_usd_per_hour": 0.84672,
+        "price_estimated": false
+      }
+    },
+    {
+      "name": "firecracker-mmio",
+      "label": "Firecracker, mmio, no random-number device",
+      "why": "Firecracker as the baseline ran it, to show what the devices alone change.",
+      "changes": [
+        {
+          "path": "hypervisor.virtio_transport",
+          "base": "pci",
+          "value": "mmio"
+        },
+        {
+          "path": "hypervisor.virtio_rng",
+          "base": true,
+          "value": false
+        }
+      ],
+      "spec": {
+        "worker_host": {
+          "instance_type": "m8i.4xlarge"
+        },
+        "hypervisor": {
+          "name": "firecracker",
+          "virtio_transport": "mmio",
+          "virtio_rng": false
+        },
+        "microvm": {
+          "vcpus": 2,
+          "memory_mib": 2048
+        },
+        "densities": [
+          1,
+          4,
+          8,
+          9,
+          10,
+          11,
+          12,
+          14,
+          16
+        ],
+        "criteria": {
+          "step_p50_target_ms": 1000,
+          "step_p95_target_ms": 2000,
+          "task_p95_target_ms": 5000,
+          "ready_timeout_s": 180,
+          "step_timeout_ms": 10000,
+          "task_timeout_ms": 45000
+        },
+        "procedure": {
+          "trials_per_density": 1,
+          "boundary_trials": 2,
+          "settle_s": 10
+        },
+        "support_host": {
+          "instance_type": "m8i.xlarge"
+        }
+      },
+      "host": {
+        "instance_type": "m8i.4xlarge",
+        "host_kind": "nested",
+        "vcpus": 16,
+        "memory_gib": 64,
+        "price_usd_per_hour": 0.84672,
+        "price_estimated": false
+      }
+    }
+  ],
+  "runs": [
+    {
+      "id": "firecracker-r1",
+      "spec": "firecracker",
+      "replica": 1,
+      "stopped_early": false,
+      "started": "2026-09-27T20:00Z",
+      "duration_s": 1124,
+      "host": {
+        "instance_type": "m8i.4xlarge",
+        "host_kind": "nested",
+        "vcpus": 16,
+        "cores": 8,
+        "threads_per_core": 2,
+        "sockets": 1,
+        "cpu_model": "Intel(R) Xeon(R) 6975P-C",
+        "mem_gib": 61.8,
+        "kernel_release": "6.18.48-109.150.amzn2023.x86_64",
+        "hypervisor_version": "Firecracker v1.17.0",
+        "chromium_version": "154.0.8037.57"
+      },
+      "result": {
+        "tested_successfully": 10,
+        "first_failed": 11,
+        "gap": null,
+        "not_tested": [
+          12,
+          14,
+          16
+        ],
+        "per_host_vcpu": 0.625,
+        "midpoint_per_host_vcpu": 0.6563,
+        "cost_per_1000_tasks": {
+          "execution": [
+            0.0743,
+            0.08
+          ],
+          "observed": [
+            0.1735,
+            0.1808
+          ]
+        },
+        "limit": {
+          "density": 11,
+          "verdicts": [
+            "host_cpu"
+          ],
+          "trials_with_verdict": 3,
+          "trials": 3,
+          "missed": [
+            "the home step's median took 1,269–1,427 ms against 1,000 (3 of 3 trials)"
+          ],
+          "host_consumer": "microvm_vcpus",
+          "guest_group": "renderer",
+          "guest_share": [
+            0.575,
+            0.575
+          ]
+        }
+      },
+      "by_density": [
+        {
+          "density": 1,
+          "result": "passed",
+          "passed": 1,
+          "trials": 1,
+          "trial_results": [
+            true
+          ]
+        },
+        {
+          "density": 4,
+          "result": "passed",
+          "passed": 1,
+          "trials": 1,
+          "trial_results": [
+            true
+          ]
+        },
+        {
+          "density": 8,
+          "result": "passed",
+          "passed": 1,
+          "trials": 1,
+          "trial_results": [
+            true
+          ]
+        },
+        {
+          "density": 9,
+          "result": "passed",
+          "passed": 1,
+          "trials": 1,
+          "trial_results": [
+            true
+          ]
+        },
+        {
+          "density": 10,
+          "result": "passed",
+          "passed": 3,
+          "trials": 3,
+          "trial_results": [
+            true,
+            true,
+            true
+          ]
+        },
+        {
+          "density": 11,
+          "result": "failed",
+          "passed": 0,
+          "trials": 3,
+          "trial_results": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "density": 12,
+          "result": "not_tested",
+          "passed": 0,
+          "trials": 0,
+          "trial_results": []
+        },
+        {
+          "density": 14,
+          "result": "not_tested",
+          "passed": 0,
+          "trials": 0,
+          "trial_results": []
+        },
+        {
+          "density": 16,
+          "result": "not_tested",
+          "passed": 0,
+          "trials": 0,
+          "trial_results": []
+        }
+      ]
+    },
+    {
+      "id": "firecracker-r2",
+      "spec": "firecracker",
+      "replica": 2,
+      "stopped_early": false,
+      "started": "2026-09-27T20:00Z",
+      "duration_s": 1122,
+      "host": {
+        "instance_type": "m8i.4xlarge",
+        "host_kind": "nested",
+        "vcpus": 16,
+        "cores": 8,
+        "threads_per_core": 2,
+        "sockets": 1,
+        "cpu_model": "Intel(R) Xeon(R) 6975P-C",
+        "mem_gib": 61.8,
+        "kernel_release": "6.18.48-109.150.amzn2023.x86_64",
+        "hypervisor_version": "Firecracker v1.17.0",
+        "chromium_version": "154.0.8037.57"
+      },
+      "result": {
+        "tested_successfully": 10,
+        "first_failed": 11,
+        "gap": null,
+        "not_tested": [
+          12,
+          14,
+          16
+        ],
+        "per_host_vcpu": 0.625,
+        "midpoint_per_host_vcpu": 0.6563,
+        "cost_per_1000_tasks": {
+          "execution": [
+            0.0758,
+            0.0773
+          ],
+          "observed": [
+            0.1783,
+            0.1804
+          ]
+        },
+        "limit": {
+          "density": 11,
+          "verdicts": [
+            "host_cpu"
+          ],
+          "trials_with_verdict": 3,
+          "trials": 3,
+          "missed": [
+            "the home step's median took 1,205–1,278 ms against 1,000 (3 of 3 trials)"
+          ],
+          "host_consumer": "microvm_vcpus",
+          "guest_group": "renderer",
+          "guest_share": [
+            0.575,
+            0.575
+          ]
+        }
+      },
+      "by_density": [
+        {
+          "density": 1,
+          "result": "passed",
+          "passed": 1,
+          "trials": 1,
+          "trial_results": [
+            true
+          ]
+        },
+        {
+          "density": 4,
+          "result": "passed",
+          "passed": 1,
+          "trials": 1,
+          "trial_results": [
+            true
+          ]
+        },
+        {
+          "density": 8,
+          "result": "passed",
+          "passed": 1,
+          "trials": 1,
+          "trial_results": [
+            true
+          ]
+        },
+        {
+          "density": 9,
+          "result": "passed",
+          "passed": 1,
+          "trials": 1,
+          "trial_results": [
+            true
+          ]
+        },
+        {
+          "density": 10,
+          "result": "passed",
+          "passed": 3,
+          "trials": 3,
+          "trial_results": [
+            true,
+            true,
+            true
+          ]
+        },
+        {
+          "density": 11,
+          "result": "failed",
+          "passed": 0,
+          "trials": 3,
+          "trial_results": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "density": 12,
+          "result": "not_tested",
+          "passed": 0,
+          "trials": 0,
+          "trial_results": []
+        },
+        {
+          "density": 14,
+          "result": "not_tested",
+          "passed": 0,
+          "trials": 0,
+          "trial_results": []
+        },
+        {
+          "density": 16,
+          "result": "not_tested",
+          "passed": 0,
+          "trials": 0,
+          "trial_results": []
+        }
+      ]
+    },
+    {
+      "id": "cloud-hypervisor-r1",
+      "spec": "cloud-hypervisor",
+      "replica": 1,
+      "stopped_early": false,
+      "started": "2026-09-27T20:40Z",
+      "duration_s": 1102,
+      "host": {
+        "instance_type": "m8i.4xlarge",
+        "host_kind": "nested",
+        "vcpus": 16,
+        "cores": 8,
+        "threads_per_core": 2,
+        "sockets": 1,
+        "cpu_model": "Intel(R) Xeon(R) 6975P-C",
+        "mem_gib": 61.8,
+        "kernel_release": "6.18.48-109.150.amzn2023.x86_64",
+        "hypervisor_version": "cloud-hypervisor v48.0",
+        "chromium_version": "154.0.8037.57"
+      },
+      "result": {
+        "tested_successfully": 9,
+        "first_failed": 10,
+        "gap": null,
+        "not_tested": [
+          11,
+          12,
+          14,
+          16
+        ],
+        "per_host_vcpu": 0.5625,
+        "midpoint_per_host_vcpu": 0.5938,
+        "cost_per_1000_tasks": {
+          "execution": [
+            0.08,
+            0.082
+          ],
+          "observed": [
+            0.1877,
+            0.1965
+          ]
+        },
+        "limit": {
+          "density": 10,
+          "verdicts": [
+            "host_cpu"
+          ],
+          "trials_with_verdict": 3,
+          "trials": 3,
+          "missed": [
+            "the home step's median took 1,192–1,303 ms against 1,000 (3 of 3 trials)"
+          ],
+          "separated_by": {
+            "rule": "host_cpu_pressure_pct",
+            "passing": [
+              15.9378,
+              19.0041
+            ],
+            "failing": [
+              25.9742,
+              27.628
+            ],
+            "threshold": 20
+          },
+          "host_consumer": "microvm_vcpus",
+          "guest_group": "renderer",
+          "guest_share": [
+            0.59,
+            0.59
+          ]
+        }
+      },
+      "by_density": [
+        {
+          "density": 1,
+          "result": "passed",
+          "passed": 1,
+          "trials": 1,
+          "trial_results": [
+            true
+          ]
+        },
+        {
+          "density": 4,
+          "result": "passed",
+          "passed": 1,
+          "trials": 1,
+          "trial_results": [
+            true
+          ]
+        },
+        {
+          "density": 8,
+          "result": "passed",
+          "passed": 1,
+          "trials": 1,
+          "trial_results": [
+            true
+          ]
+        },
+        {
+          "density": 9,
+          "result": "passed",
+          "passed": 3,
+          "trials": 3,
+          "trial_results": [
+            true,
+            true,
+            true
+          ]
+        },
+        {
+          "density": 10,
+          "result": "failed",
+          "passed": 0,
+          "trials": 3,
+          "trial_results": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "density": 11,
+          "result": "not_tested",
+          "passed": 0,
+          "trials": 0,
+          "trial_results": []
+        },
+        {
+          "density": 12,
+          "result": "not_tested",
+          "passed": 0,
+          "trials": 0,
+          "trial_results": []
+        },
+        {
+          "density": 14,
+          "result": "not_tested",
+          "passed": 0,
+          "trials": 0,
+          "trial_results": []
+        },
+        {
+          "density": 16,
+          "result": "not_tested",
+          "passed": 0,
+          "trials": 0,
+          "trial_results": []
+        }
+      ]
+    },
+    {
+      "id": "cloud-hypervisor-r2",
+      "spec": "cloud-hypervisor",
+      "replica": 2,
+      "stopped_early": true,
+      "started": "2026-09-27T20:40Z",
+      "duration_s": 989,
+      "host": {
+        "instance_type": "m8i.4xlarge",
+        "host_kind": "nested",
+        "vcpus": 16,
+        "cores": 8,
+        "threads_per_core": 2,
+        "sockets": 1,
+        "cpu_model": "Intel(R) Xeon(R) 6975P-C",
+        "mem_gib": 61.8,
+        "kernel_release": "6.18.48-109.150.amzn2023.x86_64",
+        "hypervisor_version": "cloud-hypervisor v48.0",
+        "chromium_version": "154.0.8037.57"
+      },
+      "result": {
+        "tested_successfully": 9,
+        "first_failed": null,
+        "gap": null,
+        "not_tested": [
+          10,
+          11,
+          12,
+          14,
+          16
+        ],
+        "per_host_vcpu": 0.5625,
+        "midpoint_per_host_vcpu": null,
+        "cost_per_1000_tasks": {
+          "execution": [
+            0.0791,
+            0.0791
+          ],
+          "observed": [
+            0.1919,
+            0.1919
+          ]
+        },
+        "limit": null
+      },
+      "by_density": [
+        {
+          "density": 1,
+          "result": "passed",
+          "passed": 1,
+          "trials": 1,
+          "trial_results": [
+            true
+          ]
+        },
+        {
+          "density": 4,
+          "result": "passed",
+          "passed": 1,
+          "trials": 1,
+          "trial_results": [
+            true
+          ]
+        },
+        {
+          "density": 8,
+          "result": "passed",
+          "passed": 1,
+          "trials": 1,
+          "trial_results": [
+            true
+          ]
+        },
+        {
+          "density": 9,
+          "result": "passed",
+          "passed": 1,
+          "trials": 1,
+          "trial_results": [
+            true
+          ]
+        },
+        {
+          "density": 10,
+          "result": "not_tested",
+          "passed": 0,
+          "trials": 0,
+          "trial_results": []
+        },
+        {
+          "density": 11,
+          "result": "not_tested",
+          "passed": 0,
+          "trials": 0,
+          "trial_results": []
+        },
+        {
+          "density": 12,
+          "result": "not_tested",
+          "passed": 0,
+          "trials": 0,
+          "trial_results": []
+        },
+        {
+          "density": 14,
+          "result": "not_tested",
+          "passed": 0,
+          "trials": 0,
+          "trial_results": []
+        },
+        {
+          "density": 16,
+          "result": "not_tested",
+          "passed": 0,
+          "trials": 0,
+          "trial_results": []
+        }
+      ]
+    },
+    {
+      "id": "firecracker-mmio-r1",
+      "spec": "firecracker-mmio",
+      "replica": 1,
+      "stopped_early": false,
+      "started": "2026-09-27T21:20Z",
+      "duration_s": 1082,
+      "host": {
+        "instance_type": "m8i.4xlarge",
+        "host_kind": "nested",
+        "vcpus": 16,
+        "cores": 8,
+        "threads_per_core": 2,
+        "sockets": 1,
+        "cpu_model": "Intel(R) Xeon(R) 6975P-C",
+        "mem_gib": 61.8,
+        "kernel_release": "6.18.48-109.150.amzn2023.x86_64",
+        "hypervisor_version": "Firecracker v1.17.0",
+        "chromium_version": "154.0.8037.57"
+      },
+      "result": {
+        "tested_successfully": 8,
+        "first_failed": 9,
+        "gap": null,
+        "not_tested": [
+          10,
+          11,
+          12,
+          14,
+          16
+        ],
+        "per_host_vcpu": 0.5,
+        "midpoint_per_host_vcpu": 0.5313,
+        "cost_per_1000_tasks": {
+          "execution": [
+            0.0816,
+            0.0873
+          ],
+          "observed": [
+            0.2009,
+            0.2142
+          ]
+        },
+        "limit": {
+          "density": 9,
+          "verdicts": [
+            "host_cpu"
+          ],
+          "trials_with_verdict": 3,
+          "trials": 3,
+          "missed": [
+            "the home step's median took 1,217–1,292 ms against 1,000 (3 of 3 trials)"
+          ],
+          "host_consumer": "microvm_vcpus",
+          "guest_group": "renderer",
+          "guest_share": [
+            0.605,
+            0.605
+          ]
+        }
+      },
+      "by_density": [
+        {
+          "density": 1,
+          "result": "passed",
+          "passed": 1,
+          "trials": 1,
+          "trial_results": [
+            true
+          ]
+        },
+        {
+          "density": 4,
+          "result": "passed",
+          "passed": 1,
+          "trials": 1,
+          "trial_results": [
+            true
+          ]
+        },
+        {
+          "density": 8,
+          "result": "passed",
+          "passed": 3,
+          "trials": 3,
+          "trial_results": [
+            true,
+            true,
+            true
+          ]
+        },
+        {
+          "density": 9,
+          "result": "failed",
+          "passed": 0,
+          "trials": 3,
+          "trial_results": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "density": 10,
+          "result": "not_tested",
+          "passed": 0,
+          "trials": 0,
+          "trial_results": []
+        },
+        {
+          "density": 11,
+          "result": "not_tested",
+          "passed": 0,
+          "trials": 0,
+          "trial_results": []
+        },
+        {
+          "density": 12,
+          "result": "not_tested",
+          "passed": 0,
+          "trials": 0,
+          "trial_results": []
+        },
+        {
+          "density": 14,
+          "result": "not_tested",
+          "passed": 0,
+          "trials": 0,
+          "trial_results": []
+        },
+        {
+          "density": 16,
+          "result": "not_tested",
+          "passed": 0,
+          "trials": 0,
+          "trial_results": []
+        }
+      ]
+    },
+    {
+      "id": "firecracker-mmio-r2",
+      "spec": "firecracker-mmio",
+      "replica": 2,
+      "stopped_early": true,
+      "started": "2026-09-27T21:20Z",
+      "duration_s": 1045,
+      "host": {
+        "instance_type": "m8i.4xlarge",
+        "host_kind": "nested",
+        "vcpus": 16,
+        "cores": 8,
+        "threads_per_core": 2,
+        "sockets": 1,
+        "cpu_model": "Intel(R) Xeon(R) 6975P-C",
+        "mem_gib": 61.8,
+        "kernel_release": "6.18.48-109.150.amzn2023.x86_64",
+        "hypervisor_version": "Firecracker v1.17.0",
+        "chromium_version": "154.0.8037.57"
+      },
+      "result": {
+        "tested_successfully": 9,
+        "first_failed": null,
+        "gap": null,
+        "not_tested": [
+          10,
+          11,
+          12,
+          14,
+          16
+        ],
+        "per_host_vcpu": 0.5625,
+        "midpoint_per_host_vcpu": null,
+        "cost_per_1000_tasks": {
+          "execution": [
+            0.0821,
+            0.0838
+          ],
+          "observed": [
+            0.1934,
+            0.1954
+          ]
+        },
+        "limit": null
+      },
+      "by_density": [
+        {
+          "density": 1,
+          "result": "passed",
+          "passed": 1,
+          "trials": 1,
+          "trial_results": [
+            true
+          ]
+        },
+        {
+          "density": 4,
+          "result": "passed",
+          "passed": 1,
+          "trials": 1,
+          "trial_results": [
+            true
+          ]
+        },
+        {
+          "density": 8,
+          "result": "passed",
+          "passed": 1,
+          "trials": 1,
+          "trial_results": [
+            true
+          ]
+        },
+        {
+          "density": 9,
+          "result": "passed",
+          "passed": 3,
+          "trials": 3,
+          "trial_results": [
+            true,
+            true,
+            true
+          ]
+        },
+        {
+          "density": 10,
+          "result": "not_tested",
+          "passed": 0,
+          "trials": 0,
+          "trial_results": []
+        },
+        {
+          "density": 11,
+          "result": "not_tested",
+          "passed": 0,
+          "trials": 0,
+          "trial_results": []
+        },
+        {
+          "density": 12,
+          "result": "not_tested",
+          "passed": 0,
+          "trials": 0,
+          "trial_results": []
+        },
+        {
+          "density": 14,
+          "result": "not_tested",
+          "passed": 0,
+          "trials": 0,
+          "trial_results": []
+        },
+        {
+          "density": 16,
+          "result": "not_tested",
+          "passed": 0,
+          "trials": 0,
+          "trial_results": []
+        }
+      ]
+    }
+  ],
+  "outcomes": [
+    {
+      "spec": "firecracker",
+      "replicas": [
+        {
+          "run": "firecracker-r1",
+          "host_vcpus": 16,
+          "tested_successfully": 10,
+          "first_failed": 11,
+          "stopped_early": false,
+          "per_host_vcpu": 0.625,
+          "midpoint_per_host_vcpu": 0.6563,
+          "cost_per_1000_tasks": {
+            "execution": [
+              0.0743,
+              0.08
+            ],
+            "observed": [
+              0.1735,
+              0.1808
+            ]
+          }
+        },
+        {
+          "run": "firecracker-r2",
+          "host_vcpus": 16,
+          "tested_successfully": 10,
+          "first_failed": 11,
+          "stopped_early": false,
+          "per_host_vcpu": 0.625,
+          "midpoint_per_host_vcpu": 0.6563,
+          "cost_per_1000_tasks": {
+            "execution": [
+              0.0758,
+              0.0773
+            ],
+            "observed": [
+              0.1783,
+              0.1804
+            ]
+          }
+        }
+      ],
+      "midpoint_per_host_vcpu": 0.6563
+    },
+    {
+      "spec": "cloud-hypervisor",
+      "replicas": [
+        {
+          "run": "cloud-hypervisor-r1",
+          "host_vcpus": 16,
+          "tested_successfully": 9,
+          "first_failed": 10,
+          "stopped_early": false,
+          "per_host_vcpu": 0.5625,
+          "midpoint_per_host_vcpu": 0.5938,
+          "cost_per_1000_tasks": {
+            "execution": [
+              0.08,
+              0.082
+            ],
+            "observed": [
+              0.1877,
+              0.1965
+            ]
+          }
+        },
+        {
+          "run": "cloud-hypervisor-r2",
+          "host_vcpus": 16,
+          "tested_successfully": 9,
+          "first_failed": null,
+          "stopped_early": true,
+          "per_host_vcpu": 0.5625,
+          "midpoint_per_host_vcpu": null,
+          "cost_per_1000_tasks": {
+            "execution": [
+              0.0791,
+              0.0791
+            ],
+            "observed": [
+              0.1919,
+              0.1919
+            ]
+          }
+        }
+      ],
+      "midpoint_per_host_vcpu": null
+    },
+    {
+      "spec": "firecracker-mmio",
+      "replicas": [
+        {
+          "run": "firecracker-mmio-r1",
+          "host_vcpus": 16,
+          "tested_successfully": 8,
+          "first_failed": 9,
+          "stopped_early": false,
+          "per_host_vcpu": 0.5,
+          "midpoint_per_host_vcpu": 0.5313,
+          "cost_per_1000_tasks": {
+            "execution": [
+              0.0816,
+              0.0873
+            ],
+            "observed": [
+              0.2009,
+              0.2142
+            ]
+          }
+        },
+        {
+          "run": "firecracker-mmio-r2",
+          "host_vcpus": 16,
+          "tested_successfully": 9,
+          "first_failed": null,
+          "stopped_early": true,
+          "per_host_vcpu": 0.5625,
+          "midpoint_per_host_vcpu": null,
+          "cost_per_1000_tasks": {
+            "execution": [
+              0.0821,
+              0.0838
+            ],
+            "observed": [
+              0.1934,
+              0.1954
+            ]
+          }
+        }
+      ],
+      "midpoint_per_host_vcpu": null
+    }
+  ],
+  "rules": [
+    {
+      "key": "host_cpu_pressure_pct",
+      "label": "Host CPU pressure",
+      "verdict": "host_cpu",
+      "op": ">=",
+      "threshold": 20
+    },
+    {
+      "key": "host_cpu_util_pct",
+      "label": "Host CPU utilisation",
+      "verdict": "host_cpu",
+      "op": ">=",
+      "threshold": 90
+    },
+    {
+      "key": "microvm_throttled_fraction",
+      "label": "MicroVM throttled fraction",
+      "verdict": "microvm_cpu_allowance",
+      "op": ">=",
+      "threshold": 0.1
+    },
+    {
+      "key": "host_mem_available_fraction",
+      "label": "Host memory available",
+      "verdict": "host_memory",
+      "op": "<",
+      "threshold": 0.1
+    },
+    {
+      "key": "host_mem_pressure_pct",
+      "label": "Host memory pressure",
+      "verdict": "host_memory",
+      "op": ">=",
+      "threshold": 5
+    },
+    {
+      "key": "host_io_pressure_pct",
+      "label": "Host IO pressure",
+      "verdict": "io",
+      "op": ">=",
+      "threshold": 10
+    },
+    {
+      "key": "host_steal_pct",
+      "label": "Steal",
+      "verdict": "steal",
+      "op": ">=",
+      "threshold": 5
+    }
+  ],
+  "notes": [
+    "Anything real: every number in this campaign is made up by tests/fixtures/make-synthetic.mjs."
+  ]
+}

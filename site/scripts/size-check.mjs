@@ -6,7 +6,8 @@ import { gzipSync } from 'node:zlib';
 const dist = process.argv[2] ?? 'dist';
 const KB = 1024;
 const BUDGET = {
-  code: 70 * KB,        // all JS and CSS
+  code: 70 * KB,        // the JS and CSS every page loads first (what index.html references)
+  lazy: 40 * KB,        // each chunk loaded only when needed (the experiment builder)
   index: 5 * KB,        // data/index.json
   doc: 25 * KB,         // each campaign, run or trial document
   data: 2 * 1024 * KB,  // the whole dataset, images included
@@ -26,13 +27,22 @@ if (!existsSync(dist)) {
 walk(dist);
 
 const gz = (p) => gzipSync(readFileSync(p)).length;
+const html = readFileSync(join(dist, 'index.html'), 'utf8');
+const initial = new Set([...html.matchAll(/(?:src|href)="\.\/(assets\/[^"]+\.(?:js|css))"/g)].map((m) => m[1]));
 const problems = [];
 let code = 0;
+let lazy = 0;
 let data = 0;
 for (const p of files) {
   const rel = relative(dist, p).split('\\').join('/');
   const size = gz(p);
-  if (/\.(js|css)$/.test(rel)) code += size;
+  if (/\.(js|css)$/.test(rel)) {
+    if (initial.has(rel)) code += size;
+    else {
+      lazy += size;
+      if (size > BUDGET.lazy) problems.push(`${rel}: ${size} B > ${BUDGET.lazy} B (a lazy chunk)`);
+    }
+  }
   if (rel.startsWith('data/')) {
     data += size;
     if (rel === 'data/index.json' && size > BUDGET.index) problems.push(`${rel}: ${size} B > ${BUDGET.index} B`);
@@ -41,10 +51,14 @@ for (const p of files) {
     }
   }
 }
-if (code > BUDGET.code) problems.push(`JS + CSS: ${code} B > ${BUDGET.code} B`);
+if (!initial.size) problems.push('index.html references no JS or CSS');
+if (code > BUDGET.code) problems.push(`JS + CSS loaded first: ${code} B > ${BUDGET.code} B`);
 if (data > BUDGET.data) problems.push(`dataset: ${data} B > ${BUDGET.data} B`);
 
-console.log(`size-check: JS + CSS ${(code / KB).toFixed(1)} KB gz (budget 70), dataset ${(data / KB).toFixed(1)} KB gz (budget 2,048)`);
+console.log(
+  `size-check: JS + CSS loaded first ${(code / KB).toFixed(1)} KB gz (budget 70), lazy chunks ${(lazy / KB).toFixed(1)} KB gz ` +
+    `(budget 40 each), dataset ${(data / KB).toFixed(1)} KB gz (budget 2,048)`,
+);
 if (problems.length) {
   console.error('size-check failed:\n  ' + problems.join('\n  '));
   process.exit(1);

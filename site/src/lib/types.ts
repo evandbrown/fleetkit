@@ -1,6 +1,6 @@
 // The dataset contract. A copy of the types in DATA.md; when the two disagree, DATA.md wins.
 
-export const SCHEMA = 'fleetkit-site-data/1' as const;
+export const SCHEMA = 'fleetkit-site-data/2' as const;
 
 // ---- shared -------------------------------------------------------------------------------------
 
@@ -10,7 +10,7 @@ export type StepName = (typeof STEP_NAMES)[number];
 export type Subject = StepName | 'task';
 export type HostKind = 'nested' | 'metal';
 export type Hypervisor = 'firecracker' | 'cloud-hypervisor';
-export type TrialRole = 'ladder' | 'boundary' | 'warmup' | 'illustration' | 'fault';
+export type TrialRole = 'ladder' | 'boundary' | 'warmup' | 'illustration';
 export const COUNTING_ROLES: readonly TrialRole[] = ['ladder', 'boundary'];
 export const VERDICTS = [
   'host_cpu', 'microvm_cpu_allowance', 'host_memory', 'io', 'steal', 'none', 'unknown',
@@ -27,17 +27,32 @@ export const GUEST_GROUPS = ['renderer', 'browser', 'other_chromium', 'guestd', 
 export type GuestGroup = (typeof GUEST_GROUPS)[number];
 export type MicroVMOutcome =
   | 'completed' | 'startup_timeout' | 'startup_error' | 'lifetime_expired' | 'idle_expired' | 'task_failure_destroyed';
-export type Cls = 'measured' | 'derived' | 'modelled' | 'assumed' | 'rule';
-export type TermKey =
-  | 'campaign' | 'run' | 'trial' | 'microvm' | 'density' | 'spec' | 'replica' | 'worker_host' | 'host_kind'
-  | 'hypervisor' | 'support_host' | 'tested_successfully' | 'p50' | 'p95' | 'cpu_pressure' | 'allocated';
-export type Seg = { t: string } | { term: TermKey; t?: string } | { v: string; cls: Cls; src: string };
+
+/** A spec, exactly as experiments/schema/spec.schema.json defines it. */
+export interface Spec {
+  worker_host: { instance_type: string };
+  hypervisor: { name: Hypervisor; virtio_transport: 'mmio' | 'pci'; virtio_rng: boolean };
+  microvm: { vcpus: number; memory_mib: number };
+  densities: number[];
+  criteria: {
+    step_p50_target_ms: number;
+    step_p95_target_ms: number;
+    task_p95_target_ms: number;
+    ready_timeout_s: number;
+    step_timeout_ms: number;
+    task_timeout_ms: number;
+  };
+  procedure: { trials_per_density: number; boundary_trials: number; settle_s: number };
+  support_host: { instance_type: string };
+}
+
+export type DeepPartial<T> = { [K in keyof T]?: T[K] extends object ? (T[K] extends unknown[] ? T[K] : DeepPartial<T[K]>) : T[K] };
 
 // ---- index.json ---------------------------------------------------------------------------------
 
 export interface Index {
   schema: typeof SCHEMA;
-  latest: string | null;
+  featured: string | null;
   campaigns: CampaignEntry[];
 }
 
@@ -57,15 +72,27 @@ export interface CampaignEntry {
 
 export interface SpecOutcome {
   spec: string;
-  runs: string[];
-  tested_successfully: (number | null)[];
-  per_host_vcpu: (number | null)[];
-  cost_per_1000_tasks: ({ execution: Range; observed: Range } | null)[];
+  replicas: ReplicaResult[];
+  midpoint_per_host_vcpu: number | null;
+}
+
+export interface ReplicaResult {
+  run: string;
+  host_vcpus: number;
+  tested_successfully: number | null;
+  first_failed: number | null;
+  stopped_early: boolean;
+  per_host_vcpu: number | null;
+  midpoint_per_host_vcpu: number | null;
+  cost_per_1000_tasks: CostRanges | null;
+}
+
+export interface CostRanges {
+  execution: Range;
+  observed: Range;
 }
 
 // ---- campaign.json ------------------------------------------------------------------------------
-
-export type Spec = Record<string, unknown>;
 
 export interface CampaignDoc {
   schema: typeof SCHEMA;
@@ -77,57 +104,40 @@ export interface CampaignDoc {
   status: 'complete' | 'partial';
   synthetic?: true;
   before_campaigns?: true;
-  provenance: 'recorded' | 'reconstructed';
+  reconstructed?: true;
   preregistration?: { path: string; commit: string };
   definition: CampaignDefinition;
-  spec_fields: SpecField[];
   specs: SpecDoc[];
   runs: RunEntry[];
   outcomes: SpecOutcome[];
-  answer?: Seg[];
-  does_not_show?: Seg[][];
-  reading?: string;
-  next?: NextChange[];
+  rules: RuleDef[];
+  notes?: string[];
 }
 
 export interface CampaignDefinition {
-  format: string;
-  id: string;
+  name: string;
   question: string;
-  base: Spec;
-  specs: { name: string; label: string; changes: Record<string, unknown> }[];
   replicas: number;
-}
-
-export interface SpecField {
-  path: string;
-  label: string;
-  group: string;
-  unit?: string;
-  note?: string;
+  shutdown_after_minutes?: number;
+  base: Spec;
+  specs: Record<string, DeepPartial<Spec>>;
+  why?: Record<string, string>;
 }
 
 export interface SpecDoc {
   name: string;
   label: string;
+  why?: string;
   changes: { path: string; base: unknown; value: unknown }[];
   spec: Spec;
-  instance_type: string;
-  host_kind: HostKind;
-  hypervisor: Hypervisor;
-  microvm: { vcpus: number; mem_mib: number; mem_overhead_mib: number };
-  densities: number[];
-  boundary_trials: number;
-  criteria: Criteria;
-  rules: RuleDef[];
-  price_usd_per_hour: number;
-}
-
-export interface Criteria {
-  step_p50_ms: number;
-  step_p95_ms: number;
-  task_p95_ms: number;
-  ready_limit_s: number;
+  host: {
+    instance_type: string;
+    host_kind: HostKind;
+    vcpus: number;
+    memory_gib: number;
+    price_usd_per_hour: number;
+    price_estimated: boolean;
+  };
 }
 
 export interface RuleDef {
@@ -138,22 +148,15 @@ export interface RuleDef {
   threshold: number;
 }
 
-export interface NextChange {
-  text: string;
-  motivated_by: string;
-  changes: Record<string, unknown>;
-}
-
 export interface RunEntry {
   id: string;
   spec: string;
   replica: number;
-  status: 'complete' | 'incomplete';
-  note?: string;
+  stopped_early: boolean;
   started: string;
   duration_s: number;
   host: HostFacts;
-  result: RunResult | null;
+  result: RunResult;
   by_density: DensityBrief[];
 }
 
@@ -174,18 +177,12 @@ export interface HostFacts {
 export interface RunResult {
   tested_successfully: number | null;
   first_failed: number | null;
-  not_tried: Range | null;
-  not_run: number[];
+  gap: Range | null;
+  not_tested: number[];
   per_host_vcpu: number | null;
-  vcpus_allocated_per_host_vcpu: number | null;
+  midpoint_per_host_vcpu: number | null;
   cost_per_1000_tasks: CostRanges | null;
   limit: RunLimit | null;
-}
-
-export interface CostRanges {
-  execution: Range;
-  observed: Range;
-  fixture: Range;
 }
 
 export interface RunLimit {
@@ -193,17 +190,19 @@ export interface RunLimit {
   verdicts: Verdict[];
   trials_with_verdict: number;
   trials: number;
+  missed: string[];
   separated_by?: { rule: RuleKey; passing: Range; failing: Range; threshold: number };
-  host_consumer: HostConsumer;
-  guest_group: GuestGroup;
-  guest_share: Range;
+  host_consumer?: HostConsumer;
+  guest_group?: GuestGroup;
+  guest_share?: Range;
 }
 
 export interface DensityBrief {
   density: number;
-  result: 'passed' | 'failed' | 'not_run';
+  result: 'passed' | 'failed' | 'not_tested';
   passed: number;
   trials: number;
+  trial_results: boolean[];
 }
 
 // ---- runs/<run>.json ----------------------------------------------------------------------------
@@ -212,26 +211,19 @@ export interface RunDoc extends RunEntry {
   schema: typeof SCHEMA;
   campaign: string;
   synthetic?: true;
-  code: { commit: string; dirty: boolean };
   has: Has;
   by_density: DensityResult[];
   trials: TrialSummary[];
   tasks: TaskColumns;
   steps: StepColumns;
-  overview: { t_s: number[]; cpu_util_pct: number[]; bands: { trial: string; start_s: number; end_s: number }[] };
-  support?: { t_s: number[]; cpu_util_pct: number[] };
-  answer?: Seg[];
 }
 
 export interface Has {
-  host_hz: 1 | 5;
   boot_phases: boolean;
   per_microvm_cpu: boolean;
   guest_series: boolean;
   attribution: boolean;
-  cost: boolean;
   filmstrip: boolean;
-  fixture_rtt: boolean;
 }
 
 export interface DensityResult extends DensityBrief {
@@ -268,9 +260,8 @@ export interface TrialSummary {
     steal_pct: number | null;
   } | null;
   microvm_mem_peak_mib: Range | null;
-  cost_per_1000_tasks: { execution: number; observed: number; fixture: number } | null;
+  cost_per_1000_tasks: { execution: number; observed: number } | null;
   excluded_because?: string;
-  fault?: string;
 }
 
 export interface Check {
@@ -336,7 +327,6 @@ export interface TrialDoc {
   microvms: MicroVMLane[];
   series: TrialSeries;
   limit: TrialLimit;
-  fault?: { microvm: number; at_ms: number; label: string };
   filmstrip?: { microvm: number; frames: { step: StepName; img: string }[] };
 }
 
@@ -391,7 +381,6 @@ export interface TrialSeries {
     mem_mib: number[];
   }[];
   guest?: ({ index: number; t_ms: number[] } & Record<GuestGroup, number[]>)[];
-  fixture_rtt?: { t_ms: number[]; ms: number[] };
 }
 
 export interface TrialLimit {

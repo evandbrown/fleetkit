@@ -1,34 +1,59 @@
-// Reading specs for display. The site never computes a result from a spec; it labels and compares them.
-import type { CampaignDoc, Spec, SpecDoc, SpecField } from './types';
+// Reading specs for display, from the one input schema (experiments/schema/spec.schema.json): each field's
+// label, unit and tier, in the schema's order. The site never computes a result from a spec; it labels and
+// compares them.
+import schema from '../../../experiments/schema/spec.schema.json';
+import * as f from './format';
+import type { Spec } from './types';
 
-/**
- * Where the spec keeps each typed copy, by the SpecDoc field it fills. The site computes only from the typed
- * copies and finds them in a spec only through this map, so this is the one place to update when the input
- * schema (D41) replaces the interim shape in DATA.md.
- */
-export const SPEC_PATHS = {
-  instance_type: 'host.instance_type',
-  hypervisor: 'hypervisor.name',
-  'microvm.vcpus': 'microvm.vcpus',
-  'microvm.mem_mib': 'microvm.mem_mib',
-  'microvm.mem_overhead_mib': 'microvm.mem_overhead_mib',
-  densities: 'procedure.densities',
-  boundary_trials: 'procedure.boundary_trials',
-  'criteria.step_p50_ms': 'criteria.step_p50_ms',
-  'criteria.step_p95_ms': 'criteria.step_p95_ms',
-  'criteria.task_p95_ms': 'criteria.task_p95_ms',
-  'criteria.ready_limit_s': 'criteria.ready_limit_s',
-} as const;
-export type TypedField = keyof typeof SPEC_PATHS;
-
-/** A typed copy on a SpecDoc, by its field name ("microvm.vcpus"). */
-export function typedCopy(s: SpecDoc, field: TypedField): unknown {
-  return getPath(s as unknown as Spec, field);
+export interface Field {
+  path: string;
+  label: string;
+  unit?: string;
+  tier: 'basic' | 'advanced' | 'rare';
+  /** The section it belongs to: "MicroVM", "Pass criteria". */
+  group: string;
 }
 
-/** The value at a dotted path ("host.instance_type"), or undefined. */
-export function getPath(spec: Spec, path: string): unknown {
-  let v: unknown = spec;
+type Node = {
+  $ref?: string;
+  type?: string;
+  properties?: Record<string, Node>;
+  'x-builder'?: { label?: string; unit?: string; tier?: Field['tier'] };
+};
+
+function deref(n: Node): Node {
+  if (!n.$ref) return n;
+  const name = n.$ref.replace('#/$defs/', '');
+  return { ...(schema.$defs as Record<string, Node>)[name], ...n, $ref: undefined };
+}
+
+function walk(n: Node, path: string, group: string, out: Field[]) {
+  const node = deref(n);
+  const label = node['x-builder']?.label ?? path;
+  if (node.type === 'object' && node.properties) {
+    for (const [k, v] of Object.entries(node.properties)) walk(v, path ? `${path}.${k}` : k, label, out);
+    return;
+  }
+  const xb = node['x-builder'] ?? {};
+  out.push({ path, label, unit: xb.unit, tier: xb.tier ?? 'rare', group: path.includes('.') ? group : label });
+}
+
+/** Every leaf of the spec, in the schema's order. */
+export const FIELDS: Field[] = (() => {
+  const out: Field[] = [];
+  for (const [k, v] of Object.entries(schema.properties as Record<string, Node>)) walk(v, k, k, out);
+  return out;
+})();
+
+const BY_PATH = new Map(FIELDS.map((x) => [x.path, x]));
+
+export function field(path: string): Field {
+  return BY_PATH.get(path) ?? { path, label: path, tier: 'rare', group: 'Other' };
+}
+
+/** The value at a dotted path ("worker_host.instance_type"), or undefined. */
+export function getPath(obj: unknown, path: string): unknown {
+  let v: unknown = obj;
   for (const k of path.split('.')) {
     if (v === null || typeof v !== 'object' || !(k in (v as object))) return undefined;
     v = (v as Record<string, unknown>)[k];
@@ -36,48 +61,45 @@ export function getPath(spec: Spec, path: string): unknown {
   return v;
 }
 
-/** Every leaf path in a spec ("procedure.densities"), arrays treated as values. */
-export function leafPaths(spec: Spec, prefix = ''): string[] {
-  return Object.entries(spec).flatMap(([k, v]) =>
-    v !== null && typeof v === 'object' && !Array.isArray(v)
-      ? leafPaths(v as Spec, `${prefix}${k}.`)
-      : [`${prefix}${k}`],
-  );
+/** Every leaf of a spec as a dotted path, lists as values. */
+export function flatten(obj: object, prefix = ''): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (v !== null && typeof v === 'object' && !Array.isArray(v)) Object.assign(out, flatten(v as object, `${prefix}${k}.`));
+    else out[`${prefix}${k}`] = v;
+  }
+  return out;
 }
 
-export function fieldFor(fields: SpecField[], path: string): SpecField {
-  return fields.find((f) => f.path === path) ?? { path, label: path, group: 'Other' };
+const HYPERVISOR: Record<string, string> = { firecracker: 'Firecracker', 'cloud-hypervisor': 'Cloud Hypervisor' };
+
+/** "2 GiB" for whole GiB, else "1,536 MiB". */
+export function mib(v: number): string {
+  return v % 1024 === 0 ? `${f.num(v / 1024)} GiB` : `${f.num(v)} MiB`;
 }
 
-/** Paths changed by any spec, in spec_fields order. */
-export function differingPaths(doc: CampaignDoc): string[] {
-  const changed = new Set(doc.specs.flatMap((s) => s.changes.map((c) => c.path)));
-  const ordered = doc.spec_fields.map((f) => f.path).filter((p) => changed.has(p));
-  return [...ordered, ...[...changed].filter((p) => !ordered.includes(p))];
-}
-
-export function show(value: unknown, unit?: string): string {
+/** A spec value in words, with its unit. */
+export function show(path: string, value: unknown): string {
   if (value === undefined) return '–';
+  if (path === 'hypervisor.name') return HYPERVISOR[String(value)] ?? String(value);
+  if (path === 'hypervisor.virtio_rng') return value ? 'yes' : 'no';
+  if (path === 'microvm.memory_mib' && typeof value === 'number') return mib(value);
+  if (path === 'densities' && Array.isArray(value)) return value.join(', ');
   if (Array.isArray(value)) return value.join(', ');
   if (typeof value === 'boolean') return value ? 'yes' : 'no';
-  if (typeof value === 'number') return `${value.toLocaleString('en-US')}${unit ? (unit === '%' ? '%' : ` ${unit}`) : ''}`;
-  if (value === null) return 'none';
+  const unit = field(path).unit;
+  if (typeof value === 'number') return `${f.num(value, value % 1 ? 2 : 0)}${unit ? ` ${unit}` : ''}`;
   return String(value);
 }
 
-/** The base spec's fields grouped for display, in spec_fields order, then anything unlabelled. */
-export function grouped(doc: CampaignDoc, spec: Spec): { group: string; rows: { field: SpecField; value: unknown }[] }[] {
-  const paths = leafPaths(spec);
-  const ordered = [
-    ...doc.spec_fields.map((f) => f.path).filter((p) => paths.includes(p)),
-    ...paths.filter((p) => !doc.spec_fields.some((f) => f.path === p)),
-  ];
-  const out: { group: string; rows: { field: SpecField; value: unknown }[] }[] = [];
-  for (const p of ordered) {
-    const field = fieldFor(doc.spec_fields, p);
-    let g = out.find((x) => x.group === field.group);
-    if (!g) out.push((g = { group: field.group, rows: [] }));
-    g.rows.push({ field, value: getPath(spec, p) });
-  }
-  return out;
+export const hypervisorName = (h: string) => HYPERVISOR[h] ?? h;
+
+const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+
+/** The paths whose values differ between the specs, in the schema's order. */
+export function differing(specs: Spec[]): string[] {
+  const flat = specs.map((s) => flatten(s));
+  const paths = [...new Set(flat.flatMap((x) => Object.keys(x)))];
+  const ordered = [...FIELDS.map((x) => x.path).filter((p) => paths.includes(p)), ...paths.filter((p) => !BY_PATH.has(p))];
+  return ordered.filter((p) => flat.some((x) => !same(x[p], flat[0][p])));
 }

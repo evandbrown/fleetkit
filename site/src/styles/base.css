@@ -6,36 +6,54 @@
 
 html {
   -webkit-text-size-adjust: 100%;
+  scroll-padding-top: 72px; /* the sticky header */
 }
 
 body {
   margin: 0;
   background: var(--bg);
   color: var(--ink);
-  font: 16px/1.55 var(--font);
+  font: 16px/1.6 var(--font);
   overflow-wrap: break-word;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
+/* Links: the accent, underlined only on hover and focus. */
 a {
-  color: var(--accent);
-  text-underline-offset: 2px;
+  color: var(--accent-ink);
+  text-decoration: none;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+a:hover,
+a:focus-visible {
+  text-decoration: underline;
 }
 
+/* One heading system for every page: sentence case, ink, two or three words. */
 h1,
 h2,
 h3 {
-  line-height: 1.25;
-  margin: 1.6em 0 0.5em;
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+  color: var(--ink);
 }
 h1 {
-  font-size: 1.75rem;
-  margin-top: 0.4em;
+  font-size: clamp(1.75rem, 1.4rem + 1.4vw, 2.25rem);
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  margin: 28px 0 8px;
 }
 h2 {
-  font-size: 1.25rem;
+  font-size: 1.3rem;
+  font-weight: 700;
+  margin: 56px 0 12px;
 }
 h3 {
-  font-size: 1.05rem;
+  font-size: 1rem;
+  font-weight: 650;
+  margin: 24px 0 8px;
 }
 
 p,
@@ -52,11 +70,12 @@ code {
 .page {
   max-width: var(--page);
   margin: 0 auto;
-  padding: 0 var(--gutter) 48px;
+  padding: 8px var(--gutter) 72px;
 }
 
 .lead {
-  font-size: 1.1rem;
+  font-size: 1.125rem;
+  line-height: 1.55;
   color: var(--ink-2);
 }
 
@@ -70,18 +89,61 @@ code {
 }
 
 .crumbs {
-  font-size: 0.9rem;
+  font-size: 0.88rem;
   color: var(--muted);
-  margin-top: 20px;
+  margin: 24px 0 0;
 }
 .crumbs a {
+  color: var(--muted);
+}
+.crumbs a:hover {
+  color: var(--ink);
+}
+
+/* A section heading with a quiet action at its right end. */
+.headrow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 16px;
+  margin-bottom: 12px;
+}
+.headrow > :is(h1, h2) {
+  margin-bottom: 0;
+}
+.quiet {
+  font-size: 0.85rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* A secondary action: a small outlined button. */
+.button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  background: var(--bg);
   color: var(--ink-2);
+  font-size: 0.85rem;
+  font-weight: 600;
+  white-space: nowrap;
+  text-decoration: none;
+}
+.button:hover,
+.button:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  text-decoration: none;
 }
 
 /* Tables scroll inside their own box, never the page. */
 .table-wrap {
   overflow-x: auto;
-  margin: 12px 0 20px;
+  margin: 12px 0 24px;
   max-width: 100%;
 }
 table {
@@ -92,7 +154,7 @@ table {
 th,
 td {
   text-align: left;
-  padding: 6px 12px 6px 0;
+  padding: 8px 14px 8px 0;
   border-bottom: 1px solid var(--rule);
   vertical-align: top;
 }
@@ -106,6 +168,10 @@ th.num {
   text-align: right;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+tbody tr:hover > td,
+tbody tr:hover > th {
+  background: var(--surface);
 }
 
 .pass {
@@ -128,16 +194,15 @@ details > summary {
   color: var(--ink-2);
 }
 
-abbr.term {
-  text-decoration: underline dotted;
-  text-underline-offset: 3px;
-  cursor: help;
-}
-
 .status {
   padding: 24px 0;
   color: var(--ink-2);
 }
 .status.error {
   color: var(--critical);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }

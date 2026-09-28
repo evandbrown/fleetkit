@@ -1,11 +1,120 @@
 {
-  "schema": "fleetkit-site-data/1",
-  "latest": "cap-baseline-1",
+  "schema": "fleetkit-site-data/2",
+  "featured": "nested-sizes-1",
   "campaigns": [
     {
+      "id": "nested-sizes-1",
+      "title": "Host size",
+      "question": "Is density per host vCPU the same on 8 and 16 vCPU hosts?",
+      "started": "2026-09-28T00:00Z",
+      "status": "complete",
+      "replicas": 2,
+      "specs": [
+        {
+          "name": "m8i-4xlarge",
+          "label": "m8i.4xlarge"
+        },
+        {
+          "name": "m8i-2xlarge",
+          "label": "m8i.2xlarge"
+        }
+      ],
+      "runs": 4,
+      "outcomes": [
+        {
+          "spec": "m8i-4xlarge",
+          "replicas": [
+            {
+              "run": "m8i-4xlarge-r1",
+              "host_vcpus": 16,
+              "tested_successfully": 9,
+              "first_failed": 10,
+              "stopped_early": false,
+              "per_host_vcpu": 0.5625,
+              "midpoint_per_host_vcpu": 0.5938,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0639,
+                  0.0707
+                ],
+                "observed": [
+                  0.1837,
+                  0.184
+                ]
+              }
+            },
+            {
+              "run": "m8i-4xlarge-r2",
+              "host_vcpus": 16,
+              "tested_successfully": 9,
+              "first_failed": 10,
+              "stopped_early": false,
+              "per_host_vcpu": 0.5625,
+              "midpoint_per_host_vcpu": 0.5938,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0642,
+                  0.0715
+                ],
+                "observed": [
+                  0.186,
+                  0.1892
+                ]
+              }
+            }
+          ],
+          "midpoint_per_host_vcpu": 0.5938
+        },
+        {
+          "spec": "m8i-2xlarge",
+          "replicas": [
+            {
+              "run": "m8i-2xlarge-r1",
+              "host_vcpus": 8,
+              "tested_successfully": 4,
+              "first_failed": 5,
+              "stopped_early": false,
+              "per_host_vcpu": 0.5,
+              "midpoint_per_host_vcpu": 0.5625,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0594,
+                  0.0651
+                ],
+                "observed": [
+                  0.1679,
+                  0.172
+                ]
+              }
+            },
+            {
+              "run": "m8i-2xlarge-r2",
+              "host_vcpus": 8,
+              "tested_successfully": 4,
+              "first_failed": 5,
+              "stopped_early": false,
+              "per_host_vcpu": 0.5,
+              "midpoint_per_host_vcpu": 0.5625,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0604,
+                  0.0663
+                ],
+                "observed": [
+                  0.1706,
+                  0.1744
+                ]
+              }
+            }
+          ],
+          "midpoint_per_host_vcpu": 0.5625
+        }
+      ]
+    },
+    {
       "id": "cap-baseline-1",
-      "title": "Capacity baseline",
-      "question": "How many 2 vCPU / 2 GiB Firecracker microVMs can one m8i.4xlarge worker host run at once, with every shopping task inside its latency targets?",
+      "title": "Baseline",
+      "question": "How many microVMs fit on one m8i.4xlarge?",
       "started": "2026-09-27T17:09Z",
       "status": "complete",
       "before_campaigns": true,
@@ -20,27 +129,28 @@
       "outcomes": [
         {
           "spec": "baseline",
-          "runs": [
-            "baseline-r1"
-          ],
-          "tested_successfully": [
-            8
-          ],
-          "per_host_vcpu": [
-            0.5
-          ],
-          "cost_per_1000_tasks": [
+          "replicas": [
             {
-              "execution": [
-                0.0681,
-                0.0827
-              ],
-              "observed": [
-                0.1843,
-                0.2014
-              ]
+              "run": "baseline-r1",
+              "host_vcpus": 16,
+              "tested_successfully": 8,
+              "first_failed": 12,
+              "stopped_early": false,
+              "per_host_vcpu": 0.5,
+              "midpoint_per_host_vcpu": 0.625,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0681,
+                  0.0827
+                ],
+                "observed": [
+                  0.1843,
+                  0.2014
+                ]
+              }
             }
-          ]
+          ],
+          "midpoint_per_host_vcpu": 0.625
         }
       ]
     }

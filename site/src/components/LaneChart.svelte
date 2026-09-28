@@ -1,11 +1,12 @@
 <script lang="ts">
   // Every microVM in a trial as one lane on the trial's clock: its boot phases (a grey ramp), its five steps (one
-  // colour each), and its destruction. Vertical rules mark when all were ready, when tasks were released, when
-  // the last task returned and when the host was clean. Each lane's number links to that microVM.
+  // colour each), and its destruction. The boot phases are named once, inside the first lane, where they fit.
+  // Vertical rules mark when all were ready, when the tasks started and when the last one was done. Pointing at a lane
+  // reads it out beside those marks. Each lane's number links to that microVM.
   import * as f from '../lib/format';
   import { SUBJECT_LABEL } from '../lib/glossary';
   import { linear } from '../lib/scale';
-  import { BOOT_PHASES, type Lane, type LaneSeg } from '../lib/shape';
+  import { type Lane, type LaneSeg } from '../lib/shape';
   import { STEP_NAMES, type Range, type TrialMarks } from '../lib/types';
 
   let {
@@ -18,8 +19,7 @@
     $props();
 
   let w = $state(0);
-  let tipW = $state(0);
-  let hover: { lane: Lane; seg: LaneSeg | null; t: number; px: number; py: number } | null = $state(null);
+  let hover: { lane: Lane; seg: LaneSeg | null; t: number; px: number } | null = $state(null);
 
   const n = $derived(lanes.length);
   const rowH = $derived(n <= 16 ? 18 : n <= 32 ? 12 : n <= 64 ? 7 : 5);
@@ -30,12 +30,13 @@
 
   const MARKS = $derived(
     [
-      { key: 'all_ready', label: 'all ready', ms: marks.all_ready_ms },
-      { key: 'release', label: 'tasks released', ms: marks.release_ms },
-      { key: 'last_return', label: 'last task back', ms: marks.last_return_ms },
-      { key: 'clean', label: 'host clean', ms: marks.clean_ms },
+      { key: 'all_ready', label: 'ready', ms: marks.all_ready_ms },
+      { key: 'release', label: 'tasks start', ms: marks.release_ms },
+      { key: 'last_return', label: 'tasks done', ms: marks.last_return_ms },
     ].filter((m): m is { key: string; label: string; ms: number } => m.ms !== null),
   );
+
+  const BOOT_SHORT = ['hypervisor', 'kernel', 'guest daemon', 'Chromium'];
 
   function fill(s: LaneSeg): string {
     if (s.kind === 'boot') return `var(--ordinal-${s.phase})`;
@@ -56,13 +57,16 @@
     const t = x.invert(px);
     const slack = x.invert(M.left + 3) - domain[0];
     const seg = lane.segs.find((s) => t >= s.start - slack && t <= s.end + slack) ?? null;
-    hover = { lane, seg, t, px, py };
+    hover = { lane, seg, t, px };
   }
 
   function segText(s: LaneSeg): string {
     const span = `${f.num(s.start / 1000, 2)}–${f.num(s.end / 1000, 2)} s`;
-    return `${s.label}${s.kind === 'step' && !s.ok ? ' (failed)' : ''}: ${f.num(s.end - s.start)} ms, ${span}`;
+    return `${s.kind === 'boot' ? BOOT_SHORT[(s.phase ?? 1) - 1] : s.label}${s.kind === 'step' && !s.ok ? ' failed' : ''} ${f.num(s.end - s.start)} ms · ${span}`;
   }
+  /** A boot phase's name inside the first lane, if it fits. */
+  const phaseFont = $derived(rowH >= 16 ? 10 : 9);
+  const fits = (label: string, width: number) => rowH >= 12 && label.length * phaseFont * 0.58 + 6 <= width;
 </script>
 
 <div class="lanes">
@@ -74,7 +78,7 @@
       <span class="ramp">
         {#each [1, 2, 3, 4] as p (p)}<span class="sw" style:background="var(--ordinal-{p})"></span>{/each}
       </span>
-      starting: {BOOT_PHASES.join(', then ')}
+      boot
     </li>
     <li><span class="sw destroy"></span>destroyed</li>
   </ul>
@@ -106,6 +110,9 @@
               fill={fill(s)}
               class:failed={s.kind === 'step' && !s.ok}
             />
+            {#if r === 0 && s.kind === 'boot' && s.phase && fits(BOOT_SHORT[s.phase - 1], sw)}
+              <text class="phase" class:dark={s.phase >= 3} x={x0 + 4} y={y0 + rowH / 2} dy="0.34em" style:font-size="{phaseFont}px">{BOOT_SHORT[s.phase - 1]}</text>
+            {/if}
           {/each}
         {/each}
         {#each MARKS as m (m.key)}
@@ -120,23 +127,18 @@
         {/if}
       </svg>
     {/if}
-    {#if hover && w > 0}
-      <div
-        class="tip"
-        bind:offsetWidth={tipW}
-        style:left="{Math.max(0, hover.px + 12 + tipW > w ? hover.px - 12 - tipW : hover.px + 12)}px"
-        style:top="{Math.max(0, hover.py + 14)}px"
-      >
-        <div class="tip-head">microVM {hover.lane.index} · {hover.lane.product}</div>
-        <div>{hover.seg ? segText(hover.seg) : `${f.num(hover.t / 1000, 2)} s: waiting`}</div>
-      </div>
+  </div>
+  <div class="foot">
+    <ul class="marks" aria-label="Marks">
+      {#each MARKS as m (m.key)}<li><span class="rule"></span>{m.label} <strong>{f.num(m.ms / 1000, 1)} s</strong></li>{/each}
+    </ul>
+    {#if hover}
+      <p class="readout" aria-hidden="true">
+        <strong>microVM {hover.lane.index}</strong>
+        {hover.seg ? segText(hover.seg) : `${f.num(hover.t / 1000, 2)} s waiting`}
+      </p>
     {/if}
   </div>
-  <p class="marks muted">
-    Rules, left to right:
-    {#each MARKS as m, i (m.key)}{i ? '; ' : ''}{m.label} at {f.num(m.ms / 1000, 2)} s{/each}. Time is from the moment
-    {n === 1 ? 'the microVM was' : `all ${n} microVMs were`} requested.
-  </p>
 </div>
 
 <style>
@@ -213,24 +215,53 @@
     stroke: var(--ink-2);
     opacity: 0.4;
   }
-  .tip {
-    position: absolute;
-    z-index: 5;
-    width: max-content;
-    max-width: min(20rem, 100%);
-    background: var(--bg);
-    border: 1px solid var(--rule);
-    border-radius: var(--radius);
-    box-shadow: 0 2px 10px rgb(0 0 0 / 0.12);
-    padding: 6px 9px;
-    font-size: 0.78rem;
+  .phase {
+    fill: var(--ink);
     pointer-events: none;
   }
-  .tip-head {
+  .phase.dark {
+    fill: #fff;
+  }
+  .foot {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 2px 16px;
+    margin-top: 4px;
+  }
+  .readout {
+    margin: 0;
+    font-size: 0.82rem;
+    color: var(--ink-2);
+    font-variant-numeric: tabular-nums;
+  }
+  .readout strong {
+    color: var(--ink);
     font-weight: 600;
   }
   .marks {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px 16px;
     font-size: 0.82rem;
-    margin-top: 4px;
+    color: var(--ink-2);
+    max-width: none;
+  }
+  .marks strong {
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .rule {
+    display: inline-block;
+    width: 1px;
+    height: 11px;
+    background: var(--ink);
+    opacity: 0.5;
+    margin-right: 6px;
+    vertical-align: -1px;
   }
 </style>

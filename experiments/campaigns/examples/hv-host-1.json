@@ -1,6 +1,6 @@
 {
   "name": "hv-host-1",
-  "question": "Do the hypervisor (Firecracker or Cloud Hypervisor, with the same devices) and the host kind (a nested m8i.4xlarge or a whole m8i.metal-48xl) change the density per host vCPU that meets the targets, and the cost per 1,000 tasks? The mmio spec shows whether Firecracker's devices alone move the result.",
+  "question": "How do the hypervisor and a metal host change density per vCPU and cost?",
   "replicas": 2,
   "shutdown_after_minutes": 80,
   "base": {
@@ -38,10 +38,10 @@
     }
   },
   "why": {
-    "firecracker-nested": "Firecracker on the nested host every earlier campaign used, with the devices Cloud Hypervisor always has.",
-    "firecracker-nested-mmio": "Firecracker as cap-baseline-1 ran it, to show whether the devices alone move the result.",
-    "cloud-hypervisor-nested": "Cloud Hypervisor on the same nested host, so the nested pair differs only in the hypervisor.",
-    "firecracker-metal": "The whole metal host, with no nested virtualization underneath; its ladder steps by 12 through the same 0.5 to 0.75 per host vCPU where the nested host turned from pass to fail, and goes on to 1.0.",
-    "cloud-hypervisor-metal": "Cloud Hypervisor on the whole metal host, the pair that says which hypervisor to run in production."
+    "firecracker-nested": "Nested host, same devices as Cloud Hypervisor.",
+    "firecracker-nested-mmio": "Firecracker as the baseline ran it.",
+    "cloud-hypervisor-nested": "Cloud Hypervisor, nested host.",
+    "firecracker-metal": "Firecracker on a whole metal host.",
+    "cloud-hypervisor-metal": "Cloud Hypervisor on a whole metal host."
   }
 }

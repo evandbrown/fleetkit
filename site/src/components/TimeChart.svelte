@@ -1,7 +1,7 @@
 <script lang="ts">
   // One panel of a trial's time series: lines (or stacked layers) against ms from the trial's start, with the
   // task window shaded, the trial's marks as rules, and a rule's threshold as a reference line. A crosshair snaps
-  // to the nearest sample and reads every series; the arrow keys move it.
+  // to the nearest sample and its values read out beside the title; the arrow keys move it.
   import * as f from '../lib/format';
   import { areaPath, linear, linePath, nearest, niceDomain } from '../lib/scale';
   import type { Range } from '../lib/types';
@@ -44,7 +44,6 @@
   const M = { top: 10, right: 12, bottom: 26, left: 44 };
   let w = $state(0);
   let hover: number | null = $state(null);
-  let tipW = $state(0);
 
   const tOf = (i: number) => t[Math.min(i, t.length - 1)];
   const base = $derived(tOf(0).map((v, i) => ({ v, i })).filter((p) => p.v >= domain[0] && p.v <= domain[1]));
@@ -117,7 +116,23 @@
 </script>
 
 <figure class="tc">
-  <figcaption>{title}{unit && unit !== '%' ? `, ${unit}` : ''}</figcaption>
+  <figcaption>
+    <span>{title}{unit && unit !== '%' ? ` (${unit})` : ''}</span>
+    {#if hover !== null}
+      {@const rows = readAt(hover)}
+      <span class="readout" aria-hidden="true">
+        <span class="at">{fmtT(tOf(0)[hover])}</span>
+        {#if many}
+          {@const vals = rows.map((r) => r.value).filter((v) => v !== null) as number[]}
+          <strong>{vals.length ? f.range([Math.min(...vals), Math.max(...vals)], fmt) : '–'}</strong>
+        {:else if stack}
+          <strong>{fmt(rows.reduce((a, r) => a + (r.value ?? 0), 0))}</strong>
+        {:else}
+          <strong>{rows[0]?.value == null ? '–' : fmt(rows[0].value)}</strong>
+        {/if}
+      </span>
+    {/if}
+  </figcaption>
   <div class="plot" bind:clientWidth={w}>
     <div
       class="focus"
@@ -181,9 +196,12 @@
           {#if threshold}
             <line class="ref" x1={M.left} x2={w - M.right} y1={y(threshold.value)} y2={y(threshold.value)} />
             {@const nearTop = y(threshold.value) - M.top < 18}
-            <text class="ref-label" x={w - M.right} y={y(threshold.value) + (nearTop ? 13 : -4)} text-anchor="end">
-              rule: {threshold.op === '>=' ? 'at least' : 'below'} {plain(threshold.value)}{threshold.fired === null ? '' : threshold.fired ? ' (fired)' : ' (did not fire)'}
-            </text>
+            <text
+              class="ref-label"
+              x={ceiling ? M.left + 4 : w - M.right}
+              y={y(threshold.value) + (nearTop ? 13 : -5)}
+              text-anchor={ceiling ? 'start' : 'end'}>{plain(threshold.value)} limit</text
+            >
           {/if}
           {#if hover !== null}
             <line class="crosshair" x1={x(tOf(0)[hover])} x2={x(tOf(0)[hover])} y1={M.top} y2={height - M.bottom} />
@@ -191,28 +209,6 @@
         </svg>
       {/if}
     </div>
-    {#if hover !== null && w > 0}
-      {@const px = x(tOf(0)[hover])}
-      {@const rows = readAt(hover)}
-      <div class="tip" bind:offsetWidth={tipW} style:left="{Math.max(0, px + 12 + tipW > w ? px - 12 - tipW : px + 12)}px" aria-hidden="true">
-        <div class="tip-head">{fmtT(tOf(0)[hover])} from the trial's start</div>
-        {#if many}
-          {@const vals = rows.map((r) => r.value).filter((v) => v !== null) as number[]}
-          <div class="tip-row">
-            <span class="tip-v">{vals.length ? f.range([Math.min(...vals), Math.max(...vals)], fmt) : '–'}</span>
-            <span class="tip-l">across {f.count(rows.length, 'microVM')}</span>
-          </div>
-        {:else}
-          {#each [...rows].reverse() as r (r.label)}
-            <div class="tip-row">
-              <svg width="12" height="10" aria-hidden="true"><rect x="0" y="1" width="12" height="8" rx="2" fill={r.color} /></svg>
-              <span class="tip-v">{r.value === null ? '–' : fmt(r.value)}</span>
-              <span class="tip-l">{r.label}</span>
-            </div>
-          {/each}
-        {/if}
-      </div>
-    {/if}
   </div>
 </figure>
 
@@ -222,9 +218,15 @@
     min-width: 0;
   }
   figcaption {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 0 12px;
     font-weight: 600;
     font-size: 0.9rem;
     margin: 4px 0 2px;
+    min-height: 1.5em;
   }
   .plot {
     position: relative;
@@ -269,35 +271,17 @@
     stroke: var(--ink-2);
     opacity: 0.6;
   }
-  .tip {
-    position: absolute;
-    top: 6px;
-    z-index: 5;
-    width: max-content;
-    max-width: min(20rem, 100%);
-    background: var(--bg);
-    border: 1px solid var(--rule);
-    border-radius: var(--radius);
-    box-shadow: 0 2px 10px rgb(0 0 0 / 0.12);
-    padding: 6px 9px;
-    font-size: 0.78rem;
-    pointer-events: none;
-  }
-  .tip-head {
-    font-weight: 600;
-    margin-bottom: 3px;
-  }
-  .tip-row {
-    display: grid;
-    grid-template-columns: auto auto 1fr;
+  .readout {
+    display: inline-flex;
     gap: 6px;
     align-items: baseline;
-  }
-  .tip-v {
-    font-weight: 600;
+    font-weight: 400;
+    font-size: 0.82rem;
+    color: var(--ink-2);
     font-variant-numeric: tabular-nums;
   }
-  .tip-l {
-    color: var(--ink-2);
+  .readout strong {
+    color: var(--ink);
+    font-weight: 600;
   }
 </style>

@@ -12,7 +12,7 @@
   <div class="bar" role="img" aria-label="{title}: {shown.map((p) => `${p.label} ${f.num(p.share * 100)}%`).join(', ')}">
     {#each shown as p (p.label)}
       {#if p.share > 0}
-        <span class="seg" style:flex-grow={p.share} style:background={p.color} title="{p.label}: {f.num(p.share * 100, 1)}%"></span>
+        <span class="seg" style:flex-grow={p.share} style:background={p.color}></span>
       {/if}
     {/each}
   </div>

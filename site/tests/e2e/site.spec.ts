@@ -17,7 +17,7 @@ function watchErrors(page: Page): string[] {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
   page.on('console', (m) => {
-    // Missing screenshots are expected: the cap-baseline-1 fixture has no image files.
+    // Missing screenshots are expected: the fixtures have no image files.
     if (m.type() === 'error' && !/Failed to load resource.*404/.test(m.text())) errors.push(m.text());
   });
   return errors;
@@ -35,26 +35,16 @@ async function shoot(page: Page, name: string) {
   await page.screenshot({ path: join(SHOTS, `${test.info().project.name}-${name}.png`), fullPage: true });
 }
 
-// The smoke test: every route loads against the fixtures, in light and dark, with nothing leaving the site,
-// no script errors and no sideways scrolling.
+// The smoke test: every route loads against the fixtures (light is the only theme), with nothing leaving the site,
+// no script errors and no sideways scrolling. The results pages have their own smoke test (results.spec.ts).
 const ROUTES: { name: string; path: string; h1: RegExp | string; ready?: string }[] = [
-  { name: 'home', path: './', h1: 'Synthetic: two host sizes', ready: 'Latency against density' },
-  { name: 'campaigns', path: './#/campaigns', h1: 'Campaigns' },
-  { name: 'campaign-synthetic', path: './#/campaigns/nested-sizes-synthetic', h1: 'Synthetic: two host sizes', ready: 'Latency against density' },
-  { name: 'campaign-cap-baseline-1', path: './#/campaigns/cap-baseline-1', h1: 'Capacity baseline', ready: 'Latency against density' },
-  { name: 'run', path: './#/campaigns/nested-sizes-synthetic/runs/m8i-2xlarge-r2', h1: 'Run m8i-2xlarge-r2', ready: 'What limited it' },
-  { name: 'run-density', path: './#/campaigns/cap-baseline-1/runs/baseline-r1?density=12', h1: 'Run baseline-r1', ready: 'Trials at density 12' },
-  { name: 'trial', path: './#/campaigns/cap-baseline-1/runs/baseline-r1/trials/d12-t1?microvm=3', h1: 'Trial 1 at density 12', ready: 'Final screens' },
-  { name: 'trial-illustration', path: './#/campaigns/cap-baseline-1/runs/baseline-r1/trials/illustration', h1: /^Illustration at density 1$/, ready: 'Filmstrip' },
-  { name: 'builder', path: './#/builder', h1: 'Experiment builder' },
-  { name: 'method', path: './#/method', h1: /./ },
-  { name: 'about', path: './#/about', h1: 'About' },
+  { name: 'about', path: './#/about', h1: 'What we evaluate', ready: 'Architecture' },
+  { name: 'about-from-method', path: './#/method', h1: 'What we evaluate', ready: 'Architecture' },
   { name: 'not-found', path: './#/nowhere', h1: 'Not found' },
 ];
 
-for (const scheme of ['light', 'dark'] as const) {
+for (const scheme of ['light'] as const) {
   test.describe(`every route, ${scheme}`, () => {
-    test.use({ colorScheme: scheme });
     for (const r of ROUTES) {
       test(r.name, async ({ page, baseURL }) => {
         const outside = watchRequests(page, baseURL!);
@@ -66,70 +56,60 @@ for (const scheme of ['light', 'dark'] as const) {
         await noHorizontalScroll(page);
         expect(outside).toEqual([]);
         expect(errors).toEqual([]);
+        const text = await page.locator('main').innerText();
+        expect(text).not.toMatch(/\bNaN\b|\bundefined\b|\[object Object\]|\bInfinity\b|\bnull\b/);
         await shoot(page, `${r.name}-${scheme}`);
       });
     }
   });
 }
 
-test('opens on the most recent campaign, marked synthetic', async ({ page }) => {
-  await page.goto('./');
-  await expect(page).toHaveURL(/#\/campaigns\/nested-sizes-synthetic$/);
-  await expect(page.getByRole('note')).toContainText('Synthetic data');
-  await expect(page.getByRole('heading', { name: 'What differs between the specs' })).toBeVisible();
-  await expect(page.locator('.card .row.changed')).toHaveCount(2);
-});
-
-test('drills from a campaign to a run, a trial and a microVM', async ({ page }) => {
-  await page.goto('./#/campaigns/cap-baseline-1');
-  await expect(page.getByText('shown as a campaign of one')).toBeVisible();
-  await page.getByRole('link', { name: 'baseline-r1', exact: true }).first().click();
-  await expect(page.getByText('Density 8 tested successfully; density 12 failed; 9–11 not tried; 16 not run.')).toBeVisible();
-  await page.getByRole('link', { name: 'trial 1 at density 12', exact: true }).click();
-  await expect(page.locator('h1')).toHaveText('Trial 1 at density 12');
-  await expect(page.getByRole('heading', { name: 'MicroVMs' })).toBeVisible();
-  await page.getByRole('link', { name: 'microVM 3', exact: true }).click();
-  await expect(page).toHaveURL(/trials\/d12-t1\?microvm=3$/);
-  await expect(page.getByRole('heading', { name: /^MicroVM 3/ })).toBeVisible();
-  await noHorizontalScroll(page);
-  await page.goBack();
-  await page.goBack();
-  await expect(page).toHaveURL(/runs\/baseline-r1$/);
-});
-
-test('filters a run to one density', async ({ page }) => {
-  await page.goto('./#/campaigns/cap-baseline-1/runs/baseline-r1?density=8');
-  await expect(page.getByRole('heading', { name: 'Trials at density 8' })).toBeVisible();
-  await expect(page.getByRole('link', { name: /^trial \d at density 8$/ })).toHaveCount(3);
-});
-
-test('reads the capacity chart from the keyboard', async ({ page }) => {
-  await page.goto('./#/campaigns/cap-baseline-1');
-  const slider = page.getByRole('slider', { name: /^Whole task p95 against density/ });
-  await slider.focus();
-  await page.keyboard.press('End');
-  await expect(slider).toHaveAttribute('aria-valuetext', /^Density 12\. .*failed\.$/);
-});
-
-test('defines terms on focus', async ({ page }) => {
-  await page.goto('./#/campaigns/cap-baseline-1');
-  const term = page.locator('.term', { hasText: 'tested successfully' }).first();
-  await term.focus();
-  await expect(page.getByRole('tooltip').filter({ hasText: 'never a maximum' }).first()).toBeVisible();
-  await page.keyboard.press('Escape');
-  await expect(page.getByRole('tooltip').filter({ hasText: 'never a maximum' }).first()).toBeHidden();
-});
-
-test('has the method, the builder placeholder and about', async ({ page }) => {
-  await page.goto('./#/method');
+test('shows terms as plain words, with no popover', async ({ page }) => {
+  await page.goto('./#/results/nested-sizes-synthetic');
   await expect(page.locator('h1')).toBeVisible();
-  await page.getByRole('link', { name: 'Builder' }).click();
-  await expect(page.getByText('Coming next.')).toBeVisible();
-  await page.getByRole('link', { name: 'About' }).click();
-  await expect(page.locator('h1')).toHaveText('About');
+  await expect(page.getByRole('tooltip')).toHaveCount(0);
+  await expect(page.locator('[aria-describedby]')).toHaveCount(0);
 });
 
-test('says so when something is not in the dataset', async ({ page }) => {
-  await page.goto('./#/campaigns/no-such-campaign');
-  await expect(page.getByRole('alert')).toContainText("isn't in this dataset");
+test('has three places in the navigation, no theme switch and no footer', async ({ page }) => {
+  await page.goto('./#/about');
+  const nav = page.getByRole('navigation', { name: 'Main' });
+  await expect(nav.getByRole('link')).toHaveText(['Results', 'Builder', 'About']);
+  await expect(nav.getByRole('link', { name: 'About' })).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByRole('button', { name: /theme/i })).toHaveCount(0);
+  await expect(page.locator('body > #app > footer, footer.page')).toHaveCount(0);
+  await page.goto('./#/results/cap-baseline-1/runs/baseline-r1');
+  await expect(nav.getByRole('link', { name: 'Results' })).toHaveAttribute('aria-current', 'page');
+});
+
+test('opens older addresses at their new ones', async ({ page }) => {
+  const cases: [string, RegExp][] = [
+    ['./#/campaigns', /#\/results$/],
+    ['./#/campaigns/cap-baseline-1', /#\/results\/cap-baseline-1$/],
+    ['./#/campaigns/cap-baseline-1/runs/baseline-r1?density=8', /#\/results\/cap-baseline-1\/runs\/baseline-r1\?density=8$/],
+    ['./#/campaigns/cap-baseline-1/runs/baseline-r1/trials/d12-t1?microvm=3', /#\/results\/cap-baseline-1\/runs\/baseline-r1\/trials\/d12-t1\?microvm=3$/],
+    ['./#/compare?specs=cap-baseline-1/baseline', /#\/results\/compare\?specs=cap-baseline-1\/baseline$/],
+    ['./#/method/glossary', /#\/about$/],
+  ];
+  for (const [from, to] of cases) {
+    await page.goto(from);
+    await expect(page).toHaveURL(to);
+    await expect(page.locator('h1')).toBeVisible();
+  }
+});
+
+test('explains the setup on About, with the featured spec, its SLOs and the five steps', async ({ page }) => {
+  await page.goto('./#/about');
+  await expect(page.getByRole('img', { name: /^AWS us-east-1/ })).toBeVisible();
+  await expect(page.getByRole('list', { name: 'Success criteria' }).getByRole('listitem')).toHaveCount(5);
+  await expect(page.getByRole('list', { name: 'Success criteria' })).toContainText('≤ 1 s');
+  await expect(page.locator('ol.film > li')).toHaveCount(5);
+  await expect(page.locator('ol.film')).toContainText('Verify cart');
+  await expect(page.locator('dl.spec .varies')).toHaveCount(4);
+  await expect(page.locator('ol.parts > li')).toHaveCount(5);
+  await expect(page.locator('dl.measures dt')).toHaveText(['Latency', 'Time to ready', 'Host pressure', 'Cost', 'Max density', 'Midpoint']);
+  // Nothing after What we measure: no call to action, no footer links.
+  await expect(page.getByRole('link', { name: 'See the results' })).toHaveCount(0);
+  await expect(page.locator('main')).not.toContainText(/Words we don't use|glossary/i);
+  await noHorizontalScroll(page);
 });

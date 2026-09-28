@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { densityBriefs, hostKindOf, parseTrialId, runResultCore, trialId, unionVerdicts } from '../../src/lib/derive';
+import { densityBriefs, hostKindOf, meanMidpoint, midpoint, parseTrialId, runResultCore, span, trialId, unionVerdicts } from '../../src/lib/derive';
 import type { TrialSummary } from '../../src/lib/types';
 
 function trial(density: number, number: number, passed: boolean): TrialSummary {
@@ -27,14 +27,15 @@ describe('trial ids', () => {
 });
 
 describe('rules 3 and 4', () => {
-  it('reproduces cap-baseline-1: 8 tested successfully, 12 failed, 9 to 11 not tried, 16 not run', () => {
+  it('reproduces cap-baseline-1: 8 tested successfully, 12 failed, 9 to 11 and 16 not tested', () => {
     const trials = [
       trial(1, 1, true), trial(2, 1, true), trial(4, 1, true), trial(8, 1, true), trial(12, 1, false),
       trial(8, 2, true), trial(8, 3, true), trial(12, 2, false), trial(12, 3, false),
     ];
     const briefs = densityBriefs([1, 2, 4, 8, 12, 16], trials);
-    expect(briefs.map((b) => b.result)).toEqual(['passed', 'passed', 'passed', 'passed', 'failed', 'not_run']);
-    expect(runResultCore(briefs)).toEqual({ tested_successfully: 8, first_failed: 12, not_tried: [9, 11], not_run: [16] });
+    expect(briefs.map((b) => b.result)).toEqual(['passed', 'passed', 'passed', 'passed', 'failed', 'not_tested']);
+    expect(briefs[3].trial_results).toEqual([true, true, true]);
+    expect(runResultCore(briefs)).toEqual({ tested_successfully: 8, first_failed: 12, gap: [9, 11], not_tested: [16] });
   });
 
   it('walks down when a boundary trial fails at the last passing density', () => {
@@ -43,8 +44,8 @@ describe('rules 3 and 4', () => {
       trial(4, 2, true), trial(4, 3, false), trial(6, 2, false), trial(6, 3, false), trial(3, 2, true), trial(3, 3, true),
     ];
     const briefs = densityBriefs([1, 2, 3, 4, 6, 8], trials);
-    expect(briefs.find((b) => b.density === 4)).toEqual({ density: 4, result: 'failed', passed: 2, trials: 3 });
-    expect(runResultCore(briefs)).toEqual({ tested_successfully: 3, first_failed: 4, not_tried: null, not_run: [8] });
+    expect(briefs.find((b) => b.density === 4)).toEqual({ density: 4, result: 'failed', passed: 2, trials: 3, trial_results: [true, true, false] });
+    expect(runResultCore(briefs)).toEqual({ tested_successfully: 3, first_failed: 4, gap: null, not_tested: [8] });
   });
 
   it('has no result when the lowest density fails, and no limit when every density passes', () => {
@@ -52,8 +53,26 @@ describe('rules 3 and 4', () => {
     expect(runResultCore(densityBriefs([1, 2], [trial(1, 1, true), trial(2, 1, true)]))).toMatchObject({
       tested_successfully: 2,
       first_failed: null,
-      not_tried: null,
+      gap: null,
     });
+  });
+});
+
+describe('rule 6: midpoints (D60)', () => {
+  it("spans a replica from its result to its first failure, per host vCPU", () => {
+    expect(span(8, 12, 16)).toEqual([0.5, 0.75]);
+    expect(midpoint(8, 12, 16)).toBe(0.625);
+    expect(midpoint(4, 6, 8)).toBe(0.625);
+    expect(midpoint(3, 4, 8)).toBe(0.4375);
+  });
+  it('starts the span at 0 when nothing passed, and has no midpoint without a failure', () => {
+    expect(span(null, 1, 8)).toEqual([0, 0.125]);
+    expect(midpoint(16, null, 16)).toBeNull();
+  });
+  it("averages a spec's replicas, and has none if any replica has none", () => {
+    expect(meanMidpoint([0.625, 0.4375])).toBe(0.53125);
+    expect(meanMidpoint([0.625, null])).toBeNull();
+    expect(meanMidpoint([])).toBeNull();
   });
 });
 

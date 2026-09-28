@@ -1,6 +1,8 @@
 <script lang="ts">
+  import { href } from '../lib/router';
+
   let { path }: { path: string } = $props();
 </script>
 
 <h1>Not found</h1>
-<p>There's no page at <code>#{path}</code>. <a href="#/campaigns">See every campaign</a>.</p>
+<p>No page at <code>#{path}</code>. <a href={href({ name: 'results', campaign: null })}>Go to Results</a>.</p>

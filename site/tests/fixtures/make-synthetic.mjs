@@ -1,18 +1,20 @@
-// SYNTHETIC TEST DATA. Writes a made-up 4-run campaign, nested-sizes-synthetic, that follows DATA.md, then
-// rebuilds tests/fixtures/data/index.json from every campaign under tests/fixtures/data/campaigns/.
-// Nothing here was measured. It exists to test the site and must never be copied into public/data
-// (`npm run build` refuses it). Deterministic: the same seed writes the same bytes.
+// SYNTHETIC TEST DATA. Writes made-up campaigns that follow DATA.md, copies the real cap-baseline-1 documents from
+// public/data (without screenshots), and rebuilds tests/fixtures/data/index.json. Nothing synthetic was measured.
+// It exists to test the site and must never be copied into public/data (`npm run build` refuses it).
+// Deterministic: the same seed writes the same bytes.
 //
 //   node tests/fixtures/make-synthetic.mjs      (or: npm run fixtures)
-import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+//
+// The campaigns cover what a reader must be able to read: replicas that disagree, a run that stopped early, a
+// density not tested because no clean trial remained, a spec with no midpoint yet, and cross-campaign comparison.
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DATA = join(HERE, 'data');
-const ID = 'nested-sizes-synthetic';
-const SCHEMA = 'fleetkit-site-data/1';
-const SPEC_FIELDS = JSON.parse(readFileSync(join(HERE, 'spec-fields.json'), 'utf8'));
+const PUBLISHED = join(HERE, '../../public/data');
+const SCHEMA = 'fleetkit-site-data/2';
 
 // ---- deterministic randomness and rounding ----------------------------------------------------------
 
@@ -40,7 +42,7 @@ function percentile(values, q) {
 }
 const fmtInt = (v) => Math.round(v).toLocaleString('en-US');
 
-// ---- the campaign definition ------------------------------------------------------------------------
+// ---- specs --------------------------------------------------------------------------------------------
 
 const RULES = [
   { key: 'host_cpu_pressure_pct', label: 'Host CPU pressure', verdict: 'host_cpu', op: '>=', threshold: 20 },
@@ -52,70 +54,100 @@ const RULES = [
   { key: 'host_steal_pct', label: 'Steal', verdict: 'steal', op: '>=', threshold: 5 },
 ];
 const SEVERITY = ['host_cpu', 'microvm_cpu_allowance', 'host_memory', 'io', 'steal'];
+const OVERHEAD_MIB = 256;
 
 const BASE = {
-  host: { instance_type: 'm8i.4xlarge' },
-  hypervisor: { name: 'firecracker', version: 'v1.17.0' },
-  microvm: { vcpus: 2, mem_mib: 2048, mem_overhead_mib: 256 },
-  workload: { task: 'shop-5-steps', products: 20 },
-  procedure: {
-    densities: [1, 2, 4, 8, 12, 16],
-    boundary_trials: 2,
-    warmup_trials: 1,
-    settle_s: 10,
-    illustration: true,
-    stop_at_first_failure: true,
-    release: 'all_ready',
+  worker_host: { instance_type: 'm8i.4xlarge' },
+  hypervisor: { name: 'firecracker', virtio_transport: 'mmio', virtio_rng: false },
+  microvm: { vcpus: 2, memory_mib: 2048 },
+  densities: [1, 2, 4, 8, 12, 16],
+  criteria: {
+    step_p50_target_ms: 1000,
+    step_p95_target_ms: 2000,
+    task_p95_target_ms: 5000,
+    ready_timeout_s: 180,
+    step_timeout_ms: 10000,
+    task_timeout_ms: 45000,
   },
-  criteria: { step_p50_ms: 1000, step_p95_ms: 2000, task_p95_ms: 5000, ready_limit_s: 180 },
-  attribution: Object.fromEntries(RULES.map((r) => [r.key, r.threshold])),
-  measurement: { host_hz: 5, guest_interval_ms: 200 },
-  support: { instance_type: 'm8i.xlarge' },
-};
-
-const DEFINITION = {
-  format: 'fleetkit-campaign/1',
-  id: ID,
-  question:
-    'Does density per host vCPU stay the same when the worker host doubles from 8 to 16 vCPUs, with 2 vCPU / 2 GiB Firecracker microVMs?',
-  base: BASE,
-  specs: [
-    { name: 'm8i-4xlarge', label: 'm8i.4xlarge (16 vCPUs)', changes: {} },
-    {
-      name: 'm8i-2xlarge',
-      label: 'm8i.2xlarge (8 vCPUs)',
-      changes: { 'host.instance_type': 'm8i.2xlarge', 'procedure.densities': [1, 2, 3, 4, 6, 8] },
-    },
-  ],
-  replicas: 2,
+  procedure: { trials_per_density: 1, boundary_trials: 2, settle_s: 10 },
+  support_host: { instance_type: 'm8i.xlarge' },
 };
 
 const HOSTS = {
-  'm8i.4xlarge': { vcpus: 16, cores: 8, mem_gib: 61.8, price: 0.84672 },
-  'm8i.2xlarge': { vcpus: 8, cores: 4, mem_gib: 30.8, price: 0.42336 },
+  'm8i.4xlarge': { vcpus: 16, cores: 8, mem_gib: 61.8, memory_gib: 64, price: 0.84672, estimated: false },
+  'm8i.2xlarge': { vcpus: 8, cores: 4, mem_gib: 30.8, memory_gib: 32, price: 0.42336, estimated: true },
 };
+const VERSION = { firecracker: 'Firecracker v1.17.0', 'cloud-hypervisor': 'cloud-hypervisor v48.0' };
 
-// Each run's trials in execution order: [role, density, pass?, how it fails].
+// Each run's trials in execution order: [role, density, pass?, how it fails]. A density with no trial is not tested.
 const W = ['warmup', 1];
 const I = ['illustration', 1];
-const SCRIPTS = {
-  'm8i-4xlarge-r1': [W, ['ladder', 1, true], ['ladder', 2, true], ['ladder', 4, true], ['ladder', 8, true],
-    ['ladder', 12, false], ['boundary', 8, true], ['boundary', 8, true], ['boundary', 12, false], ['boundary', 12, false], I],
-  'm8i-4xlarge-r2': [W, ['ladder', 1, true], ['ladder', 2, true], ['ladder', 4, true], ['ladder', 8, true],
-    ['ladder', 12, false], ['boundary', 8, true], ['boundary', 8, true], ['boundary', 12, true], ['boundary', 12, false], I],
-  'm8i-2xlarge-r1': [W, ['ladder', 1, true], ['ladder', 2, true], ['ladder', 3, true], ['ladder', 4, true],
-    ['ladder', 6, false], ['boundary', 4, true], ['boundary', 4, true], ['boundary', 6, false, 'task'], ['boundary', 6, false], I],
-  // The boundary check fails a trial at 4, so 4 becomes a failing density and 3 gets its extra trials.
-  'm8i-2xlarge-r2': [W, ['ladder', 1, true], ['ladder', 2, true], ['ladder', 3, true], ['ladder', 4, true],
-    ['ladder', 6, false], ['boundary', 4, true], ['boundary', 4, false], ['boundary', 6, false], ['boundary', 6, false],
-    ['boundary', 3, true], ['boundary', 3, true], I],
-};
-const STARTED = {
-  'm8i-4xlarge-r1': '2026-09-27T18:00Z',
-  'm8i-4xlarge-r2': '2026-09-27T18:00Z',
-  'm8i-2xlarge-r1': '2026-09-27T18:01Z',
-  'm8i-2xlarge-r2': '2026-09-27T18:01Z',
-};
+const up = (densities) => densities.map((d) => ['ladder', d, true]);
+
+const CAMPAIGNS = [
+  {
+    id: 'nested-sizes-synthetic',
+    title: 'Synthetic host sizes',
+    definition: {
+      name: 'nested-sizes-synthetic',
+      question: 'Does density per host vCPU stay the same when the worker host doubles from 8 to 16 vCPUs, with 2 vCPU / 2 GiB Firecracker microVMs?',
+      replicas: 2,
+      shutdown_after_minutes: 45,
+      base: BASE,
+      specs: { 'm8i-4xlarge': {}, 'm8i-2xlarge': { worker_host: { instance_type: 'm8i.2xlarge' }, densities: [1, 2, 3, 4, 6, 8] } },
+      why: {
+        'm8i-4xlarge': 'The host the baseline ran on, so it anchors the comparison.',
+        'm8i-2xlarge': 'Half the vCPUs of the same family, to test whether density per host vCPU is a fair scale.',
+      },
+    },
+    labels: { 'm8i-4xlarge': 'm8i.4xlarge', 'm8i-2xlarge': 'm8i.2xlarge' },
+    notes: ['Anything real: every number in this campaign is made up by tests/fixtures/make-synthetic.mjs.'],
+    runs: {
+      'm8i-4xlarge-r1': { started: '2026-09-27T18:00Z', script: [W, ...up([1, 2, 4, 8]), ['ladder', 12, false], ['boundary', 8, true], ['boundary', 8, true], ['boundary', 12, false], ['boundary', 12, false], I] },
+      'm8i-4xlarge-r2': { started: '2026-09-27T18:00Z', script: [W, ...up([1, 2, 4, 8]), ['ladder', 12, false], ['boundary', 8, true], ['boundary', 8, true], ['boundary', 12, true], ['boundary', 12, false], I] },
+      'm8i-2xlarge-r1': { started: '2026-09-27T18:01Z', script: [W, ...up([1, 2, 3, 4]), ['ladder', 6, false], ['boundary', 4, true], ['boundary', 4, true], ['boundary', 6, false, 'task'], ['boundary', 6, false], I] },
+      // A boundary trial fails at 4, so 4 fails and 3 gets its own boundary trials: the replicas disagree.
+      'm8i-2xlarge-r2': { started: '2026-09-27T18:01Z', script: [W, ...up([1, 2, 3, 4]), ['ladder', 6, false], ['boundary', 4, true], ['boundary', 4, false], ['boundary', 6, false], ['boundary', 6, false], ['boundary', 3, true], ['boundary', 3, true], I] },
+    },
+  },
+  {
+    id: 'nested-hv-synthetic',
+    title: 'Synthetic hypervisors',
+    definition: {
+      name: 'nested-hv-synthetic',
+      question: 'On a nested m8i.4xlarge, does Cloud Hypervisor reach the same density as Firecracker when both have the same devices?',
+      replicas: 2,
+      shutdown_after_minutes: 45,
+      base: { ...BASE, hypervisor: { name: 'firecracker', virtio_transport: 'pci', virtio_rng: true }, densities: [1, 4, 8, 9, 10, 11, 12, 14, 16] },
+      specs: {
+        firecracker: {},
+        'cloud-hypervisor': { hypervisor: { name: 'cloud-hypervisor' } },
+        'firecracker-mmio': { hypervisor: { virtio_transport: 'mmio', virtio_rng: false } },
+      },
+      why: {
+        firecracker: 'Firecracker with the devices Cloud Hypervisor always has, so the two differ only in the hypervisor.',
+        'cloud-hypervisor': 'The alternative hypervisor.',
+        'firecracker-mmio': 'Firecracker as the baseline ran it, to show what the devices alone change.',
+      },
+    },
+    labels: {
+      firecracker: 'Firecracker, pci, random-number device',
+      'cloud-hypervisor': 'Cloud Hypervisor, pci, random-number device',
+      'firecracker-mmio': 'Firecracker, mmio, no random-number device',
+    },
+    notes: ['Anything real: every number in this campaign is made up by tests/fixtures/make-synthetic.mjs.'],
+    runs: {
+      'firecracker-r1': { started: '2026-09-27T20:00Z', script: [W, ...up([1, 4, 8, 9, 10]), ['ladder', 11, false], ['boundary', 10, true], ['boundary', 10, true], ['boundary', 11, false], ['boundary', 11, false], I] },
+      'firecracker-r2': { started: '2026-09-27T20:00Z', script: [W, ...up([1, 4, 8, 9, 10]), ['ladder', 11, false], ['boundary', 10, true], ['boundary', 10, true], ['boundary', 11, false], ['boundary', 11, false], I] },
+      'cloud-hypervisor-r1': { started: '2026-09-27T20:40Z', script: [W, ...up([1, 4, 8, 9]), ['ladder', 10, false], ['boundary', 9, true], ['boundary', 9, true], ['boundary', 10, false], ['boundary', 10, false], I] },
+      // Its shutdown timer fired after density 9: it stopped early, with no failure.
+      'cloud-hypervisor-r2': { started: '2026-09-27T20:40Z', stopped_early: true, script: [W, ...up([1, 4, 8, 9])] },
+      'firecracker-mmio-r1': { started: '2026-09-27T21:20Z', script: [W, ...up([1, 4, 8]), ['ladder', 9, false], ['boundary', 8, true], ['boundary', 8, true], ['boundary', 9, false], ['boundary', 9, false], I] },
+      // No clean trial at 10 (outside the experiment, so not published): 10 is not tested and the run went no higher.
+      'firecracker-mmio-r2': { started: '2026-09-27T21:20Z', stopped_early: true, script: [W, ...up([1, 4, 8, 9]), ['boundary', 9, true], ['boundary', 9, true], I] },
+    },
+  },
+];
 
 // ---- a load model, so the numbers hang together -------------------------------------------------------
 
@@ -127,15 +159,14 @@ const GUEST = ['renderer', 'browser', 'other_chromium', 'guestd', 'other'];
 const CONSUMERS = ['microvm_vcpus', 'hypervisor', 'hostd', 'driver', 'unattributed'];
 const product = (index) => `p${String(37 + index * 13).padStart(4, '0')}`;
 
-function spec(name) {
-  const s = structuredClone(BASE);
-  for (const [path, value] of Object.entries(DEFINITION.specs.find((x) => x.name === name).changes)) {
-    const keys = path.split('.');
-    let o = s;
-    for (const k of keys.slice(0, -1)) o = o[k];
-    o[keys.at(-1)] = value;
-  }
-  return s;
+const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+function merge(base, changes) {
+  const out = structuredClone(base);
+  for (const [k, v] of Object.entries(changes)) out[k] = isObj(v) && isObj(out[k]) ? merge(out[k], v) : structuredClone(v);
+  return out;
+}
+function flatten(o, prefix = '') {
+  return Object.entries(o).reduce((acc, [k, v]) => (isObj(v) ? { ...acc, ...flatten(v, `${prefix}${k}.`) } : { ...acc, [`${prefix}${k}`]: v }), {});
 }
 
 function makeTrial({ role, density, pass, failMode }, host, sp) {
@@ -165,7 +196,7 @@ function makeTrial({ role, density, pass, failMode }, host, sp) {
     let t = dispatch + 16;
     m.steps = [];
     for (const step of STEPS) {
-      let d = (STEP_BASE[step] + STEP_LOAD[step] * over) * between(0.8, 1.2);
+      const d = (STEP_BASE[step] + STEP_LOAD[step] * over) * between(0.8, 1.2);
       if (m.index === failIndex && step === 'search') {
         m.steps.push({ name: step, start_ms: t, end_ms: t + 10000, ok: false });
         t += 10000;
@@ -195,7 +226,7 @@ function makeTrial({ role, density, pass, failMode }, host, sp) {
   }
 
   // Scripted outcome: nudge the home step so the median lands on the scripted side of its target.
-  const target = sp.criteria.step_p50_ms;
+  const target = sp.criteria.step_p50_target_ms;
   const homes = () => microvms.filter((m) => m.task.ok).map((m) => m.steps[0].end_ms - m.steps[0].start_ms);
   const p50 = percentile(homes(), 50);
   const want = pass === false && failMode !== 'task' ? Math.max(p50, target * between(1.04, 1.3)) : pass ? Math.min(p50, target * 0.985) : p50;
@@ -228,16 +259,16 @@ function makeTrial({ role, density, pass, failMode }, host, sp) {
   const checks = [];
   for (const step of STEPS) {
     const ds = okVms.map((m) => m.steps.find((s) => s.name === step)).filter(Boolean).map((s) => s.end_ms - s.start_ms);
-    checks.push({ subject: step, stat: 'p50', value_ms: r4(percentile(ds, 50)), target_ms: sp.criteria.step_p50_ms, met: percentile(ds, 50) <= sp.criteria.step_p50_ms });
-    checks.push({ subject: step, stat: 'p95', value_ms: r4(percentile(ds, 95)), target_ms: sp.criteria.step_p95_ms, met: percentile(ds, 95) <= sp.criteria.step_p95_ms });
+    checks.push({ subject: step, stat: 'p50', value_ms: r4(percentile(ds, 50)), target_ms: sp.criteria.step_p50_target_ms, met: percentile(ds, 50) <= sp.criteria.step_p50_target_ms });
+    checks.push({ subject: step, stat: 'p95', value_ms: r4(percentile(ds, 95)), target_ms: sp.criteria.step_p95_target_ms, met: percentile(ds, 95) <= sp.criteria.step_p95_target_ms });
   }
   const tp95 = percentile(okVms.map((m) => m.task.task_ms), 95);
-  checks.push({ subject: 'task', stat: 'p95', value_ms: r4(tp95), target_ms: sp.criteria.task_p95_ms, met: tp95 <= sp.criteria.task_p95_ms });
+  checks.push({ subject: 'task', stat: 'p95', value_ms: r4(tp95), target_ms: sp.criteria.task_p95_target_ms, met: tp95 <= sp.criteria.task_p95_target_ms });
   const tasks = { ok: okVms.length, of: density };
-  const ready = { microvms: density, all_ready_ms: Math.round(allReady), limit_ms: sp.criteria.ready_limit_s * 1000, met: allReady <= sp.criteria.ready_limit_s * 1000 };
+  const ready = { microvms: density, all_ready_ms: Math.round(allReady), limit_ms: sp.criteria.ready_timeout_s * 1000, met: allReady <= sp.criteria.ready_timeout_s * 1000 };
   const meets = ready.met && tasks.ok === tasks.of && checks.every((c) => c.met);
   const failed = [
-    ...(tasks.ok < tasks.of ? [`${tasks.of - tasks.ok} of ${tasks.of} tasks failed (step_timeout at search)`] : []),
+    ...(tasks.ok < tasks.of ? [`${tasks.of - tasks.ok} of ${tasks.of} tasks failed`] : []),
     ...checks.filter((c) => !c.met).map((c) => `${STEP_LABEL[c.subject]} ${c.stat} ${fmtInt(c.value_ms)} ms > ${fmtInt(c.target_ms)} ms`),
   ];
 
@@ -277,24 +308,22 @@ function makeTrial({ role, density, pass, failMode }, host, sp) {
     missing: [],
   };
   const counts = role === 'ladder' || role === 'boundary';
-  const price = HOSTS[sp.host.instance_type].price;
   const cost = counts
     ? {
-        execution: r4((1000 * price * ((marks.last_return_ms - marks.release_ms) / 1000)) / 3600 / density),
-        observed: r4((1000 * price * (marks.clean_ms / 1000)) / 3600 / density),
-        fixture: 0.05,
+        execution: r4((1000 * host.price * ((marks.last_return_ms - marks.release_ms) / 1000)) / 3600 / density),
+        observed: r4((1000 * host.price * (marks.clean_ms / 1000)) / 3600 / density),
       }
     : null;
 
   return {
     L, microvms, marks, checks, tasks, ready, meets, failed, attribution, cost, counts, util, pressure, busyCores,
-    memUsed: (1 - memAvail) * host.mem_gib, steal: values.host_steal_pct, hostCpu, share,
+    memUsed: (1 - memAvail) * host.mem_gib, steal: values.host_steal_pct, share,
   };
 }
 
 // ---- trial documents ----------------------------------------------------------------------------------
 
-function trialSeries(t, host, sp, settleS) {
+function trialSeries(t, host, settleS) {
   const start = -settleS * 1000;
   const end = t.marks.end_ms;
   const host5 = { t_ms: [], cpu_util_pct: [], mem_used_gib: [], cpu_pressure_pct: [], mem_pressure_pct: [], io_pressure_pct: [], steal_pct: [], cores: Object.fromEntries(CONSUMERS.map((k) => [k, []])) };
@@ -341,12 +370,7 @@ function trialSeries(t, host, sp, settleS) {
     }
     return g;
   });
-  const fixture = { t_ms: [], ms: [] };
-  for (let x = Math.ceil(start / 1000) * 1000; x <= end; x += 1000) {
-    fixture.t_ms.push(x);
-    fixture.ms.push(sig3(between(0.3, 0.6)));
-  }
-  return { host: host5, microvms, guest, fixture_rtt: fixture };
+  return { host: host5, microvms, guest };
 }
 
 function lane(m) {
@@ -357,10 +381,7 @@ function lane(m) {
     outcome: m.outcome,
     ready_ms: Math.round(m.ready_ms),
     boot: round(m.boot),
-    task: {
-      ...round(m.task),
-      chromium_rss_mib: Math.round(m.task.chromium_rss_mib),
-    },
+    task: { ...round(m.task), chromium_rss_mib: Math.round(m.task.chromium_rss_mib) },
     steps: m.steps.map((s) => ({ ...s, start_ms: Math.round(s.start_ms), end_ms: Math.round(s.end_ms) })),
     destroy: round(m.destroy),
   };
@@ -369,8 +390,8 @@ function lane(m) {
 // ---- runs ---------------------------------------------------------------------------------------------
 
 const EXCLUDED = {
-  warmup: 'the first microVM after setup reads its root filesystem from disk; later ones read it from memory.',
-  illustration: 'screenshots after every step add time inside the task.',
+  warmup: 'The first microVM after setup reads its disk from storage; later ones read it from memory.',
+  illustration: 'It takes a screenshot after every step, which adds time inside the task.',
 };
 
 function unionVerdicts(lists) {
@@ -380,12 +401,29 @@ function unionVerdicts(lists) {
   return seen.has('unknown') || !seen.size ? ['unknown'] : ['none'];
 }
 
-function makeRun(specName, replica) {
-  const sp = spec(specName);
-  const hostSpec = HOSTS[sp.host.instance_type];
+function missed(atF, ft) {
+  const n = ft.length;
+  const of = (k) => ` (${k} of ${n} trial${n === 1 ? '' : 's'})`;
+  const out = [];
+  for (const c of [...atF.checks].sort((a, b) => a.met - b.met)) {
+    if (c.met < n) {
+      const what = c.subject === 'task' ? 'the whole task' : `the ${STEP_LABEL[c.subject]} step`;
+      const stat = c.stat === 'p50' ? 'median' : 'p95';
+      const vals = Math.round(c.range[0]) === Math.round(c.range[1]) ? fmtInt(c.range[0]) : `${fmtInt(c.range[0])}–${fmtInt(c.range[1])}`;
+      out.push(`${what}'s ${stat} took ${vals} ms against ${fmtInt(c.target_ms)}${of(n - c.met)}`);
+    }
+  }
+  const failedTasks = ft.filter((t) => t.tasks.ok < t.tasks.of).length;
+  if (failedTasks) out.push(`a task failed${of(failedTasks)}`);
+  return out;
+}
+
+function makeRun(camp, specName, replica, sp) {
+  const hostSpec = HOSTS[sp.worker_host.instance_type];
   const runId = `${specName}-r${replica}`;
+  const cfg = camp.runs[runId];
   const host = {
-    instance_type: sp.host.instance_type,
+    instance_type: sp.worker_host.instance_type,
     host_kind: 'nested',
     vcpus: hostSpec.vcpus,
     cores: hostSpec.cores,
@@ -394,7 +432,7 @@ function makeRun(specName, replica) {
     cpu_model: 'Intel(R) Xeon(R) 6975P-C',
     mem_gib: hostSpec.mem_gib,
     kernel_release: '6.18.48-109.150.amzn2023.x86_64',
-    hypervisor_version: 'Firecracker v1.17.0',
+    hypervisor_version: VERSION[sp.hypervisor.name],
     chromium_version: '154.0.8037.57',
   };
   const numbers = new Map();
@@ -402,9 +440,8 @@ function makeRun(specName, replica) {
   const docs = [];
   const tasks = { trial: [], microvm: [], product: [], ok: [], task_ms: [], wall_ms: [], failed_step: [], failure_category: [], timing_valid: [], img: [] };
   const steps = { trial: [], microvm: [], step: [], duration_ms: [], ok: [] };
-  const overview = { t_s: [], cpu_util_pct: [], bands: [] };
   let clock = 0;
-  SCRIPTS[runId].forEach(([role, density, pass, failMode], i) => {
+  cfg.script.forEach(([role, density, pass, failMode], i) => {
     const t = makeTrial({ role, density, pass, failMode }, hostSpec, sp);
     let id;
     let number = null;
@@ -416,7 +453,7 @@ function makeRun(specName, replica) {
     } else {
       id = role;
     }
-    const summary = {
+    trials.push({
       id,
       density,
       number,
@@ -432,18 +469,11 @@ function makeRun(specName, replica) {
       clean: true,
       marks: t.marks,
       attribution: t.attribution,
-      host: {
-        cpu_util_pct: r4(t.util),
-        cpu_pressure_pct: r4(t.pressure),
-        busy_cores: r4(t.busyCores),
-        mem_used_gib: r4(t.memUsed),
-        steal_pct: t.steal,
-      },
+      host: { cpu_util_pct: r4(t.util), cpu_pressure_pct: r4(t.pressure), busy_cores: r4(t.busyCores), mem_used_gib: r4(t.memUsed), steal_pct: t.steal },
       microvm_mem_peak_mib: r4range(t.microvms.map((m) => m.mem_peak_mib)),
       cost_per_1000_tasks: t.cost,
       ...(t.counts ? {} : { excluded_because: EXCLUDED[role] }),
-    };
-    trials.push(summary);
+    });
 
     for (const m of t.microvms) {
       tasks.trial.push(id);
@@ -464,28 +494,12 @@ function makeRun(specName, replica) {
         steps.ok.push(s.ok);
       }
     }
+    clock += sp.procedure.settle_s + Math.ceil(t.marks.end_ms / 1000);
 
-    // The run's timeline: settle, then the trial.
     const settle = sp.procedure.settle_s;
-    for (let s = 0; s < settle; s++) {
-      overview.t_s.push(clock + s);
-      overview.cpu_util_pct.push(sig3(between(0.2, 0.8)));
-    }
-    const startS = clock + settle;
-    const endS = startS + Math.ceil(t.marks.end_ms / 1000);
-    for (let s = startS; s < endS; s++) {
-      const x = (s - startS) * 1000;
-      const u = x < t.marks.all_ready_ms ? 15 + 25 * t.L : x <= t.marks.last_return_ms ? t.util : 4;
-      overview.t_s.push(s);
-      overview.cpu_util_pct.push(sig3(Math.min(100, u * between(0.95, 1.05))));
-    }
-    overview.bands.push({ trial: id, start_s: startS, end_s: endS });
-    clock = endS;
-
-    const series = trialSeries(t, hostSpec, sp, settle);
     docs.push({
       schema: SCHEMA,
-      campaign: ID,
+      campaign: camp.id,
       run: runId,
       id,
       synthetic: true,
@@ -496,7 +510,7 @@ function makeRun(specName, replica) {
       marks: t.marks,
       settle: { seconds: settle, cpu_util_mean_pct: r4(between(0.2, 0.6)) },
       microvms: t.microvms.map(lane),
-      series,
+      series: trialSeries(t, hostSpec, settle),
       limit: {
         verdicts: t.attribution.verdicts,
         microvms: t.microvms.map((m) => ({
@@ -511,16 +525,17 @@ function makeRun(specName, replica) {
     });
   });
 
-  // By density (rule 3), then the run's result (rule 4).
-  const by_density = sp.procedure.densities.map((density) => {
+  // By density (rule 3), then the run's result (rules 4 and 6).
+  const by_density = sp.densities.map((density) => {
     const at = trials.filter((t) => t.counts && t.density === density).sort((a, b) => a.number - b.number);
     const passed = at.filter((t) => t.passed).length;
-    const result = at.length === 0 ? 'not_run' : passed === at.length ? 'passed' : 'failed';
+    const result = at.length === 0 ? 'not_tested' : passed === at.length ? 'passed' : 'failed';
     const d = {
       density,
       result,
       passed,
       trials: at.length,
+      trial_results: at.map((t) => t.passed),
       trial_ids: at.map((t) => t.id),
       checks: at.length
         ? at[0].checks.map((c, k) => ({
@@ -540,14 +555,13 @@ function makeRun(specName, replica) {
           }
         : null,
       vcpus_allocated: density * sp.microvm.vcpus,
-      mem_allocated_gib: r4((density * (sp.microvm.mem_mib + sp.microvm.mem_overhead_mib)) / 1024),
+      mem_allocated_gib: r4((density * (sp.microvm.memory_mib + OVERHEAD_MIB)) / 1024),
       verdicts: at.length ? unionVerdicts(at.map((t) => t.attribution.verdicts)) : [],
     };
     if (result === 'passed') {
       d.cost_per_1000_tasks = {
         execution: r4range(at.map((t) => t.cost_per_1000_tasks.execution)),
         observed: r4range(at.map((t) => t.cost_per_1000_tasks.observed)),
-        fixture: r4range(at.map((t) => t.cost_per_1000_tasks.fixture)),
       };
     }
     return d;
@@ -580,6 +594,7 @@ function makeRun(specName, replica) {
       verdicts: atFailed.verdicts,
       trials_with_verdict: ft.filter((t) => t.attribution.verdicts.includes(atFailed.verdicts[0])).length,
       trials: ft.length,
+      missed: missed(atFailed, ft),
       ...(sepRule
         ? { separated_by: { rule: sepRule.key, passing: r4range(rv(pt, sepRule.key)), failing: r4range(rv(ft, sepRule.key)), threshold: sepRule.threshold } }
         : {}),
@@ -591,10 +606,10 @@ function makeRun(specName, replica) {
   const result = {
     tested_successfully: tested,
     first_failed: firstFailed,
-    not_tried: tested !== null && firstFailed !== null && firstFailed - tested > 1 ? [tested + 1, firstFailed - 1] : null,
-    not_run: by_density.filter((b) => b.result === 'not_run').map((b) => b.density),
+    gap: tested !== null && firstFailed !== null && firstFailed - tested > 1 ? [tested + 1, firstFailed - 1] : null,
+    not_tested: by_density.filter((b) => b.result === 'not_tested').map((b) => b.density),
     per_host_vcpu: tested === null ? null : r4(tested / host.vcpus),
-    vcpus_allocated_per_host_vcpu: tested === null ? null : r4((tested * sp.microvm.vcpus) / host.vcpus),
+    midpoint_per_host_vcpu: firstFailed === null ? null : r4(((tested ?? 0) + firstFailed) / 2 / host.vcpus),
     cost_per_1000_tasks: atTested?.cost_per_1000_tasks ?? null,
     limit,
   };
@@ -603,131 +618,124 @@ function makeRun(specName, replica) {
     id: runId,
     spec: specName,
     replica,
-    status: 'complete',
-    started: STARTED[runId],
-    duration_s: clock,
+    stopped_early: Boolean(cfg.stopped_early),
+    started: cfg.started,
+    duration_s: clock + 900,
     host,
     result,
-    by_density: by_density.map(({ density, result: r, passed, trials: n }) => ({ density, result: r, passed, trials: n })),
+    by_density: by_density.map(({ density, result: r, passed, trials: n, trial_results }) => ({ density, result: r, passed, trials: n, trial_results })),
   };
-  const support = { t_s: [], cpu_util_pct: [] };
-  for (let s = 0; s < clock; s += 1) {
-    support.t_s.push(s);
-    support.cpu_util_pct.push(sig3(between(2, 8)));
-  }
   const doc = {
     schema: SCHEMA,
     ...entry,
-    campaign: ID,
+    campaign: camp.id,
     synthetic: true,
-    code: { commit: '0000000000000000000000000000000000000000', dirty: false },
-    has: { host_hz: 5, boot_phases: true, per_microvm_cpu: true, guest_series: true, attribution: true, cost: true, filmstrip: false, fixture_rtt: true },
+    has: { boot_phases: true, per_microvm_cpu: true, guest_series: true, attribution: true, filmstrip: false },
     by_density,
     trials,
     tasks,
     steps,
-    overview,
-    support,
   };
-  return { entry, doc, docs, specDoc: sp };
+  return { entry, doc, docs };
 }
 
-// ---- the campaign -------------------------------------------------------------------------------------
+// ---- campaigns ----------------------------------------------------------------------------------------
 
-function getPath(o, path) {
-  return path.split('.').reduce((v, k) => (v == null ? undefined : v[k]), o);
-}
-
-function specDoc(s) {
-  const sp = spec(s.name);
+function specDoc(camp, name, sp) {
+  const base = flatten(camp.definition.base);
+  const flat = flatten(sp);
+  const h = HOSTS[sp.worker_host.instance_type];
   return {
-    name: s.name,
-    label: s.label,
-    changes: Object.entries(s.changes).map(([path, value]) => ({ path, base: getPath(BASE, path), value })),
+    name,
+    label: camp.labels[name],
+    ...(camp.definition.why?.[name] ? { why: camp.definition.why[name] } : {}),
+    changes: Object.keys(flat)
+      .filter((p) => JSON.stringify(flat[p]) !== JSON.stringify(base[p]))
+      .map((path) => ({ path, base: base[path], value: flat[path] })),
     spec: sp,
-    instance_type: sp.host.instance_type,
-    host_kind: 'nested',
-    hypervisor: sp.hypervisor.name,
-    microvm: sp.microvm,
-    densities: sp.procedure.densities,
-    boundary_trials: sp.procedure.boundary_trials,
-    criteria: sp.criteria,
-    rules: RULES,
-    price_usd_per_hour: HOSTS[sp.host.instance_type].price,
+    host: {
+      instance_type: sp.worker_host.instance_type,
+      host_kind: 'nested',
+      vcpus: h.vcpus,
+      memory_gib: h.memory_gib,
+      price_usd_per_hour: h.price,
+      price_estimated: h.estimated,
+    },
   };
 }
-
-const runs = [];
-for (const s of DEFINITION.specs) for (let r = 1; r <= DEFINITION.replicas; r++) runs.push(makeRun(s.name, r));
-
-const outcomes = DEFINITION.specs.map((s) => {
-  const rs = runs.filter((r) => r.entry.spec === s.name).map((r) => r.entry);
-  return {
-    spec: s.name,
-    runs: rs.map((r) => r.id),
-    tested_successfully: rs.map((r) => r.result?.tested_successfully ?? null),
-    per_host_vcpu: rs.map((r) => r.result?.per_host_vcpu ?? null),
-    cost_per_1000_tasks: rs.map((r) =>
-      r.result?.cost_per_1000_tasks ? { execution: r.result.cost_per_1000_tasks.execution, observed: r.result.cost_per_1000_tasks.observed } : null,
-    ),
-  };
-});
 
 const endMinute = (e) => {
   const d = new Date(e.started.replace('Z', ':00Z'));
   d.setUTCSeconds(d.getUTCSeconds() + e.duration_s);
   return d.toISOString().slice(0, 16) + 'Z';
 };
-const perVcpu = outcomes.flatMap((o) => o.per_host_vcpu).filter((v) => v !== null);
-const campaign = {
-  schema: SCHEMA,
-  id: ID,
-  title: 'Synthetic: two host sizes',
-  question: DEFINITION.question,
-  started: runs.map((r) => r.entry.started).sort()[0],
-  ended: runs.map((r) => endMinute(r.entry)).sort().at(-1),
-  status: 'complete',
-  synthetic: true,
-  provenance: 'recorded',
-  definition: DEFINITION,
-  spec_fields: SPEC_FIELDS,
-  specs: DEFINITION.specs.map(specDoc),
-  runs: runs.map((r) => r.entry),
-  outcomes,
-  answer: [
-    { t: 'Synthetic, for testing the site. Across both sizes and both ' },
-    { term: 'replica', t: 'replicas' },
-    { t: ', ' },
-    { term: 'density' },
-    { t: ' per host vCPU came out at ' },
-    { v: `${Math.min(...perVcpu)}–${Math.max(...perVcpu)}`, cls: 'derived', src: 'runs › result.per_host_vcpu' },
-    { t: '. One 8-vCPU replica failed a boundary trial at density 4 and walked down to 3, so the spread between replicas is as large as the difference between sizes.' },
-  ],
-  does_not_show: [[{ t: 'Anything real: every number on this page is made up by tests/fixtures/make-synthetic.mjs.' }]],
-  next: [
-    {
-      text: 'Narrow the boundary on the 16-vCPU host.',
-      motivated_by: 'densities 9 to 11 were not tried',
-      changes: { 'procedure.densities': [1, 2, 4, 8, 9, 10, 11, 12] },
-    },
-  ],
-};
 
-// ---- write ----------------------------------------------------------------------------------------------
-
-const dir = join(DATA, 'campaigns', ID);
-rmSync(dir, { recursive: true, force: true });
 const write = (path, value, pretty = true) => {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, JSON.stringify(value, null, pretty ? 2 : undefined) + '\n');
 };
-write(join(dir, 'campaign.json'), campaign);
-for (const r of runs) {
-  write(join(dir, 'runs', `${r.entry.id}.json`), r.doc, false);
-  for (const t of r.docs) write(join(dir, 'runs', r.entry.id, `${t.id}.json`), t, false);
+
+for (const camp of CAMPAIGNS) {
+  const def = camp.definition;
+  const specs = Object.entries(def.specs).map(([name, ch]) => [name, merge(def.base, ch)]);
+  const runs = [];
+  for (const [name, sp] of specs) {
+    for (let r = 1; r <= def.replicas; r++) if (camp.runs[`${name}-r${r}`]) runs.push(makeRun(camp, name, r, sp));
+  }
+  const entries = runs.map((r) => r.entry);
+  const outcomes = specs.map(([name]) => {
+    const replicas = entries
+      .filter((e) => e.spec === name)
+      .map((e) => ({
+        run: e.id,
+        host_vcpus: e.host.vcpus,
+        tested_successfully: e.result.tested_successfully,
+        first_failed: e.result.first_failed,
+        stopped_early: e.stopped_early,
+        per_host_vcpu: e.result.per_host_vcpu,
+        midpoint_per_host_vcpu: e.result.midpoint_per_host_vcpu,
+        cost_per_1000_tasks: e.result.cost_per_1000_tasks,
+      }));
+    const mids = replicas.map((x) => x.midpoint_per_host_vcpu);
+    const mid = mids.length && mids.every((m) => m !== null) ? r4(mids.reduce((a, b) => a + b, 0) / mids.length) : null;
+    return { spec: name, replicas, midpoint_per_host_vcpu: mid };
+  });
+  const complete = entries.length === specs.length * def.replicas && !entries.some((e) => e.stopped_early);
+  const campaign = {
+    schema: SCHEMA,
+    id: camp.id,
+    title: camp.title,
+    question: def.question,
+    started: entries.map((e) => e.started).sort()[0],
+    ended: entries.map(endMinute).sort().at(-1),
+    status: complete ? 'complete' : 'partial',
+    synthetic: true,
+    definition: def,
+    specs: specs.map(([name, sp]) => specDoc(camp, name, sp)),
+    runs: entries,
+    outcomes,
+    rules: RULES,
+    notes: camp.notes,
+  };
+  const dir = join(DATA, 'campaigns', camp.id);
+  rmSync(dir, { recursive: true, force: true });
+  write(join(dir, 'campaign.json'), campaign);
+  for (const r of runs) {
+    write(join(dir, 'runs', `${r.entry.id}.json`), r.doc, false);
+    for (const t of r.docs) write(join(dir, 'runs', r.entry.id, `${t.id}.json`), t, false);
+  }
+  console.log(`wrote ${camp.id}: ${runs.length} runs, ${runs.reduce((a, r) => a + r.docs.length, 0)} trial documents`);
 }
 
-// index.json, from every campaign in the fixtures (including any real snapshot written by another script).
+// The real cap-baseline-1, as the builder published it, without its screenshots.
+const real = join(PUBLISHED, 'campaigns', 'cap-baseline-1');
+if (existsSync(real)) {
+  rmSync(join(DATA, 'campaigns', 'cap-baseline-1'), { recursive: true, force: true });
+  cpSync(real, join(DATA, 'campaigns', 'cap-baseline-1'), { recursive: true });
+  console.log('copied cap-baseline-1 from public/data');
+}
+
+// index.json, from every campaign in the fixtures; featured as the builder chooses it (D58).
 const entries = [];
 for (const c of readdirSync(join(DATA, 'campaigns'))) {
   const p = join(DATA, 'campaigns', c, 'campaign.json');
@@ -748,5 +756,6 @@ for (const c of readdirSync(join(DATA, 'campaigns'))) {
   });
 }
 entries.sort((a, b) => b.started.localeCompare(a.started) || a.id.localeCompare(b.id));
-write(join(DATA, 'index.json'), { schema: SCHEMA, latest: entries[0]?.id ?? null, campaigns: entries });
-console.log(`wrote ${ID}: ${runs.length} runs, ${runs.reduce((a, r) => a + r.docs.length, 0)} trial documents; index lists ${entries.length} campaigns`);
+const featured = (entries.find((e) => e.status === 'complete') ?? entries[0])?.id ?? null;
+write(join(DATA, 'index.json'), { schema: SCHEMA, featured, campaigns: entries });
+console.log(`index lists ${entries.length} campaigns; featured ${featured}`);

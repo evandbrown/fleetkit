@@ -1,0 +1,3 @@
+# The dataset builder: the standard library plus Pillow (WebP). Install into the harness venv:
+#   harness/.venv/bin/pip install -r site/build/requirements.txt
+pillow==11.3.0

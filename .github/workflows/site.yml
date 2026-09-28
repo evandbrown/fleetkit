@@ -1,0 +1,184 @@
+# Site CD: builds site/ and publishes it to https://evan.mx/fleetkit/ on every push to main
+# that changes something the site is built from, and on a manual run from main. A push to
+# main is therefore a production publish.
+#
+# Two jobs, so that no third-party code runs where AWS credentials can be minted:
+#   build   npm ci, type check, unit tests, vite build and the size budget. No OIDC token and
+#           no secrets. Hands site/dist (public site content only) to deploy as an artifact.
+#   deploy  Bound to the `site` environment, whose deployment branches are limited to main.
+#           Checks out this commit for site/scripts/deploy.sh (never taken from the artifact,
+#           which the build could have altered), downloads dist, assumes the deploy role, runs
+#           the script, then checks the live site.
+#
+# The deploy role (infra/site) trusts only jobs of this repository bound to the `site`
+# environment. It can write index.html, assets/ and data/ under fleetkit/ in the evan.mx
+# bucket, delete under fleetkit/data/, and invalidate the evan.mx distribution. The role ARN,
+# bucket and distribution id are `site` environment secrets, so GitHub masks them in this
+# public log, and each is passed only to the steps that use it; the deploy output is also
+# piped through REDACT, as in terraform.yml. See infra/site/README.md.
+#
+# Actions are pinned to commit SHAs; the comment names the release each SHA was resolved from.
+name: site
+
+on:
+  push:
+    branches: [main]
+    # What the site is built from. Keep in step with SITE_INPUTS below.
+    paths:
+      - site/**
+      - docs/method.md
+      - experiments/schema/**
+      - experiments/campaigns/**
+      - .github/workflows/site.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  SITE_URL: https://evan.mx/fleetkit/
+  # The same list as on.push.paths, for the deploy job's check that it is still current.
+  SITE_INPUTS: site docs/method.md experiments/schema experiments/campaigns .github/workflows/site.yml
+  # sed program applied to deploy output that reaches the log (same as terraform.yml).
+  REDACT: 's/(^|[^0-9])[0-9]{12}([^0-9]|$)/\1<account-id>\2/g; s/(^|[^a-z0-9-])o-[a-z0-9]{10}([^a-z0-9]|$)/\1o-<redacted>\2/g; s/(^|[^a-z0-9-])ou-[a-z0-9]+-[a-z0-9]+([^a-z0-9-]|$)/\1ou-<redacted>\2/g; s/(^|[^a-z0-9-])r-[a-z0-9]{4,5}([^a-z0-9-]|$)/\1r-<redacted>\2/g'
+
+defaults:
+  run:
+    shell: bash
+    working-directory: site
+
+jobs:
+  # Runs on any ref (a manual run from a branch just builds). No id-token, no secrets.
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - run: npm ci
+      - run: npm run check
+      # The locked vitest; `npx vitest` could fetch another version if the binary were missing.
+      - run: npm test
+      # vite build, then the size budget (scripts/size-check.mjs).
+      - run: npm run build
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: site-dist
+          path: site/dist
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true
+
+  deploy:
+    name: deploy
+    needs: build
+    # Only main deploys. The environment's branch policy enforces the same on GitHub's side.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: site
+      url: https://evan.mx/fleetkit/
+    permissions:
+      contents: read
+      id-token: write
+    # One deploy at a time, never cancelled halfway; a newer run waits and then deploys.
+    concurrency:
+      group: site-deploy
+      cancel-in-progress: false
+    steps:
+      # Only the deploy script is needed from the repository.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+          sparse-checkout: site/scripts
+
+      # A re-run of an older run must not roll the site back. If a later commit on main changed
+      # what the site is built from, that commit's own run deploys it, and this one stops here.
+      # A later commit that changed nothing the site uses does not count.
+      - name: Check that this commit is still the one to deploy
+        id: current
+        working-directory: .
+        run: |
+          git fetch --quiet --no-tags --depth=1 origin main
+          newer=$(git diff --no-renames --name-only "$GITHUB_SHA" FETCH_HEAD -- $SITE_INPUTS)
+          if [ -z "$newer" ]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::main is at $(git rev-parse --short FETCH_HEAD), which changes the site since ${GITHUB_SHA::7}; that commit's run deploys instead"
+            echo "Skipped: a later commit on main changes the site." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - if: steps.current.outputs.deploy == 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: site-dist
+          path: site/dist
+
+      - name: Require environment secrets
+        if: steps.current.outputs.deploy == 'true'
+        env:
+          SITE_DEPLOY_ROLE_ARN: ${{ secrets.SITE_DEPLOY_ROLE_ARN }}
+          SITE_BUCKET: ${{ secrets.SITE_BUCKET }}
+          SITE_DISTRIBUTION_ID: ${{ secrets.SITE_DISTRIBUTION_ID }}
+        run: |
+          for name in SITE_DEPLOY_ROLE_ARN SITE_BUCKET SITE_DISTRIBUTION_ID; do
+            [ -n "${!name}" ] || { echo "::error::secret $name is not set in the site environment; see infra/site/README.md"; exit 1; }
+          done
+      - if: steps.current.outputs.deploy == 'true'
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.SITE_DEPLOY_ROLE_ARN }}
+          role-session-name: fleetkit-site-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+          mask-aws-account-id: true
+      - name: Deploy
+        if: steps.current.outputs.deploy == 'true'
+        env:
+          SITE_BUCKET: ${{ secrets.SITE_BUCKET }}
+          SITE_DISTRIBUTION_ID: ${{ secrets.SITE_DISTRIBUTION_ID }}
+        run: scripts/deploy.sh 2>&1 | sed -E "$REDACT"
+
+      # The deploy waited for the invalidation; retry briefly anyway while edges catch up.
+      # The page must name this build's bundle, the bundle and stylesheet must be served with
+      # their types, and the dataset index must be byte for byte this build's (a data-only push
+      # keeps the bundle's hash, so the page check alone would not notice stale data).
+      - name: Smoke check
+        if: steps.current.outputs.deploy == 'true'
+        run: |
+          body="$RUNNER_TEMP/body"
+          bundle=$(grep -m1 -oE 'assets/index-[^"]+\.js' dist/index.html)
+          style=$(grep -m1 -oE 'assets/index-[^"]+\.css' dist/index.html || true)
+          check() {  # check <path under SITE_URL> <content type> <command that must succeed on $body>
+            local url="$SITE_URL$1" want=$2 out code type
+            shift 2
+            for attempt in 1 2 3 4 5 6; do
+              out=$(curl -sS -o "$body" -w '%{http_code} %{content_type}' --max-time 20 "$url" || true)
+              code=${out%% *}
+              type=${out#* }
+              if [ "$code" = 200 ] && [[ $type == "$want"* ]] && "$@"; then
+                echo "ok: $url ($type)"
+                return 0
+              fi
+              echo "not yet ($attempt/6, HTTP $code, $type): $url"
+              sleep 10
+            done
+            echo "::error::smoke check failed: $url"
+            return 1
+          }
+          check "" text/html grep -qF "$bundle" "$body"
+          check "$bundle" text/javascript true
+          [ -z "$style" ] || check "$style" text/css true
+          check data/index.json application/json cmp -s "$body" dist/data/index.json
+          echo "Deployed ${GITHUB_SHA::7} to $SITE_URL" >> "$GITHUB_STEP_SUMMARY"

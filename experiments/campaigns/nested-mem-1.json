@@ -1,6 +1,6 @@
 {
   "name": "nested-mem-1",
-  "question": "With 4 GiB microVMs, does a nested c8i.4xlarge (16 vCPUs, 32 GiB) reach the same density as a nested m8i.4xlarge (16 vCPUs, 64 GiB), or does its memory run out first? If it keeps up, its lower price makes it cheaper per 1,000 tasks.",
+  "question": "With 4 GiB microVMs, does half the host memory lower density?",
   "replicas": 2,
   "shutdown_after_minutes": 45,
   "base": {
@@ -26,7 +26,7 @@
     }
   },
   "why": {
-    "m8i-4xlarge": "The cap-baseline-1 host, whose 64 GiB holds 4 GiB microVMs at every density tested here, so CPU alone should limit it, between 8 and 12 as before.",
-    "c8i-4xlarge": "The same vCPUs with half the memory: if each microVM filled its 4 GiB, memory would run out near density 7, but cap-baseline-1's microVMs used about 0.7 GiB each, so CPU may limit it first."
+    "m8i-4xlarge": "64 GiB: CPU should run out first.",
+    "c8i-4xlarge": "32 GiB, and cheaper: memory may run out first."
   }
 }

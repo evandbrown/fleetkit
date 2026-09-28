@@ -40,9 +40,21 @@ export function usd(v: number): string {
   return `$${num(v, v >= 1 ? 2 : 3)}`;
 }
 
-/** A ratio such as density per host vCPU: 0.50, 0.375. */
+/** A ratio such as density per host vCPU, always to two decimals: 0.50, 0.38. */
 export function ratio(v: number): string {
-  return new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 3 }).format(v);
+  return num(v, 2);
+}
+
+/**
+ * `value` to `digits` decimals, rounded toward its own side of `threshold` when plain rounding would reach or cross
+ * it: 89.98 against 90 is "89.9", 20.04 against 20 is "20.1". One precision, never the wrong side of a limit.
+ */
+export function side(value: number, threshold: number, digits = 1): string {
+  const k = 10 ** digits;
+  let r = Math.round(value * k) / k;
+  if (value < threshold && r >= threshold) r = Math.floor(value * k) / k;
+  if (value > threshold && r <= threshold) r = Math.ceil(value * k) / k;
+  return num(r, digits);
 }
 
 /** "1,063–1,563" or a single value when min = max. `f` formats each end. */
@@ -57,15 +69,12 @@ export function usdRange(r: Range): string {
   return a === b ? a : `${a}–${b.slice(1)}`;
 }
 
-/** [min, max] of a replica list, ignoring nulls. */
-export function spread(values: (number | null)[]): Range | null {
-  const v = values.filter((x): x is number => x !== null);
-  return v.length ? [Math.min(...v), Math.max(...v)] : null;
-}
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-/** "2026-09-27 16:49 UTC" from "2026-09-27T16:49Z". */
-export function when(iso: string): string {
-  return iso.replace('T', ' ').replace('Z', ' UTC');
+/** "27 Sep 2026" from "2026-09-27T16:49Z". */
+export function day(iso: string): string {
+  const [y, m, d] = iso.slice(0, 10).split('-');
+  return `${Number(d)} ${MONTHS[Number(m) - 1]} ${y}`;
 }
 
 export function duration(s: number): string {
