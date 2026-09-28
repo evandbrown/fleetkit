@@ -1,0 +1,42 @@
+{
+  "name": "c8i-sizes-1",
+  "question": "Does a smaller c8i host cost less per 1,000 tasks?",
+  "replicas": 2,
+  "shutdown_after_minutes": 45,
+  "base": {
+    "worker_host": { "instance_type": "m8i.4xlarge" },
+    "hypervisor": { "name": "firecracker", "virtio_transport": "pci", "virtio_rng": true },
+    "microvm": { "vcpus": 2, "memory_mib": 2048 },
+    "densities": [1, 4, 8, 9, 10, 11, 12, 14, 16],
+    "criteria": {
+      "step_p50_target_ms": 1000,
+      "step_p95_target_ms": 2000,
+      "task_p95_target_ms": 5000,
+      "ready_timeout_s": 180,
+      "step_timeout_ms": 10000,
+      "task_timeout_ms": 45000
+    },
+    "procedure": { "trials_per_density": 1, "boundary_trials": 2, "settle_s": 10 },
+    "support_host": { "instance_type": "m8i.xlarge" }
+  },
+  "specs": {
+    "m8i-4xlarge": {},
+    "c8i-4xlarge": {
+      "worker_host": { "instance_type": "c8i.4xlarge" }
+    },
+    "c8i-2xlarge": {
+      "worker_host": { "instance_type": "c8i.2xlarge" },
+      "densities": [1, 2, 3, 4, 5, 6, 7]
+    },
+    "c8i-xlarge": {
+      "worker_host": { "instance_type": "c8i.xlarge" },
+      "densities": [1, 2, 3, 4]
+    }
+  },
+  "why": {
+    "m8i-4xlarge": "Control, identical to nested-hv-1's firecracker spec: expect 9 pass, 10 fail and about $0.068 per 1,000 tasks; a shift means drift, not a lever.",
+    "c8i-4xlarge": "Same cores and clock as m8i at 11.5% less per vCPU, so only the price should move: expect the control's 9 pass, 10 fail and about $0.060 per 1,000 tasks.",
+    "c8i-2xlarge": "Half the host: fewer tasks finish together and each uses less CPU. Expect 4 pass, 5 fail and about $0.056 per 1,000 tasks, at least 4% below c8i-4xlarge, as m8i.2xlarge was 6.5% below m8i.4xlarge.",
+    "c8i-xlarge": "A quarter of the host: does the trend continue? Expect 2 pass, 3 fail and about $0.055 per 1,000 tasks, within noise of c8i-2xlarge."
+  }
+}
