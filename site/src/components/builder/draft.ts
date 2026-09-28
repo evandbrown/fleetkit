@@ -46,6 +46,8 @@ export const TITLES: Record<string, string> = {
   'metal-lean-1': 'Metal, lean Chromium',
   'hv-host-3': 'Metal, nested SLO',
   'browser-lean-1': 'Leaner headless Chromium',
+  'guest-cold-1': 'Guest boot levers, cold start',
+  'stack-warm-1': 'Full stack, warm start',
 };
 
 /** The campaign files in experiments/campaigns/, campaigns first, then the examples that aren't approved to run. */

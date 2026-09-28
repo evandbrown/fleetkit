@@ -1,0 +1,64 @@
+{
+  "name": "guest-cold-1",
+  "question": "Do a quiet guest console and huge pages cut CPU per task on lean Chromium?",
+  "replicas": 2,
+  "shutdown_after_minutes": 45,
+  "base": {
+    "worker_host": { "instance_type": "c8i.xlarge" },
+    "hypervisor": { "name": "firecracker", "virtio_transport": "pci", "virtio_rng": true },
+    "microvm": { "vcpus": 2, "memory_mib": 2048 },
+    "densities": [1, 2, 3, 4, 5, 6],
+    "criteria": {
+      "step_p50_target_ms": 1000,
+      "step_p95_target_ms": 2000,
+      "task_p95_target_ms": 5000,
+      "ready_timeout_s": 180,
+      "step_timeout_ms": 10000,
+      "task_timeout_ms": 45000
+    },
+    "procedure": { "trials_per_density": 1, "boundary_trials": 2, "settle_s": 10 },
+    "support_host": { "instance_type": "m8i.xlarge" },
+    "workload": {
+      "chromium_extra_flags": ["--disable-features=PreloadTopChromeWebUI,WebUIOmniboxPopup,WebUIOmniboxAimPopup,WebUIOmniboxFullPopup"]
+    }
+  },
+  "specs": {
+    "c8i-xlarge-lean": {},
+    "c8i-xlarge-quiet": {
+      "microvm": { "console": "quiet-i8042" }
+    },
+    "c8i-xlarge-thp": {
+      "microvm": { "memory_pages": "thp" }
+    },
+    "c8i-xlarge-quiet-thp": {
+      "microvm": { "console": "quiet-i8042", "memory_pages": "thp" }
+    },
+    "c8i-xlarge-stack": {
+      "microvm": {
+        "vcpus": 1,
+        "memory_mib": 1024,
+        "console": "quiet-i8042",
+        "memory_pages": "thp"
+      },
+      "densities": [1, 2, 3, 4, 5, 6, 7, 8]
+    },
+    "m8i-4xlarge-lean": {
+      "worker_host": { "instance_type": "m8i.4xlarge" },
+      "densities": [1, 4, 8, 9, 10, 11, 12, 13, 14, 16, 18]
+    },
+    "m8i-4xlarge-thp": {
+      "worker_host": { "instance_type": "m8i.4xlarge" },
+      "microvm": { "memory_pages": "thp" },
+      "densities": [1, 4, 8, 9, 10, 11, 12, 13, 14, 16, 18]
+    }
+  },
+  "why": {
+    "c8i-xlarge-lean": "Control: browser-lean-1's lean c8i.xlarge spec, unchanged, so it pools.",
+    "c8i-xlarge-quiet": "Quiet console, no keyboard probe: predicted -10% CPU per task.",
+    "c8i-xlarge-thp": "Guest memory on huge pages: predicted -7% CPU per task.",
+    "c8i-xlarge-quiet-thp": "Both guest levers: predicted -17%, the sum of the two.",
+    "c8i-xlarge-stack": "The warm campaign's full stack, cold: does it need the wait?",
+    "m8i-4xlarge-lean": "Standing control, lean: browser-lean-1's spec, unchanged, so it pools.",
+    "m8i-4xlarge-thp": "Huge pages alone on the 16-vCPU host, the quietest replicas: predicted -7%."
+  }
+}

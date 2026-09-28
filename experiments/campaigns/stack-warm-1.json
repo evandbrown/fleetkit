@@ -1,0 +1,56 @@
+{
+  "name": "stack-warm-1",
+  "question": "With a 5 s warm start, does the full stack cost less per task than lean 2-vCPU microVMs?",
+  "replicas": 3,
+  "shutdown_after_minutes": 45,
+  "base": {
+    "worker_host": { "instance_type": "c8i.xlarge" },
+    "hypervisor": { "name": "firecracker", "virtio_transport": "pci", "virtio_rng": true },
+    "microvm": { "vcpus": 2, "memory_mib": 2048 },
+    "densities": [1, 2, 3, 4, 5, 6],
+    "criteria": {
+      "step_p50_target_ms": 1000,
+      "step_p95_target_ms": 2000,
+      "task_p95_target_ms": 5000,
+      "ready_timeout_s": 180,
+      "step_timeout_ms": 10000,
+      "task_timeout_ms": 45000
+    },
+    "procedure": {
+      "trials_per_density": 1,
+      "boundary_trials": 2,
+      "settle_s": 10,
+      "release_after_ready_s": 5
+    },
+    "support_host": { "instance_type": "m8i.xlarge" },
+    "workload": {
+      "chromium_extra_flags": ["--disable-features=PreloadTopChromeWebUI,WebUIOmniboxPopup,WebUIOmniboxAimPopup,WebUIOmniboxFullPopup"]
+    }
+  },
+  "specs": {
+    "c8i-xlarge-lean": {},
+    "c8i-xlarge-1vcpu-1gib-lean": {
+      "microvm": { "vcpus": 1, "memory_mib": 1024 },
+      "densities": [1, 2, 3, 4, 5, 6, 7, 8]
+    },
+    "c8i-xlarge-stack": {
+      "microvm": {
+        "vcpus": 1,
+        "memory_mib": 1024,
+        "console": "quiet-i8042",
+        "memory_pages": "thp"
+      },
+      "densities": [1, 2, 3, 4, 5, 6, 7, 8]
+    },
+    "m8i-4xlarge-lean": {
+      "worker_host": { "instance_type": "m8i.4xlarge" },
+      "densities": [1, 4, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18]
+    }
+  },
+  "why": {
+    "c8i-xlarge-lean": "Lean 2-vCPU microVMs, warm: the spec the stack must beat.",
+    "c8i-xlarge-1vcpu-1gib-lean": "1 vCPU / 1 GiB, lean, no guest levers: splits the stack's saving.",
+    "c8i-xlarge-stack": "Full stack: lean, 1 vCPU / 1 GiB, quiet console, huge pages: predicted -32%.",
+    "m8i-4xlarge-lean": "Standing control, lean, warm: shape-warm-1's spec plus the lean flags."
+  }
+}
