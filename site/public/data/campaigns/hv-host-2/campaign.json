@@ -6,6 +6,7 @@
   "started": "2026-09-28T02:59Z",
   "ended": "2026-09-28T03:04Z",
   "status": "complete",
+  "definition_path": "experiments/campaigns/hv-host-2.json",
   "definition": {
     "name": "hv-host-2",
     "question": "How does a metal host change density per vCPU and cost?",
@@ -176,6 +177,7 @@
       "stopped_early": false,
       "started": "2026-09-28T02:59Z",
       "duration_s": 285,
+      "harness_commit": "958000b8bd3f7cc14b16bd3119e1ba13622f5600",
       "host": {
         "instance_type": "m8i.metal-48xl",
         "host_kind": "metal",

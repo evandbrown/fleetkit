@@ -6,6 +6,7 @@
   "started": "2026-09-28T01:13Z",
   "ended": "2026-09-28T01:36Z",
   "status": "complete",
+  "definition_path": "experiments/campaigns/nested-hv-1.json",
   "definition": {
     "name": "nested-hv-1",
     "question": "Does Cloud Hypervisor fit as many microVMs as Firecracker?",
@@ -264,6 +265,7 @@
       "stopped_early": false,
       "started": "2026-09-28T01:13Z",
       "duration_s": 180,
+      "harness_commit": "aaab966ba19a7836c8b3e7b6f9415825c2fa80bf",
       "host": {
         "instance_type": "m8i.4xlarge",
         "host_kind": "nested",
@@ -416,6 +418,7 @@
       "stopped_early": false,
       "started": "2026-09-28T01:13Z",
       "duration_s": 179,
+      "harness_commit": "aaab966ba19a7836c8b3e7b6f9415825c2fa80bf",
       "host": {
         "instance_type": "m8i.4xlarge",
         "host_kind": "nested",
@@ -568,6 +571,7 @@
       "stopped_early": false,
       "started": "2026-09-28T01:34Z",
       "duration_s": 175,
+      "harness_commit": "146a6c450d70b61168b238246f156dcd6134fb59",
       "host": {
         "instance_type": "m8i.4xlarge",
         "host_kind": "nested",
@@ -720,6 +724,7 @@
       "stopped_early": false,
       "started": "2026-09-28T01:14Z",
       "duration_s": 174,
+      "harness_commit": "aaab966ba19a7836c8b3e7b6f9415825c2fa80bf",
       "host": {
         "instance_type": "m8i.4xlarge",
         "host_kind": "nested",
@@ -872,6 +877,7 @@
       "stopped_early": false,
       "started": "2026-09-28T01:14Z",
       "duration_s": 212,
+      "harness_commit": "aaab966ba19a7836c8b3e7b6f9415825c2fa80bf",
       "host": {
         "instance_type": "m8i.4xlarge",
         "host_kind": "nested",
@@ -1014,6 +1020,7 @@
       "stopped_early": false,
       "started": "2026-09-28T01:15Z",
       "duration_s": 236,
+      "harness_commit": "aaab966ba19a7836c8b3e7b6f9415825c2fa80bf",
       "host": {
         "instance_type": "m8i.4xlarge",
         "host_kind": "nested",

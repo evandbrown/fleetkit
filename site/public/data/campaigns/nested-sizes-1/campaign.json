@@ -6,6 +6,7 @@
   "started": "2026-09-28T00:00Z",
   "ended": "2026-09-28T00:04Z",
   "status": "complete",
+  "definition_path": "experiments/campaigns/nested-sizes-1.json",
   "definition": {
     "name": "nested-sizes-1",
     "question": "Is density per host vCPU the same on 8 and 16 vCPU hosts?",
@@ -224,6 +225,7 @@
       "stopped_early": false,
       "started": "2026-09-28T00:00Z",
       "duration_s": 179,
+      "harness_commit": "63e261bc5c25651cda6e67699283afb778da40dd",
       "host": {
         "instance_type": "m8i.4xlarge",
         "host_kind": "nested",
@@ -376,6 +378,7 @@
       "stopped_early": false,
       "started": "2026-09-28T00:00Z",
       "duration_s": 180,
+      "harness_commit": "63e261bc5c25651cda6e67699283afb778da40dd",
       "host": {
         "instance_type": "m8i.4xlarge",
         "host_kind": "nested",
@@ -528,6 +531,7 @@
       "stopped_early": false,
       "started": "2026-09-28T00:01Z",
       "duration_s": 227,
+      "harness_commit": "63e261bc5c25651cda6e67699283afb778da40dd",
       "host": {
         "instance_type": "m8i.2xlarge",
         "host_kind": "nested",
@@ -675,6 +679,7 @@
       "stopped_early": false,
       "started": "2026-09-28T00:01Z",
       "duration_s": 173,
+      "harness_commit": "63e261bc5c25651cda6e67699283afb778da40dd",
       "host": {
         "instance_type": "m8i.2xlarge",
         "host_kind": "nested",
