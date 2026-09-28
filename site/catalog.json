@@ -76,6 +76,10 @@
     {
       "id": "host16-stack-1",
       "title": "Full stack, host size"
+    },
+    {
+      "id": "metal-stack-1",
+      "title": "Full stack on metal"
     }
   ],
   "gate_allow": []

@@ -1,7 +1,78 @@
 {
   "schema": "fleetkit-site-data/2",
-  "featured": "host16-stack-1",
+  "featured": "metal-stack-1",
   "campaigns": [
+    {
+      "id": "metal-stack-1",
+      "title": "Full stack on metal",
+      "question": "Is the full stack cheaper per task on a metal host than on c8i.xlarge?",
+      "started": "2026-09-28T13:15Z",
+      "status": "complete",
+      "replicas": 1,
+      "specs": [
+        {
+          "name": "metal-stack",
+          "label": "transparent huge pages"
+        },
+        {
+          "name": "metal-stack-4k",
+          "label": "4 KiB pages"
+        }
+      ],
+      "runs": 2,
+      "outcomes": [
+        {
+          "spec": "metal-stack",
+          "replicas": [
+            {
+              "run": "metal-stack-r1",
+              "host_vcpus": 192,
+              "tested_successfully": 200,
+              "first_failed": null,
+              "stopped_early": false,
+              "per_host_vcpu": 1.0417,
+              "midpoint_per_host_vcpu": null,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0516,
+                  0.0543
+                ],
+                "observed": [
+                  0.1629,
+                  0.1654
+                ]
+              }
+            }
+          ],
+          "midpoint_per_host_vcpu": null
+        },
+        {
+          "spec": "metal-stack-4k",
+          "replicas": [
+            {
+              "run": "metal-stack-4k-r1",
+              "host_vcpus": 192,
+              "tested_successfully": 192,
+              "first_failed": 200,
+              "stopped_early": false,
+              "per_host_vcpu": 1,
+              "midpoint_per_host_vcpu": 1.0208,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0626,
+                  0.0638
+                ],
+                "observed": [
+                  0.178,
+                  0.1871
+                ]
+              }
+            }
+          ],
+          "midpoint_per_host_vcpu": 1.0208
+        }
+      ]
+    },
     {
       "id": "host16-stack-1",
       "title": "Full stack, host size",
