@@ -7,7 +7,7 @@
   "ended": "2026-09-28T01:18Z",
   "status": "complete",
   "definition_path": "experiments/campaigns/nested-mem-1.json",
-  "answer": "No: with 4 GiB microVMs, c8i.4xlarge (32 GiB) held 9 microVMs on both replicas and m8i.4xlarge (64 GiB) held 9 and 8. Host CPU ran out first on every host, never memory.",
+  "answer": "No: with 4 GiB browsers, c8i.4xlarge (32 GiB) held 9 at ≈ $0.139 per 1,000 tasks and m8i.4xlarge (64 GiB) held 8 at ≈ $0.150. Host CPU ran out first on both, never memory.",
   "definition": {
     "name": "nested-mem-1",
     "question": "With 4 GiB microVMs, does half the host memory lower density?",

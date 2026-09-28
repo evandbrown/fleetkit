@@ -28,9 +28,6 @@ async function noHorizontalScroll(page: Page) {
   expect(sw).toBeLessThanOrEqual(cw);
 }
 
-// The fixtures were judged by the targets in force before 28 September 2026, so every fixture campaign carries this tag.
-const TIGHTER = 'Tighter SLOs: step p50 ≤ 1 s, step p95 ≤ 2 s, task p95 ≤ 5 s';
-
 const SHOTS = process.env.SCREENSHOTS;
 async function shoot(page: Page, name: string) {
   if (!SHOTS) return;
@@ -68,11 +65,27 @@ for (const scheme of ['light'] as const) {
   });
 }
 
-test('shows terms as plain words, with no popover', async ({ page }) => {
+test('defines a term on hover or focus, with nothing showing until then', async ({ page }) => {
   await page.goto('./#/results/nested-sizes-synthetic');
   await expect(page.locator('h1')).toBeVisible();
+  // The definitions are in the page for screen readers (aria-describedby), hidden until the word is hovered.
   await expect(page.getByRole('tooltip')).toHaveCount(0);
-  await expect(page.locator('[aria-describedby]')).toHaveCount(0);
+  const term = page.locator('table.tested .slo-list .term', { hasText: 'Each step p50' });
+  await expect(term).toHaveAttribute('aria-describedby', /^term-\d+$/);
+  await term.scrollIntoViewIfNeeded();
+  await term.hover();
+  const tip = page.getByRole('tooltip');
+  await expect(tip).toHaveCount(1);
+  await expect(tip).toHaveText('The median time of each of the five steps, over every browser in the trial. Each step must be within this.');
+  // Whole, inside the window, and under the sticky header.
+  const [box, header] = [await tip.boundingBox(), await page.locator('header').first().boundingBox()];
+  expect(box!.x).toBeGreaterThanOrEqual(0);
+  expect(box!.x + box!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+  expect(box!.y).toBeGreaterThanOrEqual(header!.y + header!.height);
+  // Escape hides it.
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('tooltip')).toHaveCount(0);
+  await noHorizontalScroll(page);
 });
 
 test('has three places in the navigation, About first, no theme switch and no footer', async ({ page }) => {
@@ -112,18 +125,25 @@ test('opens on About: what Fleetkit is, how it works, and the way into the resul
   await expect(page.locator('.hero .lead')).toContainText('benchmark framework for the browser fleet');
   await expect(page.locator('.hero .lead')).toContainText('driven by a test harness');
   await expect(page.locator('.hero')).not.toContainText(/AI agent/);
-  await expect(page.getByRole('list', { name: 'How Fleetkit works' }).getByRole('listitem')).toHaveCount(4);
+  // The four steps sit under the intro, beside the card, so the hero is one block.
+  await expect(page.locator('.hero .intro').getByRole('list', { name: 'How Fleetkit works' }).getByRole('listitem')).toHaveCount(4);
   const featured = page.getByRole('complementary', { name: 'Featured result' });
   await expect(featured).toContainText('Synthetic host sizes');
-  // The figure names the host it ran on.
-  await expect(featured).toContainText(/\d+\s*microVMs? on one m8i\.4xlarge/);
   await expect(page.getByRole('link', { name: /Define your own in the Builder/ })).toHaveAttribute('href', '#/builder');
-  await expect(featured).toContainText('per host vCPU');
-  // No question on the card (the answer carries its context), and a check before "SLOs" that reads as "every SLO met",
-  // then the tag, since the fixture was judged by the earlier targets.
-  await expect(featured.locator('.q')).toHaveCount(0);
-  await expect(featured.locator('.slos')).toHaveText(/^\s*every SLO met\s*SLOs\s*Tighter SLOs:/);
-  await expect(featured.locator('.slos .slo-tag')).toHaveText(TIGHTER);
+  // The topline figure (D102): the best spec's steady-state cost, the median of its replicas' range middles
+  // (0.20165 and 0.19655 here), with its unit under it; then the browsers on one host it came from, the host in bold;
+  // then one replica's closest-SLO chart (a bar per browser count of the spec's list). A glance, not a summary: no
+  // question, no answer, no vCPU count, no per-vCPU figure and no SLO note.
+  await expect(featured.locator('.big')).toHaveText('≈ $0.199');
+  await expect(featured.locator('.big')).toHaveAttribute('title', 'Steady state over 2 replicas: $0.193–0.211 per 1,000 tasks; one burst $0.206–0.212');
+  await expect(featured.locator('.unit')).toHaveText('per 1,000 tasks');
+  await expect(featured.locator('.detail')).toHaveText(/^8 browsers on one m8i\.4xlarge$/);
+  await expect(featured.locator('.detail strong')).toHaveText('m8i.4xlarge');
+  await expect(featured).not.toContainText(/per host vCPU|vCPUs|Tighter|SLOs:/);
+  await expect(featured.locator('.q, .slo-tag, .cost, .note')).toHaveCount(0);
+  const chart = featured.getByRole('img', { name: 'Closest SLO at each browser count, as a share of its limit' });
+  await expect(chart).toBeVisible();
+  await expect(chart.locator('rect.passed').first()).toBeVisible();
   await expect(page.getByRole('link', { name: 'See the results' })).toHaveCount(1);
   await page.getByRole('link', { name: 'See the results' }).click();
   await expect(page).toHaveURL(/#\/results$/);
@@ -148,8 +168,8 @@ test('explains the setup on About, with the featured spec, the standard SLOs and
   await expect(page.locator('#slos + .sub')).toHaveText(
     "The design's targets. Every campaign published so far was judged by targets of its own, tighter for most (step p50 ≤ 1 s, step p95 ≤ 2 s, task p95 ≤ 5 s); Results says so beside each.",
   );
-  // The featured campaign was judged by the earlier targets, so its result says so.
-  await expect(page.getByRole('complementary', { name: 'Featured result' }).locator('.slo-tag')).toHaveText(TIGHTER);
+  // The featured result carries no SLO note: the SLOs row of its spec, below, has the detail.
+  await expect(page.getByRole('complementary', { name: 'Featured result' }).locator('.slo-tag')).toHaveCount(0);
   // The task links the public copy of the test shopping site, in a new tab: the one link off the site besides GitHub.
   // The page never fetches it (the every-route test above watches for requests leaving the site).
   const fixture = page.getByRole('link', { name: 'the test shopping site' });
@@ -159,10 +179,18 @@ test('explains the setup on About, with the featured spec, the standard SLOs and
   await expect(page.locator('ol.film > li')).toHaveCount(5);
   await expect(page.locator('ol.film')).toContainText('Verify cart');
   // The spec is the same table Results shows, for the featured campaign's first spec, with the support host last.
-  await expect(page.locator('.how table.tested tbody th')).toHaveText(['Host', 'Hypervisor', 'MicroVM', 'Densities', 'Replicas', 'SLOs', 'Support host']);
+  await expect(page.locator('.how table.tested tbody th')).toHaveText(['Host', 'Hypervisor', 'MicroVM', 'Browsers per host', 'Replicas', 'SLOs', 'Support host']);
   await expect(page.locator('.how table.tested thead')).toHaveCount(0);
+  // The SLOs row: one target per line, each a defined term, the standard beside the three that differ from it.
+  await expect(page.locator('.how table.tested').getByRole('list', { name: 'SLOs' }).getByRole('listitem')).toHaveText([
+    /^Browser ready\s*≤ 180 s$/,
+    /^Tasks succeed\s*100%$/,
+    /^Each step p50\s*≤ 1 s\s*standard 2 s$/,
+    /^Each step p95\s*≤ 2 s\s*standard 3 s$/,
+    /^Whole task p95\s*≤ 5 s\s*standard 10 s$/,
+  ]);
   await expect(page.locator('ol.parts > li')).toHaveCount(5);
-  await expect(page.locator('dl.measures dt')).toHaveText(['Latency', 'Time to ready', 'Host pressure', 'Cost', 'Max density', 'Midpoint']);
+  await expect(page.locator('dl.measures dt')).toHaveText(['Latency', 'Time to ready', 'Host pressure', 'Cost', 'Most browsers', 'Midpoint']);
   // Nothing after What we measure: the one call to action is at the top, and there are no footer links.
   await expect(page.locator('section').last().getByRole('link')).toHaveCount(0);
   await expect(page.locator('main')).not.toContainText(/Words we don't use|glossary/i);

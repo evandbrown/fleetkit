@@ -117,7 +117,7 @@ export function tableRows(refs: SpecRef[], replicas: number[], support = false):
       specs.map((s) => ({ main: warmText(s.spec.procedure) })),
       specs.some((s) => (s.spec.procedure.release_after_ready_s ?? 0) > 0),
     ),
-    row('densities', 'Densities', specs.map((s) => ({ main: densitiesText(s.spec.densities) }))),
+    row('densities', 'Browsers per host', specs.map((s) => ({ main: densitiesText(s.spec.densities) }))),
     row('replicas', 'Replicas', replicas.map((n) => ({ main: replicasText(n) }))),
     row('slos', 'SLOs', specs.map((s) => ({ main: slosText(s.spec.criteria) }))),
     row('support', 'Support host', specs.map((s) => ({ main: s.spec.support_host.instance_type })), support),

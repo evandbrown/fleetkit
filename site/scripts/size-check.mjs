@@ -6,7 +6,7 @@ import { gzipSync } from 'node:zlib';
 const dist = process.argv[2] ?? 'dist';
 const KB = 1024;
 const BUDGET = {
-  code: 70 * KB,        // the JS and CSS every page loads first (what index.html references)
+  code: 75 * KB,        // the JS and CSS every page loads first (what index.html references); raised from 70 for the visual round (D103)
   lazy: 40 * KB,        // each chunk loaded only when needed (the experiment builder)
   index: 8 * KB,        // data/index.json: every campaign's entry, its answer included (D93)
   doc: 80 * KB,         // each campaign, run or trial document; a metal trial of 192 microVMs is about 70 KB
@@ -56,7 +56,7 @@ if (code > BUDGET.code) problems.push(`JS + CSS loaded first: ${code} B > ${BUDG
 if (data > BUDGET.data) problems.push(`dataset: ${data} B > ${BUDGET.data} B`);
 
 console.log(
-  `size-check: JS + CSS loaded first ${(code / KB).toFixed(1)} KB gz (budget 70), lazy chunks ${(lazy / KB).toFixed(1)} KB gz ` +
+  `size-check: JS + CSS loaded first ${(code / KB).toFixed(1)} KB gz (budget 75), lazy chunks ${(lazy / KB).toFixed(1)} KB gz ` +
     `(budget 40 each), dataset ${(data / KB).toFixed(1)} KB gz (budget 16,384)`,
 );
 if (problems.length) {

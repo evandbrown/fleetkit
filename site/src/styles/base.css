@@ -62,6 +62,12 @@ ol {
   max-width: var(--measure);
 }
 
+/* The sentence under a section heading: what the section shows and why it matters. */
+p.sub {
+  margin: -6px 0 16px;
+  color: var(--ink-2);
+}
+
 code {
   font-family: var(--mono);
   font-size: 0.9em;
@@ -222,6 +228,18 @@ details > summary {
   font-weight: 600;
   line-height: 1.45;
   font-variant-numeric: tabular-nums;
+}
+
+/* The ≈ before an estimated figure (a cost per 1,000 tasks): a hedge mark, not a glyph of the number's size. Half
+   the number's size (never under 9 px), raised to the middle of the digits, muted; a real space follows it in the markup. */
+.approx {
+  display: inline-block;
+  font-size: max(0.5em, 9px);
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: 0;
+  vertical-align: 0.42em;
+  color: var(--muted);
 }
 
 .status {

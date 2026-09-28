@@ -104,7 +104,7 @@
   {/if}
 
   {#if path === 'worker_host.instance_type' && hostVcpusDiffer}
-    <label class="opt"><input type="checkbox" bind:checked={scale} /> Scale densities per host vCPU</label>
+    <label class="opt"><input type="checkbox" bind:checked={scale} /> Scale browser counts per host vCPU</label>
   {/if}
   {#if path === 'hypervisor.name' && values.includes('cloud-hypervisor') && devicesDiffer}
     <label class="opt">

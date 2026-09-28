@@ -7,7 +7,7 @@
   "ended": "2026-09-28T01:36Z",
   "status": "complete",
   "definition_path": "experiments/campaigns/nested-hv-1.json",
-  "answer": "Yes: Cloud Hypervisor and Firecracker each held 9 microVMs on both m8i.4xlarge replicas; Firecracker with MMIO devices and no random-number device held 8 and 9. Host CPU ran out first every time.",
+  "answer": "Yes: Cloud Hypervisor held 9 browsers on m8i.4xlarge (16 vCPUs) at ≈ $0.145 per 1,000 tasks, Firecracker 9 at ≈ $0.146, Firecracker with MMIO 8 at ≈ $0.144. Host CPU ran out first every time.",
   "definition": {
     "name": "nested-hv-1",
     "question": "Does Cloud Hypervisor fit as many microVMs as Firecracker?",

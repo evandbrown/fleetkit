@@ -31,7 +31,7 @@ import {
   trialSlos,
   type SpecRef,
 } from '../../src/lib/shape';
-import { makeBands, tickShown } from '../../src/lib/bands';
+import { latencyTicks, makeBands, tickShown } from '../../src/lib/bands';
 import { laneLayout, LANES_MAX_PX } from '../../src/lib/scale';
 import { differing, FIELDS, field, flagsShort, flagsWords, flatten, mib, show } from '../../src/lib/spec';
 import type { CampaignDoc, Index, RunDoc, SpecDoc, TrialDoc } from '../../src/lib/types';
@@ -68,7 +68,7 @@ describe('specs, from the input schema', () => {
 
   it('group every input by section, marking what a spec changed', () => {
     const groups = specSections(syn.specs[1].spec, syn.specs[1].changes);
-    expect(groups.map((g) => g.group)).toEqual(['Worker host', 'Hypervisor', 'MicroVM', 'Densities', 'Success criteria', 'Procedure', 'Support host']);
+    expect(groups.map((g) => g.group)).toEqual(['Worker host', 'Hypervisor', 'MicroVM', 'Browsers per host', 'Success criteria', 'Procedure', 'Support host']);
     expect(groups.find((g) => g.group === 'Success criteria')!.rows[0].label).toBe('Step p50 target');
     const changed = groups.flatMap((g) => g.rows.filter((r) => r.base !== undefined));
     expect(changed.map((r) => [r.path, r.base, r.value])).toEqual([
@@ -163,15 +163,31 @@ describe('what we tested', () => {
 describe('how it performed', () => {
   it('gives each spec four figures: density, per vCPU, cost and what ran out', () => {
     const [big, small] = specResults(refs(syn), docs).map(headline);
-    // The cost is the steady-state cost (D81), with what one burst is charged beside it.
+    // The cost is one number (D102): the median of the replicas' steady-state range middles (D81), 0.20165 and
+    // 0.19655 here; the ranges and the burst go in the note. The count is the one most replicas held.
     expect(big).toEqual({
-      density: '8', densityNote: null, perVcpu: '0.50', cost: '$0.193–0.211', burst: '$0.206–0.212', ranOut: 'Host CPU', ranOutNote: 'at 12', ranOutDensity: 12,
+      density: '8', densityNote: null, count: '8', perVcpu: '0.50', cost: '$0.199', costValue: expect.closeTo(0.1991, 6), burst: '$0.208',
+      costNote: 'Steady state over 2 replicas: $0.193–0.211 per 1,000 tasks; one burst $0.206–0.212',
+      ranOut: 'Host CPU', ranOutNote: 'at 12', ranOutDensity: 12,
     });
-    // Its replicas ran out at 6 and at 4: the note gives both ends, never only the lowest. Neither replica's host
-    // was full at its result, so there is no steady-state cost: the burst stands alone.
-    expect(small).toMatchObject({ density: '3–4', perVcpu: '0.38–0.50', cost: null, burst: '$0.204–0.251', ranOut: 'Host CPU', ranOutNote: 'at 4–6', ranOutDensity: 4 });
+    // Its replicas ran out at 6 and at 4: the note gives both ends, never only the lowest. One replica's host was
+    // never full, so the cost comes from the other, and the note says so.
+    expect(small).toMatchObject({
+      density: '3–4', count: '3', perVcpu: '0.38–0.50', cost: '$0.202', burst: '$0.226',
+      costNote: 'Steady state (1 of 2 never filled the host): $0.196–0.208 per 1,000 tasks; one burst $0.204–0.251',
+      ranOut: 'Host CPU', ranOutNote: 'at 4–6', ranOutDensity: 4,
+    });
     expect(headline(specResults(refs(cap), docs)[0])).toEqual({
-      density: '8', densityNote: null, perVcpu: '0.50', cost: '$0.141–0.142', burst: '$0.184–0.201', ranOut: 'Host CPU', ranOutNote: 'at 12', ranOutDensity: 12,
+      density: '8', densityNote: null, count: '8', perVcpu: '0.50', cost: '$0.141', costValue: expect.closeTo(0.1413, 6), burst: '$0.193',
+      costNote: 'Steady state: $0.141–0.142 per 1,000 tasks; one burst $0.184–0.201',
+      ranOut: 'Host CPU', ranOutNote: 'at 12', ranOutDensity: 12,
+    });
+    // No steady-state figure anywhere: the burst stands alone, and the note says why.
+    const [, , mmio] = specResults(refs(hv), docs);
+    const noFleet = { ...mmio, replicas: mmio.replicas.map((x) => ({ ...x, cost_per_1000_tasks: { ...x.cost_per_1000_tasks!, steady_state: null } })) };
+    expect(headline(noFleet)).toMatchObject({
+      cost: null, costValue: null, burst: '$0.201',
+      costNote: 'One burst over 2 replicas: $0.193–0.214 per 1,000 tasks. The host was never full, so there is no steady-state figure.',
     });
   });
 
@@ -208,13 +224,13 @@ describe('how it performed', () => {
   });
 
   it('answers in a line: what each spec fit, grouped, and what ran out (D72)', () => {
-    expect(answerText(specResults(refs(cap), docs))).toBe('8 microVMs met every SLO, 0.50 per host vCPU. Host CPU ran out at 12.');
+    expect(answerText(specResults(refs(cap), docs))).toBe('8 browsers met every SLO, 0.50 per vCPU. Host CPU ran out at 12.');
     // Across host sizes the figure is per host vCPU.
     expect(answerText(specResults(refs(syn), docs))).toBe(
-      'm8i.4xlarge fits 0.50 microVMs per host vCPU, m8i.2xlarge 0.38–0.50. Host CPU ran out first in both.',
+      'm8i.4xlarge fits 0.50 browsers per vCPU, m8i.2xlarge 0.38–0.50. Host CPU ran out first in both.',
     );
     expect(answerText(specResults(refs(hv), docs))).toBe(
-      'Firecracker PCI + RNG fits 10 microVMs, Cloud Hypervisor 9, Firecracker MMIO 8–9. Host CPU ran out first in all three.',
+      'Firecracker PCI + RNG fits 10 browsers, Cloud Hypervisor 9, Firecracker MMIO 8–9. Host CPU ran out first in all three.',
     );
     // With more than three results the line names the best and gives the range of the rest.
     const three = specResults(refs(hv), docs);
@@ -226,10 +242,10 @@ describe('how it performed', () => {
         replicas: r.replicas.map((x) => ({ ...x, tested_successfully: (x.tested_successfully ?? 0) - 3 })),
       })),
     ];
-    expect(answerText(six)).toBe('Firecracker PCI + RNG fits the most, 10 microVMs; the other 5 specs 5–9. Host CPU ran out first in all 6.');
+    expect(answerText(six)).toBe('Firecracker PCI + RNG fits the most, 10 browsers; the other 5 specs 5–9. Host CPU ran out first in all 6.');
   });
 
-  it('draws each run of each spec as a bar to its first failure, with a link to the run', () => {
+  it('gives each run of each spec its last pass and first failure, with a link to the run', () => {
     const rows = answerRows(specResults(refs(hv), docs), docs);
     expect(rows.map((r) => [r.label, r.series, r.runs.map((x) => [x.replica, x.passed, x.failed, x.stoppedEarly])])).toEqual([
       ['Firecracker PCI + RNG', 0, [[1, 10, 11, false], [2, 10, 11, false]]],
@@ -240,6 +256,21 @@ describe('how it performed', () => {
     const partial: CampaignDoc = { ...syn, runs: syn.runs.filter((r) => r.id !== 'm8i-2xlarge-r2') };
     const p = answerRows(specResults(refs(partial), new Map([[syn.id, partial]])), new Map([[syn.id, partial]]));
     expect(p[1].runs[1]).toMatchObject({ replica: 2, href: null, passed: null });
+  });
+
+  it('crowns the clear winner on cost, and scales each cost to the dearest (D102)', () => {
+    // Firecracker's replica middles are both under every other spec's: a clear winner, and the dearest sets the scale.
+    const hvRows = answerRows(specResults(refs(hv), docs), docs);
+    expect(hvRows.map((r) => [r.label, r.cost, r.best, Math.round(r.share! * 100)])).toEqual([
+      ['Firecracker PCI + RNG', '$0.190', true, 94],
+      ['Cloud Hypervisor', '$0.202', false, 100],
+      ['Firecracker MMIO', '$0.201', false, 100],
+    ]);
+    // The catalog's featured spec leads instead when it is named, and is no clear winner when it isn't the cheapest.
+    const featured = answerRows(specResults(refs(hv), docs), docs, 'cloud-hypervisor');
+    expect(featured.map((r) => r.best)).toEqual([false, false, false]);
+    // One costed spec: nothing to win against, so nothing is crowned.
+    expect(answerRows(specResults(refs(cap), docs), docs).map((r) => [r.best, r.share])).toEqual([[false, 1]]);
   });
 
   it('labels a spec with no interval in any replica', () => {
@@ -257,8 +288,8 @@ describe('how it performed', () => {
 
   it('chooses a campaign by its best spec', () => {
     const e = (id: string) => index.campaigns.find((c) => c.id === id)!;
-    expect(campaignHeadline(e('cap-baseline-1'))).toEqual({ density: '8', label: 'microVMs', perVcpu: '0.50', spec: 'baseline' });
-    expect(campaignHeadline(e('nested-sizes-synthetic'))).toEqual({ density: '8', label: 'microVMs', perVcpu: '0.50', spec: 'm8i-4xlarge' });
+    expect(campaignHeadline(e('cap-baseline-1'))).toEqual({ density: '8', label: 'browsers', perVcpu: '0.50', spec: 'baseline' });
+    expect(campaignHeadline(e('nested-sizes-synthetic'))).toEqual({ density: '8', label: 'browsers', perVcpu: '0.50', spec: 'm8i-4xlarge' });
     expect(campaignHeadline(e('nested-hv-synthetic'))).toMatchObject({ density: '10', perVcpu: '0.63', spec: 'firecracker' });
   });
 
@@ -269,7 +300,7 @@ describe('how it performed', () => {
     expect(sizes.metric).toBe('Per vCPU');
     expect(sizes.bars.map((b) => [b.label, b.text])).toEqual([['m8i.4xlarge', '0.50'], ['m8i.2xlarge', '0.38–0.50']]);
     const hvs = campaignFigure(e('nested-hv-synthetic'));
-    expect(hvs.metric).toBe('Max density');
+    expect(hvs.metric).toBe('Most browsers');
     expect(hvs.bars.map((b) => [b.text, b.lo, b.hi])).toEqual([['10', 10, 10], ['9', 9, 9], ['8–9', 8, 9]]);
     expect(hvs.max).toBe(10);
     // A spec none of whose replicas reached a failure is a floor, as the headline writes it.
@@ -305,7 +336,7 @@ describe('the result chart', () => {
     const at = (d: number) => row.marks.filter((m) => m.density === d).map((m) => m.ratio!);
     expect(at(8).every((r) => r > 0.5 && r <= 1)).toBe(true);
     expect(at(12).every((r) => r > 1)).toBe(true);
-    expect(row.marks.find((m) => m.density === 12)!.title).toMatch(/^trial 1 at density 12: failed, home p50 at 128% of its limit$/);
+    expect(row.marks.find((m) => m.density === 12)!.title).toMatch(/^trial 1 at 12 browsers: failed, home p50 at 128% of its limit$/);
   });
 
   it('marks densities not tested and labels every run that stopped without a failure', () => {
@@ -376,7 +407,7 @@ describe('latency by density', () => {
       step: { ms: 1246.9796, target: 1000, name: 'home' },
       task: { ms: 2809.2428, target: 5000 },
       passed: false,
-      title: 'm8i.2xlarge · replica 2 · trial 3 at density 4',
+      title: 'm8i.2xlarge · replica 2 · trial 3 at 4 browsers',
       href: '#/results/nested-sizes-synthetic/runs/m8i-2xlarge-r2/trials/d4-t3',
     });
     // Warm-ups and illustrations aren't judged, so they aren't drawn; points run low density to high.
@@ -391,15 +422,47 @@ describe('latency by density', () => {
     expect(lat.replicas).toBe(1);
     const at12 = lat.series[0].points.filter((p) => p.density === 12);
     expect(at12.map((p) => [p.x, p.title, p.passed])).toEqual([
-      [12, 'trial 1 at density 12', false],
-      [12, 'trial 2 at density 12', false],
-      [12, 'trial 3 at density 12', false],
+      [12, 'trial 1 at 12 browsers', false],
+      [12, 'trial 2 at 12 browsers', false],
+      [12, 'trial 3 at 12 browsers', false],
     ]);
     expect(at12[0].step).toEqual({ ms: 1279.246, target: 1000, name: 'home' });
   });
 
   it('draws nothing for runs whose documents are not loaded', () => {
     expect(latency(refs(syn), docs, new Map()).series.every((s) => s.points.length === 0)).toBe(true);
+  });
+
+  it('gives each spec the median of its trials at every count it tested, replicas pooled, failed trials included', () => {
+    const lat = latency(refs(syn), docs, synRuns);
+    const small = lat.series[1];
+    expect(small.medians.map((m) => [m.x, m.n])).toEqual([[0.125, 2], [0.25, 2], [0.375, 4], [0.5, 6], [0.75, 6]]);
+    const at4 = small.medians.find((m) => m.x === 0.5)!;
+    // Six trials at 4 browsers on the 8-vCPU host across both replicas: the even count averages the middle two.
+    expect(at4.step).toBeCloseTo(985, 3);
+    expect(at4.task).toBeCloseTo(2583.855, 2);
+    expect(small.medians.at(-1)!.step).toBeCloseTo(1354.449, 2);
+    expect(lat.series[0].medians.map((m) => m.x)).toEqual([0.0625, 0.125, 0.25, 0.5, 0.75]);
+    const one = latency(refs(cap), docs, new Map([['cap-baseline-1/baseline-r1', capRun]])).series[0];
+    expect(one.medians.map((m) => [m.x, m.n, m.step])).toEqual([[1, 1, 438.476], [2, 1, 507.96], [4, 1, 522.9515], [8, 3, 806.926], [12, 3, 1279.246]]);
+  });
+
+  it('ticks a linear x axis every 0.25 per vCPU, labelled every 0.5, with a failure label only where it has room', () => {
+    const px = (v: number) => v * 400; // 400 px per browser per vCPU
+    const t = latencyTicks(2.1, px, true, [0.75, 0.5, 1.6875]);
+    expect(t.map((k) => k.v)).toEqual([0, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.6875, 1.75, 2]);
+    expect(t.filter((k) => k.label !== null).map((k) => [k.label, k.failure])).toEqual([
+      ['0', false], ['0.5', false], ['0.75', true], ['1', false], ['1.5', false], ['1.69', true], ['2', false],
+    ]);
+    // Narrower: 1.69 is 19 px from 1.75, so only 0.75 (100 px from its neighbours) keeps its label.
+    const narrow = latencyTicks(2.1, (v) => v * 100, true, [0.75, 0.5, 1.6875]);
+    expect(narrow.filter((k) => k.failure).map((k) => k.label)).toEqual([]);
+    expect(latencyTicks(2.1, (v) => v * 150, true, [0.75]).filter((k) => k.failure).map((k) => k.label)).toEqual(['0.75']);
+    // Per host: round steps, all labelled; a failure at 152 sits 70 px from 140 at 5.8 px a browser, one at 144 does not.
+    const host = latencyTicks(159.6, (v) => v * 5.8, false, [152], 6);
+    expect(host.map((k) => k.label)).toEqual(['0', '20', '40', '60', '80', '100', '120', '140', '152']);
+    expect(host.find((k) => k.failure)?.v).toBe(152);
+    expect(latencyTicks(159.6, (v) => v * 5.8, false, [144], 6).some((k) => k.failure)).toBe(false);
   });
 });
 

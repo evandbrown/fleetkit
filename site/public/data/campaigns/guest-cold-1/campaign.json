@@ -7,7 +7,7 @@
   "ended": "2026-09-28T10:41Z",
   "status": "complete",
   "definition_path": "experiments/campaigns/guest-cold-1.json",
-  "answer": "Huge pages moved c8i.xlarge from 3 microVMs to 5–6, cutting cost from $0.089–0.092 to $0.063–0.074 per 1,000 tasks; a quiet console held 3 at $0.081–0.083. With both, the 1 vCPU / 1 GiB guest held 6 at $0.038–0.047 (host CPU ran out); m8i.4xlarge rose from 13 to at least 18.",
+  "answer": "Yes, huge pages most: on c8i.xlarge the default guest cost ≈ $0.090 per 1,000 tasks, quiet console ≈ $0.082, huge pages ≈ $0.067, both ≈ $0.060 and 1 vCPU / 1 GiB tuned ≈ $0.042. On m8i.4xlarge huge pages cut ≈ $0.132 to ≈ $0.079; host CPU ran out first.",
   "definition": {
     "name": "guest-cold-1",
     "question": "Do a quiet guest console and huge pages cut CPU per task on lean Chromium?",

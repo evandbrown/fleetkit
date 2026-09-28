@@ -75,7 +75,8 @@
         {:else}
           <rect class="ghost" x={s.x} y="182" width="88" height="120" rx="8" />
           <text class="t-dots" x={s.x + 44} y="240" text-anchor="middle">…</text>
-          <text class="t-sub" x={s.x + 44} y="262" text-anchor="middle">N = density</text>
+          <text class="t-sub" x={s.x + 44} y="258" text-anchor="middle">N = browsers</text>
+          <text class="t-sub" x={s.x + 44} y="272" text-anchor="middle">per host</text>
         {/if}
       {/each}
       {@render callout(2, 32, 182)}
@@ -156,7 +157,8 @@
         {:else}
           <rect class="ghost" x={s.x} y="236" width="100" height="132" rx="8" />
           <text class="t-dots" x={s.x + 50} y="298" text-anchor="middle">…</text>
-          <text class="t-sub" x={s.x + 50} y="322" text-anchor="middle">N = density</text>
+          <text class="t-sub" x={s.x + 50} y="318" text-anchor="middle">N = browsers</text>
+          <text class="t-sub" x={s.x + 50} y="332" text-anchor="middle">per host</text>
         {/if}
       {/each}
       {@render callout(2, 172, 236)}

@@ -9,7 +9,7 @@
   import { HOST_CONSUMER_COLOR, specColor } from '../lib/colors';
   import { loadTrial } from '../lib/data';
   import * as f from '../lib/format';
-  import { HOST_CONSUMER_LABEL, RULE_LABEL, trialLabel, VERDICT_SHORT } from '../lib/glossary';
+  import { browsers, HOST_CONSUMER_LABEL, RULE_LABEL, trialLabel, VERDICT_SHORT } from '../lib/glossary';
   import { href } from '../lib/router';
   import { coresStack, firedRule, lanes, limitPanels, limitPick, type LimitPick, type SpecRef } from '../lib/shape';
   import type { CampaignDoc, RuleDef, RunDoc } from '../lib/types';
@@ -53,7 +53,7 @@
     return `${RULE_LABEL[r.key]} ${r.op === '>=' ? '≥' : '<'} ${pct ? `${f.num(v)}%` : f.num(v, 2)}`;
   };
   /** What the dropdown says of a spec beside its name: where it stopped passing, or the most that passed. */
-  const at = (x: Item) => (x.pick.failed ? `fails at ${x.pick.density}` : `passed ${x.pick.density}`);
+  const at = (x: Item) => (x.pick.failed ? `fails at ${browsers(x.pick.density)}` : `passed ${browsers(x.pick.density)}`);
   /** A new spec opens on its failure, as the first one does. */
   function choose(id: string) {
     chosen = id;
@@ -117,7 +117,7 @@
     {@const trialHref = href({ name: 'trial', campaign: c.id, run: r.id, trial: t.id, microvm: null })}
     <div class="card" id="limit-panel">
       {#if pick.pass}
-        <div class="switch" role="group" aria-label="Density shown">
+        <div class="switch" role="group" aria-label="Browser count shown">
           <span class="sl">Show</span>
           <button type="button" aria-pressed={view === 'pass'} onclick={() => (view = 'pass')}>
             <Mark kind="pass" size={10} />Last pass <strong>{pick.pass.density}</strong>
@@ -130,8 +130,8 @@
       <div class="head">
         <div class="who">
           <p class="title">
-            <strong>Density {shown.density}</strong>
-            <span class="muted">{trialLabel(t).replace(/ at density \d+$/, '')}{c.definition.replicas > 1 ? ` · replica ${r.replica}` : ''}</span>
+            <strong>{browsers(shown.density)}</strong>
+            <span class="muted">{trialLabel(t).replace(/ at \d+ browsers?$/, '')}{c.definition.replicas > 1 ? ` · replica ${r.replica}` : ''}</span>
           </p>
           <p class="result">
             {#if t.passed}

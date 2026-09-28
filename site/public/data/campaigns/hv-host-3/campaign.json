@@ -7,7 +7,7 @@
   "ended": "2026-09-28T04:03Z",
   "status": "complete",
   "definition_path": "experiments/campaigns/hv-host-3.json",
-  "answer": "One m8i.metal-48xl (192 vCPUs) held 140 microVMs at $0.121–0.126 per 1,000 tasks, 0.73 microVMs per host vCPU against 0.56 on a nested m8i.4xlarge. Host CPU ran out first at 144.",
+  "answer": "One m8i.metal-48xl (192 vCPUs) held 140 browsers at ≈ $0.123 per 1,000 tasks, against 9 at ≈ $0.150 on a nested m8i.4xlarge (16 vCPUs, m8i_host_size). Host CPU ran out first at 144.",
   "definition": {
     "name": "hv-host-3",
     "question": "At the nested campaigns' SLO, how many microVMs fit on a metal host?",
@@ -412,6 +412,6 @@
   ],
   "notes": [
     "The same SLO as the nested campaigns: each step's p50 within 1 s and p95 within 2 s.",
-    "Densities are close together between 128 and 144, around where hv-host-2's trials would have crossed this SLO."
+    "The browser counts tested are close together between 128 and 144, around where hv-host-2's trials would have crossed this SLO."
   ]
 }

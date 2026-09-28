@@ -194,7 +194,7 @@
       </Field>
       {#if path === 'worker_host.instance_type' && offer}
         <p class="offer">
-          <span>Densities for {TYPES[String(own[path])]?.vcpus} vCPUs, not {offerFrom}: <strong>{offer.join(', ')}</strong></span>
+          <span>Browser counts for {TYPES[String(own[path])]?.vcpus} vCPUs, not {offerFrom}: <strong>{offer.join(', ')}</strong></span>
           <button type="button" onclick={scale}>Scale</button>
           <button type="button" class="link" onclick={() => (offer = null)}>Keep</button>
         </p>

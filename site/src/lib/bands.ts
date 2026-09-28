@@ -1,6 +1,7 @@
 // The density axis the results charts share: one equal band per density tested (so densities 8, 9 and 10 get as
 // much room as 1 and 4), then one band for every listed density above the highest tested, marked not tested. The
 // latency chart and the every-trial grid use the same bands and margins, so their columns line up.
+import { ticks } from 'd3-array';
 import * as f from './format';
 
 export interface Band {
@@ -47,6 +48,40 @@ export function tickShown(bands: Band[], bw: number): (i: number) => boolean {
   let last = bands.length - 1;
   while (last >= 0 && bands[last].untested) last--;
   return (i) => !!bands[i]?.untested || (i <= last && (last - i) % k === 0);
+}
+
+/** A tick on the latency chart's linear x axis: its value, its label (null for an unlabelled minor tick), and
+ * whether it marks where a spec first failed. */
+export interface AxisTick {
+  v: number;
+  label: string | null;
+  failure: boolean;
+}
+
+/**
+ * The latency chart's x ticks over a linear axis from 0 to `end`: per host vCPU, every 0.25 with a label every 0.5;
+ * per host, d3's nice steps, all labelled. Then a labelled tick where each spec first failed (`failures`), kept only
+ * when it sits at least 28 px (`toPx`) from every other label, so the labels never crowd.
+ */
+export function latencyTicks(end: number, toPx: (v: number) => number, perVcpu: boolean, failures: number[], count = 6): AxisTick[] {
+  const out: AxisTick[] = [];
+  if (perVcpu) {
+    for (let k = 0; k * 0.25 <= end + EPS; k++) {
+      const v = k * 0.25;
+      out.push({ v, label: k % 2 === 0 ? tickText(v, true) : null, failure: false });
+    }
+  } else {
+    for (const v of ticks(0, end, count)) out.push({ v, label: tickText(v, false), failure: false });
+  }
+  for (const f of uniq(failures)) {
+    const room = out.filter((t) => t.label !== null).every((t) => Math.abs(toPx(t.v) - toPx(f)) >= 28);
+    if (!room) continue;
+    // A failure on a minor tick labels that tick; elsewhere it is a tick of its own.
+    const on = out.find((t) => Math.abs(t.v - f) < EPS);
+    if (on) Object.assign(on, { label: tickText(f, perVcpu), failure: true });
+    else out.push({ v: f, label: tickText(f, perVcpu), failure: true });
+  }
+  return out.sort((a, b) => a.v - b.v);
 }
 
 export function bandIndex(bands: Band[], x: number): number {

@@ -218,10 +218,12 @@ export interface Msg {
 /** The rule for a campaign or spec name, in fewer words than the schema's message. */
 export const NAME_RULE = '2–40 lowercase letters, digits or hyphens, starting with a letter';
 
-/** The long messages campaign.ts shares with expand.py, in fewer words for the page. */
+/** The long messages campaign.ts shares with expand.py, in fewer words for the page (and "density", which the
+ * harness says, as the site's "browsers"). */
 const SHORTER: [RegExp, string][] = [
   [/^a name has 2 to 40 lowercase letters.*$/, NAME_RULE],
-  [/^at density (\d+) the microVMs' memory adds up to ([\d.]+) GiB against the worker host's ([\d.]+) GiB, so memory may run out before CPU$/, 'memory full by density $1 ($2 of $3 GiB)'],
+  [/^at density (\d+) the microVMs' memory adds up to ([\d.]+) GiB against the worker host's ([\d.]+) GiB, so memory may run out before CPU$/, 'memory full at $1 browsers ($2 of $3 GiB)'],
+  [/^must be in increasing order, each density once, got (.*)$/, 'must be in increasing order, each count once, got $1'],
   [/^the worst case is (\S+), above the (\S+) limit for one campaign.*$/, 'worst case $1 is over the $2 limit'],
   [/^a run of (\S+) is expected to take about (\d+) minutes, longer than the (\d+)-minute timer$/, '$1 takes ≈$2 min, over the $3-min timer'],
   [/^with 1 replica per spec there is no spread between hosts.*$/, '1 replica: no host-to-host spread to compare against'],
@@ -315,11 +317,11 @@ export const SPEC_NAME_HELP =
   'The spec’s name. Its runs are named after it, one per replica: name-r1, name-r2, and so on.';
 
 export const ADD_HELP =
-  'Sets one input differently for this spec: the worker host, the hypervisor, the microVM, the densities or the extra Chromium flags. Every other input stays as the base spec has it.';
+  'Sets one input differently for this spec: the worker host, the hypervisor, the microVM, the browsers per host or the extra Chromium flags. Every other input stays as the base spec has it.';
 export const WHY_HELP = 'Optional: one sentence on why this spec is in the campaign, shown beside the spec.';
 
 export const REVIEW_HELP = {
-  runs: 'One run for each spec and replica. Each run gets its own worker host and support host and tests every density in its spec.',
+  runs: 'One run for each spec and replica. Each run gets its own worker host and support host and tests every browser count in its spec.',
   time: 'About how long from launching the hosts until every run has uploaded its results. Runs start together when they fit the vCPU quota, otherwise in waves.',
   expected: 'What the hosts cost at on-demand prices for as long as each run is expected to take.',
   worst: `What the hosts cost if every one runs until its shutdown timer. A campaign must stay under the ${dollars(LIMITS.campaign_worst_case_usd)} limit.`,

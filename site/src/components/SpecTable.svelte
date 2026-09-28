@@ -2,8 +2,9 @@
   // What we tested, as one table (D93): a column per spec, headed by its colour dot and short name with its why
   // under it, and a row per input (table.ts, which leaves out the rows no spec sets). A row whose value is the same
   // for every spec is written once across the row, in ink-2; one that differs shows a cell per spec, in ink at weight
-  // 600. The only lines are the rules between rows and the border around the table: no chips, no fills. One spec:
-  // two columns, label and value, no header. On Compare (`campaigns`) a first header row names each campaign over
+  // 600. The SLOs row lists each target on its own line (SloList, each a defined term); the Chromium flags row is
+  // smaller and quieter, so a long flag doesn't dominate. The only lines are the rules between rows and the border
+  // around the table: no chips, no fills. One spec: two columns, label and value, no header. On Compare (`campaigns`) a first header row names each campaign over
   // its group of columns. On a phone, with more than two specs, the table scrolls sideways inside its own box with
   // the row labels held at the left, and its right edge fades until it is scrolled to the end; with one or two it
   // wraps to fit.
@@ -18,6 +19,7 @@
   import { chromiumFlags } from '../lib/spec';
   import { tableRows, type TableRow } from '../lib/table';
   import Flags from './Flags.svelte';
+  import SloList from './SloList.svelte';
 
   let {
     refs,
@@ -59,9 +61,11 @@
 
 {#snippet cell(row: TableRow, i: number)}
   {@const v = row.values[i]}
-  <span class="v">
+  <span class="v" class:flags={row.key === 'chromium'}>
     {#if row.key === 'chromium'}
       <Flags flags={chromiumFlags(refs[i].spec.spec)} />
+    {:else if row.key === 'slos'}
+      <SloList criteria={refs[i].spec.spec.criteria} />
     {:else}
       <span class="main">{v.main}</span>{#if v.sub}<span class="sub">{v.sub}</span>{/if}
     {/if}
@@ -206,6 +210,12 @@
   .v {
     display: block;
     min-width: 0;
+  }
+  /* The flags, in full but small and quiet: Flags sets its code at 0.82em, so this lands it at 0.8rem. */
+  .v.flags {
+    font-size: calc(0.8rem / 0.82);
+    font-weight: 400;
+    color: var(--ink-2);
   }
   td.same {
     color: var(--ink-2);

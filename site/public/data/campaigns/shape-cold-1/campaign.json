@@ -7,7 +7,7 @@
   "ended": "2026-09-28T07:02Z",
   "status": "complete",
   "definition_path": "experiments/campaigns/shape-cold-1.json",
-  "answer": "No, not started cold: on c8i.xlarge, 1-vCPU microVMs held 2 and 1 against 2 for 2-vCPU, one burst costing $0.148–0.288 against $0.137–0.140 per 1,000 tasks. With 1 vCPU the host was never full; each microVM's own vCPU was busy starting up.",
+  "answer": "No, not started cold: on c8i.xlarge, 2 vCPU / 2 GiB cost ≈ $0.107 per 1,000 tasks; 1 vCPU / 2 GiB held 1 browser, one burst costing ≈ $0.217. With 1 vCPU the host was never full: each browser's own vCPU was busy starting up.",
   "definition": {
     "name": "shape-cold-1",
     "question": "Does a 1-vCPU microVM cost less per task than a 2-vCPU one?",

@@ -7,7 +7,7 @@
   "ended": "2026-09-28T07:07Z",
   "status": "complete",
   "definition_path": "experiments/campaigns/shape-warm-1.json",
-  "answer": "No: over the microVM's whole life, 2-vCPU microVMs cost $0.108–0.120 per 1,000 tasks against $0.100–0.105 for 1 vCPU / 1 GiB. Warm, 1 vCPU / 1 GiB microVMs held 4 on c8i.xlarge, 1.0 microVMs per host vCPU; host CPU ran out.",
+  "answer": "No: warm, 2 vCPU / 2 GiB cost ≈ $0.114 per 1,000 tasks against ≈ $0.107 cold (microvm_size_cold). Warm, 1 vCPU / 1 GiB was cheapest at ≈ $0.101 and 1 vCPU / 2 GiB ≈ $0.103, each holding 4 browsers on c8i.xlarge; host CPU ran out first.",
   "definition": {
     "name": "shape-warm-1",
     "question": "Does a warm start lower the cost per task, once its wait is charged?",

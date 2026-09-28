@@ -1,13 +1,13 @@
 <script lang="ts">
   // One run: the host it ran on, each density it tested (each trial a mark that opens it), what limited it, its
   // full spec, and its Source on GitHub (D73). Its own headline only when the campaign has other runs (otherwise Results shows the same four
-  // figures). ?density=N highlights one density.
+  // figures). ?density=N highlights one browser count.
   import { loadCampaign, loadRun } from '../lib/data';
   import { runSource } from '../lib/repo';
   import { href } from '../lib/router';
   import * as f from '../lib/format';
   import { campaignRefs, densityRows, type DensityRow, headline, latency, limitBars, runAttribution, runResult, runTitle, specSections } from '../lib/shape';
-  import { GUEST_GROUP_LABEL, HOST_CONSUMER_LABEL, NOT_TESTED, RULE_LABEL, trialLabel, VERDICT_SHORT } from '../lib/glossary';
+  import { browsers, GUEST_GROUP_LABEL, HOST_CONSUMER_LABEL, NOT_TESTED, RULE_LABEL, trialLabel, VERDICT_SHORT } from '../lib/glossary';
   import type { Range, RuleKey } from '../lib/types';
   import { HOST_CONSUMER_COLOR } from '../lib/colors';
   import Failed from '../components/Failed.svelte';
@@ -18,6 +18,7 @@
   import LatencyChart from '../components/LatencyChart.svelte';
   import SourceLinks from '../components/SourceLinks.svelte';
   import Flags from '../components/Flags.svelte';
+  import Term from '../components/Term.svelte';
   import { chromiumFlags } from '../lib/spec';
   import type { SpecDoc } from '../lib/types';
 
@@ -56,6 +57,17 @@
     }
     return out;
   }
+
+  const COST_TERM = 'Steady state: what a full fleet pays per 1,000 tasks, boot included. Hover a figure for its range and the one burst it was measured from.';
+  /** One cost per density (D102): the middle of its range, "≈ $0.043". */
+  const mid = (r: Range) => f.usd((r[0] + r[1]) / 2);
+  /** The ranges behind a density's cost, for its tooltip. */
+  const costNote = (d: DensityRow) =>
+    d.costSteady
+      ? `Steady state: ${f.usdRange(d.costSteady)} per 1,000 tasks; one burst ${f.usdRange(d.costBurst!)}`
+      : d.costBurst
+        ? `One burst: ${f.usdRange(d.costBurst)} per 1,000 tasks. The host was not full at this count, so there is no steady-state figure.`
+        : null;
 
   /** Scrolls the highlighted density into view once. */
   function focusRow(node: HTMLElement, on: boolean) {
@@ -96,22 +108,22 @@
 
   {@const lat = latency(campaignRefs(c).filter((x) => x.spec.name === r.spec), new Map([[c.id, c]]), new Map([[`${c.id}/${r.id}`, r]]))}
   {#if lat.series.some((x) => x.points.length)}
-    <h2>Latency by density</h2>
+    <h2>Latency by browsers per host</h2>
     <LatencyChart data={lat} />
   {/if}
 
-  <h2>Densities</h2>
+  <h2>Browsers per host</h2>
   <div class="table-wrap">
     <table class="densities">
       <thead>
         <tr>
-          <th class="num">Density</th>
+          <th class="num">Browsers</th>
           <th>Result</th>
           <th>Trials</th>
           <th class="wide">Missed</th>
           <th class="num">CPU pressure</th>
-          <th class="num wide">Memory used (GiB)</th>
-          <th class="num wide">$ / 1k tasks</th>
+          <th class="num wide">Memory used</th>
+          <th class="num wide"><Term text={COST_TERM}>$ / 1k tasks</Term></th>
         </tr>
       </thead>
       <tbody>
@@ -124,7 +136,7 @@
             {:else}
               <td class="result">
                 <span class={d.result === 'passed' ? 'pass' : 'fail'}>{d.result === 'passed' ? 'passed' : 'failed'}</span>
-                {#each d.misses as m (m.text)}<span class="miss phone">{m.text} <span class="muted">{m.missed}/{m.of}</span></span>{/each}
+                {#each d.misses as m (m.text)}<span class="miss phone">{m.text} <span class="muted">{m.missed} of {m.of}</span></span>{/each}
               </td>
               <td class="marks">
                 {#each d.trials as t (t.id)}
@@ -135,20 +147,19 @@
               </td>
               <td class="wide misses">
                 {#each d.misses as m (m.text)}
-                  <div>{m.text}{#if m.value}{' '}<span class="fail">{m.value}</span>{/if} <span class="muted">{m.missed}/{m.of} trials</span></div>
+                  <div>{m.text}{#if m.value}{' '}<span class="fail">{m.value}</span>{/if} <span class="muted">{m.missed} of {m.of} trials</span></div>
                 {:else}
                   <span class="muted">–</span>
                 {/each}
               </td>
               <td class="num">{d.cpuPressure ? f.range(d.cpuPressure, (v) => f.pct(v, 0)) : '–'}</td>
-              <td class="num wide">{d.memUsed ? f.range(d.memUsed, (v) => f.num(v, 0)) : '–'} <span class="muted">of {f.num(d.memAllocated, 0)} given</span></td>
-              <!-- Each cost says what it counts, in About's words: the steady-state cost (D81) is what a full fleet
-                   pays, with the charged burst under it; the burst alone, saying why, where the host wasn't full at
-                   this density. -->
-              <td class="num wide cost">
-                {#if d.costSteady}{f.usdRange(d.costSteady)} <span class="what">full fleet</span><span class="burst">{f.usdRange(d.costBurst!)} one burst</span>
-                {:else if d.costBurst}{f.usdRange(d.costBurst)} <span class="what">one burst</span><span class="burst">host not full, no fleet figure</span>
-                {:else}–{/if}
+              <td class="num wide">{d.memUsed ? f.range(d.memUsed, (v) => f.num(v, 0)) : '–'} <span class="muted">/ {f.num(d.memAllocated, 0)} GiB</span></td>
+              <!-- One number (D102): the steady-state cost (D81), its ranges and the burst in a title; the burst alone,
+                   quieter, with a tooltip saying why, where the host wasn't full at this count. -->
+              <td class="num wide cost" title={costNote(d)}>
+                {#if d.costSteady}<span class="approx">≈</span> {mid(d.costSteady)}
+                {:else if d.costBurst}<span class="burst"><Term text={costNote(d) ?? ''}><span class="approx">≈</span> {mid(d.costBurst)}</Term></span>
+                {:else}<span class="muted">—</span>{/if}
               </td>
             {/if}
           </tr>
@@ -163,7 +174,7 @@
     {@const l = res.limit}
     <p class="verdict">
       <strong>{VERDICT_SHORT[l.verdicts[0]]}</strong>
-      <span class="muted">at density {l.density} · limit reached in {l.trials_with_verdict} of {l.trials} trials</span>
+      <span class="muted">at {browsers(l.density)} · limit reached in {l.trials_with_verdict} of {l.trials} trials</span>
     </p>
     {#if head}
       {@const top = Math.max(head.threshold * 1.25, ...head.at.map((a) => a.values[1] * 1.05))}
@@ -174,7 +185,7 @@
           {@const over = head.op === '>=' ? a.values[1] >= head.threshold : a.values[0] < head.threshold}
           <div class="brow">
             <span class="bd">at {a.density}</span>
-            <span class="track" role="img" aria-label="{RULE_LABEL[head.key]} at density {a.density}: {ruleRange(head.key, a.values, head.threshold)}">
+            <span class="track" role="img" aria-label="{RULE_LABEL[head.key]} at {browsers(a.density)}: {ruleRange(head.key, a.values, head.threshold)}">
               {#if head.op === '>='}
                 <span class="fill" style:width={scale(over ? Math.min(a.values[1], head.threshold) : a.values[1])}></span>
                 {#if over}<span class="fill over" style:left={scale(head.threshold)} style:width="calc({scale(a.values[1])} - {scale(head.threshold)})"></span>{/if}
@@ -202,21 +213,21 @@
       {/if}
     {/if}
   {:else if res.first_failed !== null}
-    <p class="verdict"><strong>{VERDICT_SHORT.unknown}</strong> <span class="muted">at density {res.first_failed}</span></p>
+    <p class="verdict"><strong>{VERDICT_SHORT.unknown}</strong> <span class="muted">at {browsers(res.first_failed)}</span></p>
   {:else}
     <p class="verdict">
       <strong>{res.tested_successfully === null ? NOT_TESTED : 'Nothing failed'}</strong>
-      {#if res.tested_successfully !== null}<span class="muted">up to density {res.tested_successfully}</span>{/if}
+      {#if res.tested_successfully !== null}<span class="muted">up to {browsers(res.tested_successfully)}</span>{/if}
     </p>
   {/if}
   {#if attr}
     <div class="shares">
       <ShareBar
-        title="Host CPU by process at {attr.density}"
+        title="Host CPU by process at {browsers(attr.density)}"
         parts={attr.host.map((h) => ({ label: HOST_CONSUMER_LABEL[h.key], color: HOST_CONSUMER_COLOR[h.key], share: h.share, detail: `${f.num(h.seconds, 1)} CPU-s` }))}
       />
       {#if attr.guest}
-        <ShareBar title="Guest CPU by process at {attr.density}" parts={attr.guest.map((g) => ({ label: GUEST_GROUP_LABEL[g.key], share: g.share }))} />
+        <ShareBar title="Guest CPU by process at {browsers(attr.density)}" parts={attr.guest.map((g) => ({ label: GUEST_GROUP_LABEL[g.key], share: g.share }))} />
       {/if}
     </div>
   {/if}
@@ -304,18 +315,16 @@
     font-size: 0.82rem;
     color: var(--ink-2);
   }
-  /* What a cost figure counts, muted beside it ("full fleet", "one burst"). */
-  .what {
-    font-size: 0.8rem;
-    color: var(--ink-2);
-    white-space: nowrap;
+  .cost {
+    font-weight: 600;
   }
-  /* The second line of a cost: the charged burst under the fleet cost, or why there is no fleet cost under the burst
-     alone. */
+  .approx {
+    font-weight: 500;
+    color: var(--muted);
+  }
+  /* A burst figure alone: the same glyph, one shade quieter. */
   .burst {
-    display: block;
-    font-size: 0.8rem;
-    color: var(--ink-2);
+    color: var(--muted);
   }
   .marks {
     white-space: nowrap;

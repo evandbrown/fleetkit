@@ -631,7 +631,7 @@ export interface Field {
   description: string;
   /** What the builder's ⓘ beside the label says: one or two plain sentences for a reader new to the experiment. */
   help: string;
-  /** A named spec may change it: the worker host, the hypervisor, the microVM, the densities and the workload's
+  /** A named spec may change it: the worker host, the hypervisor, the microVM, the browser counts and the workload's
    * extra Chromium flags. */
   variable: boolean;
   /** A spec may leave it out, and then it is the schema's default: procedure.release_after_ready_s,
@@ -651,6 +651,8 @@ const SHORT_LABEL: Record<string, string> = {
   'criteria.step_timeout_ms': 'Step timeout',
   'criteria.task_timeout_ms': 'Task timeout',
   'procedure.settle_s': 'Idle before trial',
+  densities: 'Browsers per host',
+  'procedure.trials_per_density': 'Trials per count',
   name: 'Name',
 };
 
@@ -675,7 +677,7 @@ export const HELP: Record<string, string> = {
   'microvm.memory_pages':
     'How the host backs a microVM’s memory: 4k asks for nothing, thp for transparent huge pages, granted if the host’s mode is madvise or always. Recommended: thp, 24–40% cheaper per task on nested hosts (guest_boot_tuning), about 10% on metal (tuned_guest_metal).',
   densities:
-    'How many microVMs each trial starts at once; the run tests them in order and stops at the first that fails. Space them closely where you expect the limit: the result is only as precise as the gap between the last pass and the first failure.',
+    'How many browsers each trial runs at once, one microVM each; the run tests the counts in order and stops at the first that fails. Space them closely where you expect the limit: a result is only as precise as the gap from the last pass to the first failure.',
   'criteria.step_p50_target_ms':
     'In each trial, the median time of each of the five steps must be at or under this, or the trial fails. The steps are home, search, open product, add to cart and verify cart.',
   'criteria.step_p95_target_ms':
@@ -688,9 +690,9 @@ export const HELP: Record<string, string> = {
   'criteria.task_timeout_ms':
     'A task still running after this long fails, and so does its trial. It must be above the task p95 target.',
   'procedure.trials_per_density':
-    'How many trials run at each density on the way up. Each trial starts fresh microVMs, and all must pass before the run moves up.',
+    'How many trials run at each browser count on the way up. Each trial starts fresh microVMs, and all must pass before the run moves up.',
   'procedure.boundary_trials':
-    'Once the run stops, extra trials at the highest density that passed and at the lowest that failed, to check the result holds.',
+    'Once the run stops, extra trials at the most browsers that passed and at the fewest that failed, to check the result holds.',
   'procedure.settle_s': "Seconds the worker host sits idle before each trial, so the last trial's cleanup can't slow the next.",
   'procedure.release_after_ready_s':
     'Seconds each trial waits, once every microVM is ready, before starting their tasks together. 0 starts them at once, while browsers may still be settling; a wait tests a warm pool, and no task’s time includes it.',

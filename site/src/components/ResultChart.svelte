@@ -4,7 +4,7 @@
   // shaded span runs from the last density that passed to the first that failed (D60's interval); a dashed cell is a
   // listed density the run didn't reach. The columns are the latency chart's bands (bands.ts), so the two read
   // together. Each mark opens its trial; each replica label ("replica 2"; "r2" on a phone, where the key says what r
-  // is), its run.
+  // is), its run. `hint` is false where another chart on the page already says "Click a mark to open its trial".
   import * as f from '../lib/format';
   import { specColor } from '../lib/colors';
   import { bandIndex, bandLayout, makeBands, tickShown, type Band } from '../lib/bands';
@@ -16,7 +16,8 @@
     caption,
     bands: given = null,
     perVcpu: forced = null,
-  }: { rows: ChartRow[]; caption: string; bands?: Band[] | null; perVcpu?: boolean | null } = $props();
+    hint = true,
+  }: { rows: ChartRow[]; caption: string; bands?: Band[] | null; perVcpu?: boolean | null; hint?: boolean } = $props();
 
   let width = $state(0);
   /** The trial pointed at, read out above the grid. */
@@ -83,7 +84,7 @@
   });
   const height = $derived(plotBottom + AXIS_H);
 
-  /** "Cloud Hypervisor · replica 2 · trial 1 at density 10: failed, home p50 at 101% of its limit". */
+  /** "Cloud Hypervisor · replica 2 · trial 1 at 10 browsers: failed, home p50 at 101% of its limit". */
   const readout = (r: ChartRow, title: string) =>
     [multiCampaign ? r.campaignTitle : null, groups > 1 ? r.groupLabel : null, replicas ? `replica ${r.replica}` : null, title]
       .filter(Boolean)
@@ -97,7 +98,7 @@
   <p class="hint" class:reading={hover !== null}>
     {#if hover}
       <span aria-hidden="true">{hover}</span>
-    {:else}
+    {:else if hint}
       {touch ? 'Tap' : 'Click'} a mark to open its trial
     {/if}
   </p>
@@ -111,7 +112,7 @@
         {/if}
         {#if shown(i)}<text class="tick" class:off={b.untested} x={L.center(i)} y={plotBottom + 15} text-anchor="middle">{b.label}</text>{/if}
       {/each}
-      <text class="axis" x={L.left} y={height - 4}>{perVcpu ? 'Density per host vCPU' : 'Density (microVMs)'}</text>
+      <text class="axis" x={L.left} y={height - 4}>{perVcpu ? 'Browsers per vCPU' : 'Browsers per host'}</text>
 
       {#each layout as R (R.row.key)}
         {@const row = R.row}

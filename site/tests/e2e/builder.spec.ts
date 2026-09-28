@@ -11,7 +11,7 @@ test.beforeEach(async ({ page }) => {
 
 test('every field and review figure has an explanation the input points at', async ({ page }) => {
   const base = page.getByRole('region', { name: 'Base spec' });
-  for (const name of ['Worker host', 'Hypervisor', 'MicroVM vCPUs', 'MicroVM memory', 'Densities', 'Step p50 target']) {
+  for (const name of ['Worker host', 'Hypervisor', 'MicroVM vCPUs', 'MicroVM memory', 'Browsers per host', 'Step p50 target']) {
     await expect(base.getByRole('button', { name: `About ${name}` })).toBeVisible();
   }
   for (const name of ['Name', 'Question', 'Replicas', 'Shut down after', 'Runs', 'Time', 'Expected', 'Worst case', 'vCPUs', 'Cost']) {
@@ -23,8 +23,8 @@ test('every field and review figure has an explanation the input points at', asy
 
 test('shows on hover and keyboard focus, hides on leaving and Escape', async ({ page, isMobile }) => {
   test.skip(isMobile, 'hover and Tab are desktop');
-  const btn = page.getByRole('region', { name: 'Base spec' }).getByRole('button', { name: 'About Densities' });
-  const tip = page.getByRole('tooltip').filter({ hasText: 'How many microVMs each trial starts at once' });
+  const btn = page.getByRole('region', { name: 'Base spec' }).getByRole('button', { name: 'About Browsers per host' });
+  const tip = page.getByRole('tooltip').filter({ hasText: 'How many browsers each trial runs at once' });
   await btn.hover();
   await expect(tip).toBeVisible();
   await page.mouse.move(0, 0);
@@ -65,8 +65,8 @@ test('a new campaign starts from the recommended guest', async ({ page }) => {
   await expect(base.getByRole('combobox', { name: 'Guest console', exact: true })).toHaveValue('quiet-i8042');
   await expect(base.getByRole('combobox', { name: 'Guest memory pages', exact: true })).toHaveValue('thp');
   await expect(base.getByRole('textbox', { name: 'Extra Chromium flags', exact: true })).toHaveValue(/^--disable-features=PreloadTopChromeWebUI,/);
-  await expect(base.getByRole('button', { name: 'Remove density 8' })).toBeVisible();
-  await expect(base.getByRole('button', { name: 'Remove density 9' })).toHaveCount(0);
+  await expect(base.getByRole('button', { name: 'Remove 8 browsers' })).toBeVisible();
+  await expect(base.getByRole('button', { name: 'Remove 9 browsers' })).toHaveCount(0);
   await expect(page.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue('');
   await expect(page.getByText('2 worker hosts, one per run')).toBeVisible();
   await expect(page).toHaveURL(/#\/builder\?from=campaign:new$/);

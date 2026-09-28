@@ -2,7 +2,7 @@
 import type { GuestGroup, HostConsumer, RuleKey, Subject, TrialRole, Verdict } from './types';
 
 export const ROLE_LABEL: Record<TrialRole, string> = {
-  ladder: 'first trial at its density',
+  ladder: 'first trial at its browser count',
   boundary: 'boundary check',
   warmup: 'warm-up',
   illustration: 'illustration',
@@ -72,9 +72,14 @@ export const SUBJECT_LABEL: Record<Subject, string> = {
   task: 'whole task',
 };
 
-/** "trial 2 at density 8", "warm-up at density 1". */
+/** "8 browsers", "1 browser": how many browsers a trial runs on the host, each in its own microVM. */
+export function browsers(n: number | string): string {
+  return `${n} ${String(n) === '1' ? 'browser' : 'browsers'}`;
+}
+
+/** "trial 2 at 8 browsers", "warm-up at 1 browser". */
 export function trialLabel(t: { number: number | null; density: number; role: TrialRole; id: string }): string {
-  if (t.number !== null) return `trial ${t.number} at density ${t.density}`;
+  if (t.number !== null) return `trial ${t.number} at ${browsers(t.density)}`;
   const extra = t.id.match(/-(\d+)$/);
-  return `${ROLE_LABEL[t.role]}${extra ? ` (${extra[1]})` : ''} at density ${t.density}`;
+  return `${ROLE_LABEL[t.role]}${extra ? ` (${extra[1]})` : ''} at ${browsers(t.density)}`;
 }

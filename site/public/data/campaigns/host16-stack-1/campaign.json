@@ -7,7 +7,7 @@
   "ended": "2026-09-28T12:07Z",
   "status": "complete",
   "definition_path": "experiments/campaigns/host16-stack-1.json",
-  "answer": "The 4-vCPU host is cheaper: c8i.xlarge held 6–7 microVMs at $0.038–0.047 per 1,000 tasks, c8i.4xlarge 25–28 at $0.046–0.053. Host CPU ran out first on both.",
+  "answer": "The 4-vCPU host is cheaper: c8i.xlarge cost ≈ $0.043 per 1,000 tasks, c8i.4xlarge (16 vCPUs) ≈ $0.046 and m8i.4xlarge not tuned ≈ $0.133. Host CPU ran out first on all three.",
   "definition": {
     "name": "host16-stack-1",
     "question": "Is the full stack cheaper per task on a 4-vCPU or a 16-vCPU c8i host?",

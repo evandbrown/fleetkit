@@ -81,7 +81,7 @@ describe('builder help', () => {
 
   it('gives the p50 target and the densities the meaning a reviewer needs', () => {
     expect(HELP['criteria.step_p50_target_ms']).toMatch(/^In each trial, the median time of each of the five steps must be at or under this, or the trial fails\./);
-    expect(HELP.densities).toMatch(/^How many microVMs each trial starts at once; the run tests them in order and stops at the first that fails\./);
+    expect(HELP.densities).toMatch(/^How many browsers each trial runs at once, one microVM each; the run tests the counts in order and stops at the first that fails\./);
   });
 
   it('quotes the limits the review checks against', () => {

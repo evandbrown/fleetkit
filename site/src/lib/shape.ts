@@ -3,8 +3,9 @@
 // group, pick and label (and compute D60 midpoints for specs from different campaigns, by the same rule).
 import * as f from './format';
 import { makeBands, type Band } from './bands';
+import { campaignCost, costText, specCost, type CostSource } from './cost';
 import { meanMidpoint } from './derive';
-import { STOPPED_EARLY, SUBJECT_LABEL, trialLabel, VERDICT_SHORT } from './glossary';
+import { browsers, STOPPED_EARLY, SUBJECT_LABEL, trialLabel, VERDICT_SHORT } from './glossary';
 import { href } from './router';
 import { chromiumFlags, flagsWords, flatten, field, hypervisorName, mib, show, STANDARD_CRITERIA } from './spec';
 import type {
@@ -311,11 +312,17 @@ export interface Headline {
   density: string;
   /** Under the density: "stopped early", "none passed", "not run yet". */
   densityNote: string | null;
+  /** Browsers per host as one number (D102): the count most replicas held, "≥ 9" with no failure; null when none passed. */
+  count: string | null;
   perVcpu: string | null;
-  /** "$ / 1k tasks": the steady-state cost (D81), "$0.035–0.037"; null where no replica's host was full. */
+  /** "$ / 1k tasks" as one number (D102): the steady-state cost (D81), "$0.043"; null where no replica's host was full. */
   cost: string | null;
-  /** What one burst is charged, shown beside the cost, or alone (labelled) when there is no steady-state cost. */
+  costValue: number | null;
+  /** What one burst was charged, the same statistic: shown, quieter, only where there is no steady-state cost. */
   burst: string | null;
+  /** The ranges behind the figure, for its tooltip: "Steady state over 5 replicas: $0.038–0.047 per 1,000 tasks; one
+   * burst $0.039–0.049", or why there is only a burst figure. Null with no cost at all. */
+  costNote: string | null;
   /** What ran out: "Host CPU", or a label ("not reached"). */
   ranOut: string;
   /** Where: "at 7" when every replica ran out there, "at 26–29" when they differ; then "· 4 of 5 replicas" when fewer
@@ -325,16 +332,41 @@ export interface Headline {
   ranOutDensity: number | null;
 }
 
+const median = (xs: number[]): number => {
+  const s = [...xs].sort((a, b) => a - b);
+  const m = s.length >> 1;
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+};
+
+/** A spec's result as cost.ts reads it: one spec, its replicas. */
+const costSource = (r: SpecResult): CostSource => ({
+  specs: [{ name: r.ref.spec.name, label: r.ref.groupLabel }],
+  outcomes: [{ spec: r.ref.spec.name, replicas: r.replicas, midpoint_per_host_vcpu: r.midpoint }],
+});
+
 /** A spec's result in four figures (D52): density, per host vCPU, cost per 1,000 tasks, what ran out. */
 export function headline(r: SpecResult): Headline {
   const reps = r.replicas;
   if (!reps.length) {
-    return { density: '–', densityNote: 'not run yet', perVcpu: null, cost: null, burst: null, ranOut: '–', ranOutNote: null, ranOutDensity: null };
+    return {
+      density: '–', densityNote: 'not run yet', count: null, perVcpu: null, cost: null, costValue: null, burst: null, costNote: null, ranOut: '–', ranOutNote: null, ranOutDensity: null,
+    };
   }
   const passed = spread(reps.map((x) => x.tested_successfully), (v) => f.num(v));
   const noFailure = reps.every((x) => x.first_failed === null);
   const early = reps.filter((x) => x.stopped_early).length;
   const top = r.limits[0];
+  const sc = specCost(costSource(r), r.ref.spec.name);
+  const costed = reps.flatMap((x) => (x.cost_per_1000_tasks ? [x.cost_per_1000_tasks] : []));
+  const steadies = costed.flatMap((x) => (x.steady_state ? [x.steady_state] : []));
+  const join = (rs: Range[]): Range => [Math.min(...rs.map((x) => x[0])), Math.max(...rs.map((x) => x[1]))];
+  const over = (n: number) => (n > 1 ? ` over ${n} replicas` : '');
+  const burst = costed.length ? median(costed.map((x) => (x.observed_charged[0] + x.observed_charged[1]) / 2)) : null;
+  const costNote = !costed.length
+    ? null
+    : steadies.length
+      ? `Steady state${over(steadies.length)}${steadies.length < costed.length ? ` (${costed.length - steadies.length} of ${costed.length} never filled the host)` : ''}: ${f.usdRange(join(steadies))} per 1,000 tasks; one burst ${f.usdRange(join(costed.map((x) => x.observed_charged)))}`
+      : `One burst${over(costed.length)}: ${f.usdRange(join(costed.map((x) => x.observed_charged)))} per 1,000 tasks. The host was never full, so there is no steady-state figure.`;
   return {
     density: passed === null ? '0' : noFailure ? `≥ ${passed}` : passed,
     densityNote:
@@ -345,9 +377,12 @@ export function headline(r: SpecResult): Headline {
             ? `${early} of ${reps.length} replicas ${STOPPED_EARLY}`
             : STOPPED_EARLY
           : null,
+    count: sc.count,
     perVcpu: spread(reps.map((x) => x.per_host_vcpu), f.ratio),
-    cost: r.cost?.steady ? f.usdRange(r.cost.steady) : null,
-    burst: r.cost ? f.usdRange(r.cost.burst) : null,
+    cost: sc.cost === null ? null : costText(sc.cost),
+    costValue: sc.cost,
+    burst: burst === null ? null : costText(burst),
+    costNote,
     ranOut: top ? VERDICT_SHORT[top.verdict] : noFailure ? 'not reached' : VERDICT_SHORT.unknown,
     ranOutNote: top ? `at ${ranOutAt(top)}${reps.length > 1 && top.runs < reps.length ? ` · ${top.runs} of ${reps.length} replicas` : ''}` : null,
     ranOutDensity: top ? top.density : null,
@@ -376,7 +411,7 @@ export function campaignHeadline(e: CampaignEntry, spec: string | null = null): 
   const passed = spread(best.replicas.map((r) => r.tested_successfully), (v) => f.num(v));
   return {
     density: passed,
-    label: passed === null ? 'none passed' : passed === '1' ? 'microVM' : 'microVMs',
+    label: passed === null ? 'none passed' : passed === '1' ? 'browser' : 'browsers',
     perVcpu: spread(best.replicas.map((r) => r.per_host_vcpu), f.ratio),
     spec: best.spec,
   };
@@ -400,9 +435,9 @@ export interface CardBar {
 export function campaignFigure(
   e: CampaignEntry,
   labels: string[] = e.specs.map((s) => s.label),
-): { single: ReturnType<typeof campaignHeadline> | null; metric: 'Max density' | 'Per vCPU'; bars: CardBar[]; max: number } {
+): { single: ReturnType<typeof campaignHeadline> | null; metric: 'Most browsers' | 'Per vCPU'; bars: CardBar[]; max: number } {
   const perVcpu = new Set(e.outcomes.flatMap((o) => o.replicas.map((r) => r.host_vcpus))).size > 1;
-  const metric = perVcpu ? 'Per vCPU' : 'Max density';
+  const metric = perVcpu ? 'Per vCPU' : 'Most browsers';
   if (e.specs.length < 2) return { single: campaignHeadline(e), metric, bars: [], max: 0 };
   const bars = e.specs.map((s, i): CardBar => {
     const reps = e.outcomes.find((o) => o.spec === s.name)?.replicas ?? [];
@@ -436,9 +471,14 @@ export interface CompareRow {
   delta: number | null;
   /** Why there is no midpoint at all, where it would be (D62). */
   missing: string | null;
-  /** The steady-state cost per 1,000 tasks (D81), and the charged burst beside it (alone when cost is null). */
+  /** Browsers per host as one number: the count most replicas held. */
+  count: string | null;
+  /** The steady-state cost per 1,000 tasks as one number (D81, D102); the burst figure alone where there is none. */
   cost: string | null;
+  costValue: number | null;
   burst: string | null;
+  /** The ranges behind the cost, for its tooltip. */
+  costNote: string | null;
   ranOut: string;
   ranOutAt: string | null;
 }
@@ -480,8 +520,11 @@ export function compareRows(results: SpecResult[]): CompareRow[] {
             : noFailure.some((x) => x.stopped_early)
               ? STOPPED_EARLY
               : 'no failure yet',
+      count: h.count,
       cost: h.cost,
+      costValue: h.costValue,
       burst: h.burst,
+      costNote: h.costNote,
       ranOut: h.ranOut,
       ranOutAt: h.ranOutNote,
     };
@@ -506,9 +549,9 @@ export function answerText(results: SpecResult[]): string {
   if (results.length === 1) {
     const [h, r] = [hs[0], results[0]];
     if (!r.replicas.length) return 'Not run yet.';
-    if (h.density === '0') return 'No density met every SLO.';
+    if (h.density === '0') return 'No browser count met every SLO.';
     const d = h.density.startsWith('≥') ? `At least ${h.density.slice(2)}` : h.density;
-    const fit = `${d} ${d === '1' ? 'microVM' : 'microVMs'} met every SLO${h.perVcpu ? `, ${h.perVcpu} per host vCPU` : ''}.`;
+    const fit = `${d} ${d === '1' ? 'browser' : 'browsers'} met every SLO${h.perVcpu ? `, ${h.perVcpu} per vCPU` : ''}.`;
     return `${fit} ${r.limits[0] ? `${h.ranOut} ran out at ${ranOutAt(r.limits[0])}.` : 'Nothing ran out.'}`;
   }
   const perVcpu = new Set(results.flatMap((r) => r.replicas.map((x) => x.host_vcpus))).size > 1;
@@ -519,7 +562,7 @@ export function answerText(results: SpecResult[]): string {
     if (!r.replicas.length || v === null || hs[i].density === '0') missing.push(r.ref.groupLabel);
     else groups.set(v, [...(groups.get(v) ?? []), r.ref.groupLabel]);
   });
-  const unit = perVcpu ? ' microVMs per host vCPU' : ' microVMs';
+  const unit = perVcpu ? ' browsers per vCPU' : ' browsers';
   // Highest first: by the top of each range, then its bottom.
   const sorted = [...groups].sort((a, b) => ends(b[0])[1] - ends(a[0])[1] || ends(b[0])[0] - ends(a[0])[0]);
   const parts: string[] = [];
@@ -566,11 +609,29 @@ export interface AnswerRow extends CompareRow {
   series: number;
   runs: AnswerRun[];
   hostVcpus: number;
+  /** The clear winner on cost (D102): every replica of it cheaper than every replica of the runner-up. Never set with
+   * fewer than two costed specs. */
+  best: boolean;
+  /** Its cost as a share of the dearest spec's, for the bar under the figure; null without a steady-state cost. */
+  share: number | null;
 }
 
-/** The answer chart's rows: each spec's headline figures, and every run (replica) as a bar from 0 to its first failure. */
-export function answerRows(results: SpecResult[], docs: Map<string, CampaignDoc>): AnswerRow[] {
+/**
+ * The answer chart's rows: each spec's headline figures, every run (replica) with its last pass and first failure,
+ * and which spec, if any, clearly wins on cost. `featured` is the catalog's featured spec, which leads when it has
+ * a cost; else the cheapest does.
+ */
+export function answerRows(results: SpecResult[], docs: Map<string, CampaignDoc>, featured: string | null = null): AnswerRow[] {
   const base = compareRows(results);
+  const keyOf = (r: SpecResult) => `${r.ref.campaign}/${r.ref.spec.name}`;
+  const lead = featured ? results.find((r) => r.ref.spec.name === featured) : undefined;
+  const cc = campaignCost({
+    specs: results.map((r) => ({ name: keyOf(r), label: r.ref.groupLabel })),
+    outcomes: results.map((r) => ({ spec: keyOf(r), replicas: r.replicas, midpoint_per_host_vcpu: r.midpoint })),
+    featured_spec: lead ? keyOf(lead) : undefined,
+  });
+  const best = cc.costed > 1 && cc.clear && cc.lead ? cc.lead.spec : null;
+  const dearest = Math.max(0, ...base.map((b) => b.costValue ?? 0));
   return results.map((r, i) => {
     const c = docs.get(r.ref.campaign)!;
     const n = Math.max(c.definition.replicas, ...r.runs.map((x) => x.replica));
@@ -587,7 +648,8 @@ export function answerRows(results: SpecResult[], docs: Map<string, CampaignDoc>
         hostVcpus: run?.host.vcpus ?? r.ref.spec.host.vcpus,
       };
     });
-    return { ...base[i], series: i, runs, hostVcpus: r.ref.spec.host.vcpus };
+    const cost = base[i].costValue;
+    return { ...base[i], series: i, runs, hostVcpus: r.ref.spec.host.vcpus, best: keyOf(r) === best, share: cost === null || !dearest ? null : cost / dearest };
   });
 }
 
@@ -694,7 +756,7 @@ export function chartRows(refs: SpecRef[], docs: Map<string, CampaignDoc>, runDo
             k,
             passed,
             ratio: near ? near.ratio : null,
-            title: `trial ${k + 1} at density ${b.density}: ${passed ? 'passed' : 'failed'}${how}`,
+            title: `trial ${k + 1} at ${browsers(b.density)}: ${passed ? 'passed' : 'failed'}${how}`,
             href: href({ name: 'trial', campaign: c.id, run: run.id, trial: id, microvm: null }),
           });
         });
@@ -732,9 +794,20 @@ export interface LatencyPoint {
   step: { ms: number; target: number; name: StepName } | null;
   task: { ms: number; target: number } | null;
   passed: boolean;
-  /** "Firecracker · replica 1 · trial 2 at density 10". */
+  /** "Firecracker · replica 1 · trial 2 at 10 browsers". */
   title: string;
   href: string;
+}
+
+/** A series' line: at one browser count, the median of its counting trials there, replicas pooled. */
+export interface LatencyMedian {
+  x: number;
+  /** The median of the trials' slowest-step p50s; null when none recorded a step. */
+  step: number | null;
+  /** The median of the trials' whole-task p95s; null when none recorded one. */
+  task: number | null;
+  /** How many trials the medians pool. */
+  n: number;
 }
 
 export interface LatencySeries {
@@ -742,6 +815,8 @@ export interface LatencySeries {
   label: string;
   campaignTitle: string;
   points: LatencyPoint[];
+  /** One entry per browser count the series tested, in x order: the line the chart draws through the marks. */
+  medians: LatencyMedian[];
 }
 
 export interface Latency {
@@ -762,7 +837,8 @@ export interface Latency {
 
 /**
  * Every counting trial of each spec's runs as two latencies: its slowest step's p50 and its whole task's p95, each
- * against its SLO. Only densities that were tested have points; nothing is interpolated between them.
+ * against its SLO, and per spec the median of each at every browser count tested (its replicas pooled), which the
+ * chart draws as the spec's line. Only densities that were tested have points; nothing is interpolated between them.
  */
 export function latency(refs: SpecRef[], docs: Map<string, CampaignDoc>, runDocs: Map<string, RunDoc>): Latency {
   const vcpus = new Set<number>();
@@ -785,6 +861,7 @@ export function latency(refs: SpecRef[], docs: Map<string, CampaignDoc>, runDocs
     label: campaigns ? `${ref.campaignTitle} · ${ref.groupLabel}` : ref.groupLabel,
     campaignTitle: ref.campaignTitle,
     points: [],
+    medians: [],
   }));
   // The replicas drawn apart: those with runs here (one, on a run's own page).
   const present = new Set(found.map((x) => x.run.replica));
@@ -813,7 +890,10 @@ export function latency(refs: SpecRef[], docs: Map<string, CampaignDoc>, runDocs
       });
     }
   }
-  for (const s of series) s.points.sort((a, b) => a.x - b.x || a.replica - b.replica || a.key.localeCompare(b.key));
+  for (const s of series) {
+    s.points.sort((a, b) => a.x - b.x || a.replica - b.replica || a.key.localeCompare(b.key));
+    s.medians = latencyMedians(s.points);
+  }
   type TargetKey = 'step_p50_target_ms' | 'task_p95_target_ms';
   const targets = (k: TargetKey) => [...new Set(refs.map((r) => r.spec.spec.criteria[k]))].sort((a, b) => a - b);
   const who = (k: TargetKey, ts: number[]) =>
@@ -835,6 +915,26 @@ export function latency(refs: SpecRef[], docs: Map<string, CampaignDoc>, runDocs
     stepTargetWho: who('step_p50_target_ms', stepTargets),
     taskTargetWho: who('task_p95_target_ms', taskTargets),
   };
+}
+
+/** The median of each latency at every distinct x among `points`, in x order; replicas pooled. */
+function latencyMedians(points: LatencyPoint[]): LatencyMedian[] {
+  const at = new Map<number, LatencyPoint[]>();
+  for (const p of points) at.set(p.x, [...(at.get(p.x) ?? []), p]);
+  const med = (vs: number[]): number | null => {
+    if (!vs.length) return null;
+    const s = [...vs].sort((a, b) => a - b);
+    const m = s.length >> 1;
+    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+  };
+  return [...at.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([x, ps]) => ({
+      x,
+      step: med(ps.flatMap((p) => (p.step ? [p.step.ms] : []))),
+      task: med(ps.flatMap((p) => (p.task ? [p.task.ms] : []))),
+      n: ps.length,
+    }));
 }
 
 /**
@@ -917,7 +1017,7 @@ export function runTitle(c: CampaignDoc, runId: string): string {
 // ---- a spec's every input (the run page) ----------------------------------------------------------------
 
 /** The site's words for a few schema labels, so the full spec reads like the rest of the pages. */
-const SECTION_WORDS: Record<string, string> = { 'Pass criteria': 'Success criteria' };
+const SECTION_WORDS: Record<string, string> = { 'Pass criteria': 'Success criteria', Densities: 'Browsers per host' };
 const LABEL_WORDS: Record<string, string> = {
   'Worker instance type': 'Instance type',
   'Support instance type': 'Instance type',
@@ -925,6 +1025,8 @@ const LABEL_WORDS: Record<string, string> = {
   'Step time limit': 'Step timeout',
   'Task time limit': 'Task timeout',
   'Idle before each trial': 'Idle before trial',
+  Densities: 'Browsers per host',
+  'Trials per density': 'Trials per browser count',
 };
 
 /** Every input of a spec, grouped by section in the schema's order; `changed` marks paths that differ from a base. */

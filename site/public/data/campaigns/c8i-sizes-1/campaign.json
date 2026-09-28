@@ -7,7 +7,7 @@
   "ended": "2026-09-28T05:37Z",
   "status": "complete",
   "definition_path": "experiments/campaigns/c8i-sizes-1.json",
-  "answer": "Only the smallest did: c8i.xlarge held 2 microVMs at $0.105–0.111 per 1,000 tasks, against $0.117–0.147 on the larger hosts, all 0.50–0.56 microVMs per host vCPU. Host CPU ran out first everywhere: c8i.2xlarge held 4, c8i.4xlarge 8–9, m8i.4xlarge 9.",
+  "answer": "Yes, at every step down: c8i.xlarge cost ≈ $0.108 per 1,000 tasks, c8i.2xlarge ≈ $0.118, c8i.4xlarge ≈ $0.124 and m8i.4xlarge ≈ $0.146. Host CPU ran out first on every host.",
   "definition": {
     "name": "c8i-sizes-1",
     "question": "Does a smaller c8i host cost less per 1,000 tasks?",

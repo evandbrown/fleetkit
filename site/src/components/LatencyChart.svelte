@@ -1,17 +1,19 @@
 <script lang="ts">
-  // Latency by density: each trial's slowest step p50, full width, against its SLO; under it, smaller, each trial's
-  // whole-task p95 against its own. One band per density tested (bands.ts), shared with the every-trial grid below, so
-  // the densities near the limit get as much room as the rest. In a band, each spec and replica has its own slot and
-  // each trial its own place: a dot passed, a cross failed, in the spec's colour, hollow for every replica after the
-  // first. The area
-  // over a limit is tinted; when the specs' limits differ, each limit names whose it is (D74). Pointing at a trial
-  // reads it out; each mark opens its trial.
+  // Latency by browsers per host: per spec, a line through the median of its trials at each count, with every trial
+  // as a small mark behind it. The main panel is each trial's slowest step p50 against its SLO; under it, a small
+  // multiple of the whole task's p95 against its own. The x axis is linear (browsers per host vCPU across host sizes,
+  // browsers per host on one size), so a slope means what it looks like; where the campaign listed counts above the
+  // highest tested, the region beyond it is shaded not tested. Ticks every 0.25 (per vCPU) or at round steps, labelled
+  // every 0.5, plus a label where each spec first failed when it has room. The SLO is a dashed line with a thin
+  // tinted band over it, labelled on the chart; when the specs' limits differ, each names whose it is (D74). Failed
+  // trials are crosses. Pointing at (or tabbing to) a trial reads it out, replica included; each mark opens its trial.
   import * as f from '../lib/format';
   import { SUBJECT_LABEL } from '../lib/glossary';
   import { specColor } from '../lib/colors';
-  import { bandIndex, bandLayout, makeBands, tickShown, type Band } from '../lib/bands';
-  import { linear, niceDomain } from '../lib/scale';
-  import type { Latency, LatencyPoint } from '../lib/shape';
+  import { CHART_RIGHT, chartLeft, latencyTicks, type Band } from '../lib/bands';
+  import { linear, linePath, niceDomain } from '../lib/scale';
+  import type { Latency, LatencyMedian, LatencyPoint } from '../lib/shape';
+  import MarkShape from './MarkShape.svelte';
 
   let { data, bands: given = null }: { data: Latency; bands?: Band[] | null } = $props();
 
@@ -22,18 +24,30 @@
 
   const points = $derived(data.series.flatMap((s) => s.points));
   const multi = $derived(data.series.length > 1);
-  const bands = $derived(
-    given && points.every((p) => bandIndex(given, p.x) >= 0) ? given : makeBands(points.map((p) => p.x), [], data.perVcpu),
+  /** Where each spec first failed: a labelled tick each, when there is room. */
+  const firstFails = $derived(
+    data.series.flatMap((s) => {
+      const failed = s.points.filter((p) => !p.passed);
+      return failed.length ? [Math.min(...failed.map((p) => p.x))] : [];
+    }),
   );
+  const xs = $derived([...new Set(points.map((p) => p.x))].sort((a, b) => a - b));
+  const maxX = $derived(xs.at(-1) ?? 1);
+  /** The campaign listed counts above the highest tested (the every-trial bands say so): shade beyond it. */
+  const beyond = $derived(!!given?.some((b) => b.untested));
+  /** 0 to a little past the highest count tested (or past 2 browsers per vCPU), further when a region is shaded. */
+  const end = $derived(Math.max(data.perVcpu ? 2 * 1.05 : 0, maxX * (beyond ? 1.2 : 1.05)));
+  const left = $derived(chartLeft(phone));
+  const x = $derived(linear([0, end], [left, wrap - CHART_RIGHT]));
+  const axisTicks = $derived(latencyTicks(end, x, data.perVcpu, firstFails, phone ? 4 : 6));
+  /** How wide a count's cluster of marks may be: 16 px, or less where counts sit closer than that. */
+  const cluster = $derived(Math.min(16, 0.6 * Math.min(Infinity, ...xs.slice(1).map((v, i) => x(v) - x(xs[i])))));
 
-  const apart = $derived(data.replicas > 1);
-  const slots = $derived(data.series.length * (apart ? data.replicas : 1));
-  const slotOf = (p: LatencyPoint) => p.series * (apart ? data.replicas : 1) + (apart ? p.replica - 1 : 0);
-  /** Each trial's place among the trials of its slot at its density, and how many there are. */
+  /** Each trial's place among its spec's trials at its count (replicas pooled), for a narrow cluster on the line. */
   const places = $derived.by(() => {
     const groups = new Map<string, LatencyPoint[]>();
     for (const p of points) {
-      const k = `${slotOf(p)}|${p.x}`;
+      const k = `${p.series}|${p.x}`;
       groups.set(k, [...(groups.get(k) ?? []), p]);
     }
     const out = new Map<string, { k: number; n: number }>();
@@ -41,31 +55,57 @@
     return out;
   });
 
-  const R = $derived(phone ? 4.5 : 5.5);
+  /** A passed mark's radius (4 px across) and a failed one's size. */
+  const R = 2;
+  const FAIL = 7;
+  const TOP = 12;
+  const BOTTOM = 34;
 
   const panels = $derived([
-    { key: 'step', title: 'Slowest step p50 (ms)', value: (p: LatencyPoint) => p.step?.ms ?? null, targets: data.stepTargets, who: data.stepTargetWho, H: phone ? 230 : 280, cap: null },
-    { key: 'task', title: 'Task p95 (ms)', value: (p: LatencyPoint) => p.task?.ms ?? null, targets: data.taskTargets, who: data.taskTargetWho, H: phone ? 130 : 150, cap: 1.2 },
+    {
+      key: 'step',
+      title: 'Slowest step p50 (ms)',
+      value: (p: LatencyPoint) => p.step?.ms ?? null,
+      median: (m: LatencyMedian) => m.step,
+      targets: data.stepTargets,
+      who: data.stepTargetWho,
+      H: (phone ? 210 : 260) + TOP + BOTTOM,
+      cap: null as number | null,
+      yTicks: 4,
+    },
+    {
+      key: 'task',
+      title: 'Task p95 (ms)',
+      value: (p: LatencyPoint) => p.task?.ms ?? null,
+      median: (m: LatencyMedian) => m.task,
+      targets: data.taskTargets,
+      who: data.taskTargetWho,
+      H: 90 + TOP + BOTTOM,
+      cap: 1.2 as number | null,
+      yTicks: 2,
+    },
   ]);
-  const TOP = 14;
-  const BOTTOM = 32;
 
-  function place(p: LatencyPoint, L: ReturnType<typeof bandLayout>) {
-    const i = bandIndex(bands, p.x);
-    const inner = L.bw * 0.84;
-    const sw = Math.min(26, inner / Math.max(1, slots));
+  function place(p: LatencyPoint) {
     const pl = places.get(p.key) ?? { k: 0, n: 1 };
-    const spread = Math.min(R * 1.1, (sw * 0.8) / Math.max(1, pl.n));
-    return L.center(i) + (slotOf(p) - (slots - 1) / 2) * sw + (pl.k - (pl.n - 1) / 2) * spread;
+    const step = pl.n > 1 ? Math.min(3.5, cluster / (pl.n - 1)) : 0;
+    return x(p.x) + (pl.k - (pl.n - 1) / 2) * step;
   }
-  const hitR = $derived.by(() => {
-    const L = bandLayout(bands.length, wrap, phone);
-    return Math.max(R + 1, Math.min(10, (L.bw * 0.84) / Math.max(1, slots) / 2 + 1));
-  });
 
   function scaleY(values: number[], targets: number[], H: number, cap: number | null) {
     const want = cap ? [...targets.map((t) => t * cap), ...values.map((v) => v * 1.04)] : [...values.map((v) => v * 1.04), ...targets.map((t) => t * 1.25)];
     return linear(niceDomain(want, { count: 4 }), [H - BOTTOM, TOP]);
+  }
+
+  /** Where each limit's label goes: above its band, and above the label below when two limits sit close. */
+  function labelYs(targets: number[], y: (v: number) => number): number[] {
+    const out: number[] = [];
+    for (const t of targets) {
+      const want = y(t) - 10;
+      const below = out.at(-1);
+      out.push(below === undefined ? want : Math.min(want, below - 13));
+    }
+    return out;
   }
 
   const readout = (p: LatencyPoint) =>
@@ -75,7 +115,6 @@
     ]
       .filter(Boolean)
       .join(' · ');
-  const X = (cx: number, cy: number, r: number) => `M${cx - r},${cy - r}L${cx + r},${cy + r}M${cx + r},${cy - r}L${cx - r},${cy + r}`;
 </script>
 
 <div class="lat" bind:clientWidth={wrap}>
@@ -91,42 +130,57 @@
   {#each panels as P (P.key)}
     {@const vals = points.map(P.value).filter((v): v is number => v !== null)}
     <figure class="pn pn-{P.key}">
-      <figcaption>{P.title}</figcaption>
+      <figcaption>
+        {P.title}
+        {#if P.key === 'step'}<span class="sub" class:block={phone}>line: the median at each count · one mark per trial</span>{/if}
+      </figcaption>
       {#if wrap > 0 && vals.length}
-        {@const L = bandLayout(bands.length, wrap, phone)}
         {@const y = scaleY(vals, P.targets, P.H, P.cap)}
         {@const top = y.domain[1]}
-        {@const shown = tickShown(bands, L.bw)}
-        <svg width={wrap} height={P.H} role="group" aria-label="{P.title} by density, one mark per trial">
-          {#each P.targets as t, ti (t)}
-            <rect class="over" x={L.left} y={y(top)} width={L.right - L.left} height={Math.max(0, y(t) - y(top))} />
-            <line class="slo" x1={L.left} x2={L.right} y1={y(t)} y2={y(t)} />
-            <text class="slo-label" x={L.left + 6} y={y(t) - 5 - ti * 13}>SLO ≤ {f.num(t)} ms{P.who[ti] ? ` · ${P.who[ti]}` : ''}</text>
+        {@const bottom = P.H - BOTTOM}
+        {@const right = wrap - CHART_RIGHT}
+        {@const shade = beyond ? x(maxX) + cluster / 2 + 6 : null}
+        <svg width={wrap} height={P.H} role="group" aria-label="{P.title} by browsers per host: per spec, a line through the median at each count, and a mark per trial">
+          {#if shade !== null}
+            <rect class="untested" x={shade} y={TOP} width={Math.max(0, right - shade)} height={bottom - TOP} rx="4" />
+            {#if P.key === 'step' && right - shade >= 70}<text class="untested-label" x={(shade + right) / 2} y={TOP + 14} text-anchor="middle">not tested</text>{/if}
+          {/if}
+          {#each y.ticks(P.yTicks) as v (v)}
+            <line class="grid" x1={left} x2={right} y1={y(v)} y2={y(v)} />
+            <text class="tick" x={left - 6} y={y(v)} dy="0.32em" text-anchor="end">{f.num(v)}</text>
           {/each}
-          {#each bands as b, i (b.label)}
-            {#if b.untested}
-              <rect class="untested" x={L.start(i) + 2} y={TOP} width={L.bw - 4} height={P.H - BOTTOM - TOP} rx="4" />
-              <text class="untested-label" x={L.center(i)} y={TOP + 14} text-anchor="middle">not tested</text>
-            {:else if i > 0}
-              <line class="sep" x1={L.start(i)} x2={L.start(i)} y1={TOP} y2={P.H - BOTTOM} />
+          <line class="axis" x1={left} x2={right} y1={bottom} y2={bottom} />
+          {#each axisTicks as t (t.v)}
+            <line class="axis" x1={x(t.v)} x2={x(t.v)} y1={bottom} y2={bottom + (t.label === null ? 3 : 5)} />
+            {#if t.label !== null}<text class="tick x" class:fail={t.failure} x={x(t.v)} y={bottom + 17} text-anchor="middle">{t.label}</text>{/if}
+          {/each}
+          <text class="axis-title" x={left} y={P.H - 3}>{data.perVcpu ? 'Browsers per vCPU' : 'Browsers per host'}</text>
+
+          {#each P.targets as t (t)}
+            <rect class="over" x={left} y={y(t) - 6} width={right - left} height="6" />
+            <line class="slo" x1={left} x2={right} y1={y(t)} y2={y(t)} />
+          {/each}
+
+          {#each data.series as s, i (s.key)}
+            {@const line = s.medians.map((m) => {
+              const v = P.median(m);
+              return { x: x(m.x), y: v === null ? null : y(Math.min(v, top)) };
+            })}
+            <!-- A line needs two medians; a single count is its marks alone. -->
+            {#if line.filter((q) => q.y !== null).length > 1}
+              <path class="line" class:lit={hover?.series === i} d={linePath(line)} style:--c={specColor(i)} />
             {/if}
           {/each}
-          {#each y.ticks(P.key === 'step' ? 4 : 3) as v (v)}
-            <line class="grid" x1={L.left} x2={L.right} y1={y(v)} y2={y(v)} />
-            <text class="tick" x={L.left - 6} y={y(v)} dy="0.32em" text-anchor="end">{f.num(v)}</text>
+
+          {#each labelYs(P.targets, y) as ly, ti (P.targets[ti])}
+            <text class="slo-label" x={left + 6} y={ly}>SLO ≤ {f.num(P.targets[ti])} ms{P.who[ti] ? ` · ${P.who[ti]}` : ''}</text>
           {/each}
-          <line class="axis" x1={L.left} x2={L.right} y1={P.H - BOTTOM} y2={P.H - BOTTOM} />
-          {#each bands as b, i (b.label)}
-            {#if shown(i)}<text class="tick" class:off={b.untested} x={L.center(i)} y={P.H - BOTTOM + 15} text-anchor="middle">{b.label}</text>{/if}
-          {/each}
-          <text class="axis-title" x={L.left} y={P.H - 3}>{data.perVcpu ? 'Density per host vCPU' : 'Density (microVMs)'}</text>
 
           {#each points as p (p.key)}
             {@const v = P.value(p)}
             {#if v !== null}
-              {@const cx = place(p, L)}
+              {@const cx = place(p)}
               {@const cy = y(Math.min(v, top))}
-              {@const hollow = apart && p.replica > 1}
               <a
                 class="mark"
                 href={p.href}
@@ -137,12 +191,12 @@
                 onblur={() => (hover = null)}
                 style:--c={specColor(p.series)}
               >
-                <circle class="hit" {cx} {cy} r={hitR} />
-                {#if hover?.key === p.key}<circle class="halo" {cx} {cy} r={R + 4} />{/if}
+                <circle class="hit" {cx} {cy} r="5" />
+                {#if hover?.key === p.key}<circle class="halo" {cx} {cy} r={(p.passed ? R : FAIL / 2) + 4} />{/if}
                 {#if p.passed}
-                  <circle class="dot" class:hollow {cx} {cy} r={hollow ? R - 0.8 : R} />
+                  <circle class="dot" {cx} {cy} r={R} />
                 {:else}
-                  <path class="cross" class:hollow d={X(cx, cy, R * 0.8)} />
+                  <g class="fail"><MarkShape kind="fail" {cx} {cy} size={FAIL} /></g>
                 {/if}
               </a>
             {/if}
@@ -151,21 +205,22 @@
       {/if}
     </figure>
   {/each}
-  <ul class="key" aria-label="Key">
-    {#if multi}
-      {#each data.series as s, i (s.key)}
-        <li><svg width="12" height="12" aria-hidden="true"><circle cx="6" cy="6" r="5" fill={specColor(i)} /></svg>{s.label}</li>
-      {/each}
-    {/if}
-    {#if apart}
-      <li><svg width="12" height="12" aria-hidden="true"><circle cx="6" cy="6" r="5" fill="var(--ink-2)" /></svg>replica 1</li>
-      <!-- Every replica after the first is hollow, so the key counts them: "replica 2", or "replicas 2–5". -->
-      <li><svg width="12" height="12" aria-hidden="true"><circle cx="6" cy="6" r="4.2" fill="var(--bg)" stroke="var(--ink-2)" stroke-width="1.6" /></svg>{data.replicas === 2 ? 'replica 2' : `replicas 2–${data.replicas}`}</li>
-    {/if}
-    <li><svg width="12" height="12" aria-hidden="true"><path d={X(6, 6, 4)} stroke="var(--ink-2)" stroke-width="2.2" stroke-linecap="round" /></svg>failed</li>
-    <li><i class="sw over-sw"></i>over the SLO</li>
-    {#if bands.some((b) => b.untested)}<li><i class="sw untested-sw"></i>not tested</li>{/if}
-  </ul>
+  <!-- The key names the specs; the SLO and the failures are labelled on the chart itself. -->
+  {#if multi || beyond}
+    <ul class="key" aria-label="Key">
+      {#if multi}
+        {#each data.series as s, i (s.key)}
+          <li>
+            <svg width="20" height="12" aria-hidden="true" style:--c={specColor(i)}>
+              <line class="line" x1="1" x2="19" y1="6" y2="6" />
+              <circle class="dot" cx="10" cy="6" r={R} />
+            </svg>{s.label}
+          </li>
+        {/each}
+      {/if}
+      {#if beyond}<li><i class="sw untested-sw"></i>not tested</li>{/if}
+    </ul>
+  {/if}
 </div>
 
 <style>
@@ -205,16 +260,26 @@
     min-width: 0;
   }
   .pn-task {
-    margin-top: 10px;
+    margin-top: 8px;
   }
   figcaption {
     font-weight: 600;
     font-size: 0.9rem;
     margin: 4px 0 0;
   }
+  .sub {
+    margin-left: 8px;
+    font-weight: 400;
+    font-size: 0.8rem;
+    color: var(--muted);
+  }
+  .sub.block {
+    display: block;
+    margin: 0;
+  }
   .pn-task figcaption {
     font-size: 0.84rem;
-    color: var(--ink-2);
+    color: var(--muted);
   }
   svg {
     display: block;
@@ -222,7 +287,6 @@
   }
   .over {
     fill: var(--critical-bg);
-    opacity: 0.75;
   }
   .slo {
     stroke: var(--critical);
@@ -239,10 +303,6 @@
   }
   .grid {
     stroke: var(--grid);
-  }
-  .sep {
-    stroke: var(--grid);
-    stroke-dasharray: 2 3;
   }
   .untested {
     fill: var(--surface);
@@ -261,12 +321,23 @@
     font-size: 11px;
     font-variant-numeric: tabular-nums;
   }
-  .tick.off {
-    fill: var(--muted);
+  .tick.fail {
+    fill: var(--ink);
+    font-weight: 600;
   }
   .axis-title {
     fill: var(--muted);
     font-size: 12px;
+  }
+  .line {
+    fill: none;
+    stroke: var(--c);
+    stroke-width: 1.5;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+  }
+  .line.lit {
+    stroke-width: 2.5;
   }
   .mark {
     cursor: pointer;
@@ -276,22 +347,10 @@
   }
   .dot {
     fill: var(--c);
-    stroke: var(--bg);
-    stroke-width: 1;
+    opacity: 0.55;
   }
-  .dot.hollow {
-    fill: var(--bg);
-    stroke: var(--c);
-    stroke-width: 1.8;
-  }
-  .cross {
-    fill: none;
-    stroke: var(--c);
-    stroke-width: 2.6;
-    stroke-linecap: round;
-  }
-  .cross.hollow {
-    stroke-width: 1.8;
+  .fail {
+    opacity: 0.85;
   }
   .halo {
     fill: var(--highlight);
@@ -301,9 +360,10 @@
   .mark:focus-visible {
     outline: none;
   }
-  .mark:focus-visible .dot,
-  .mark:focus-visible .cross {
+  .mark:focus-visible .dot {
+    opacity: 1;
     stroke: var(--ink);
+    stroke-width: 1.5;
   }
   .key {
     list-style: none;
@@ -321,15 +381,15 @@
     align-items: center;
     gap: 6px;
   }
+  .key svg {
+    display: inline-block;
+    overflow: visible;
+  }
   .sw {
     display: inline-block;
     width: 14px;
     height: 10px;
     border-radius: 2px;
-  }
-  .over-sw {
-    background: var(--critical-bg);
-    border-top: 1.5px dashed var(--critical);
   }
   .untested-sw {
     background: var(--surface);

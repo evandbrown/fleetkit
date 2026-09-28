@@ -2,6 +2,8 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, test, type Page } from '@playwright/test';
+import { campaignCost, costNote, costText, specCost } from '../../src/lib/cost';
+import { browsers } from '../../src/lib/glossary';
 import { href } from '../../src/lib/router';
 import type { CampaignDoc, Index, RunDoc, TrialDoc } from '../../src/lib/types';
 
@@ -22,7 +24,7 @@ const ROUTES: Route[] = [
 ];
 for (const e of index.campaigns) {
   const c = read<CampaignDoc>('campaigns', e.id, 'campaign.json');
-  ROUTES.push({ name: `results-${c.id}`, path: `./${href({ name: 'results', campaign: c.id })}`, h1: c.title, ready: 'Every trial' });
+  ROUTES.push({ name: `results-${c.id}`, path: `./${href({ name: 'results', campaign: c.id })}`, h1: c.title, ready: 'At the limit' });
   for (const entry of c.runs) {
     const r = read<RunDoc>('campaigns', c.id, 'runs', `${entry.id}.json`);
     const run = (density: number | null) => `./${href({ name: 'run', campaign: c.id, run: r.id, density })}`;
@@ -31,7 +33,7 @@ for (const e of index.campaigns) {
     ROUTES.push({ name: `run-${c.id}-${r.id}`, path: run(null), ready: 'What limited it' });
     for (const d of r.by_density) {
       if (d.result === 'not_tested') continue;
-      ROUTES.push({ name: `run-${c.id}-${r.id}-density-${d.density}`, path: run(d.density), ready: 'Densities' });
+      ROUTES.push({ name: `run-${c.id}-${r.id}-density-${d.density}`, path: run(d.density), ready: 'Browsers per host' });
     }
     const full = (t: string) => read<TrialDoc>('campaigns', c.id, 'runs', r.id, `${t}.json`).full_size_screenshots;
     for (const t of r.trials) {
@@ -136,7 +138,7 @@ test.describe('the published cap-baseline-1', () => {
     await expect(page.locator('h1')).toHaveText(featured.title);
     // The campaign picker: a labelled select-style button naming the selected campaign, which controls the results
     // below; open, one option per campaign, the selected one marked.
-    await expect(page.locator('#campaign-label')).toHaveText('Campaign');
+    await expect(page.locator('#campaign-label')).toHaveText('Choose a campaign');
     const picker = page.getByRole('button', { name: /^Campaign/ });
     await expect(picker).toContainText(featured.title);
     await expect(picker).toHaveAttribute('aria-controls', 'campaign-panel');
@@ -158,39 +160,57 @@ test.describe('the published cap-baseline-1', () => {
     await expect(tested.locator('thead')).toHaveCount(0);
     // A number and its unit are joined by a no-break space (\s here), so "16 vCPU" never breaks in a narrow column.
     await expect(tested.locator('tbody tr').first()).toHaveText(/^Host\s*m8i\.4xlarge\s*16\svCPU · 64\sGiB · nested$/);
-    // The SLOs are its last row: the targets in force before 28 September 2026, each with the standard beside it.
+    // The SLOs are its last row, one target per line, each a defined term: the targets in force before 28 September
+    // 2026, each that differs from the standard with the standard beside it.
     const slos = tested.locator('tbody tr', { has: page.locator('th', { hasText: /^SLOs$/ }) });
-    await expect(slos.locator('td')).toHaveText(
-      'ready ≤ 180 s · tasks 100% · step p50 ≤ 1 s (standard 2 s) · step p95 ≤ 2 s (standard 3 s) · task p95 ≤ 5 s (standard 10 s)',
-    );
+    await expect(slos.getByRole('list', { name: 'SLOs' }).getByRole('listitem')).toHaveText([
+      /^Browser ready\s*≤ 180 s$/,
+      /^Tasks succeed\s*100%$/,
+      /^Each step p50\s*≤ 1 s\s*standard 2 s$/,
+      /^Each step p95\s*≤ 2 s\s*standard 3 s$/,
+      /^Whole task p95\s*≤ 5 s\s*standard 10 s$/,
+    ]);
+    await expect(slos.locator('.term')).toHaveCount(5);
     // The header: the question, then the catalog's written answer (D93).
     const cap = read<CampaignDoc>('campaigns', CAP, 'campaign.json');
     await expect(page.locator('.top .question')).toHaveText('How many microVMs fit on one m8i.4xlarge?');
     await expect(page.locator('.top .lead')).toHaveText(cap.answer!);
-    await expect(page.locator('.top .lead')).toContainText('held 8 microVMs');
-    // "$ / 1k tasks" is the steady-state cost (D81), with what one burst is charged under it.
-    await expect(page.locator('.answer .figs')).toHaveText(
-      /^Max density\s*8\s*Per vCPU\s*0\.50\s*\$ \/ 1k tasks\s*\$0\.141–0\.142\s*full fleet\s*\$0\.184–0\.201 one burst\s*Ran out\s*Host CPU\s*at 12$/,
+    await expect(page.locator('.top .lead')).toContainText('held 8 browsers');
+    // How it performed: one row for the one spec, read out whole; "$ / 1k tasks" is one number, the steady-state
+    // cost (D81, D102), its range and the burst in its title.
+    await expect(page.locator('.answer li.spec')).toHaveAttribute(
+      'aria-label',
+      'm8i.4xlarge: last pass at 8, first failure at 12; midpoint 10 browsers per host; ≈ $0.141 per 1,000 tasks; ran out: Host CPU at 12',
     );
-    // Latency by density, with no click: a mark per counting trial in each panel, against its SLO.
+    await expect(page.locator('.answer .cost')).toHaveText(/^≈\s*\$0\.141\s*$/);
+    await expect(page.locator('.answer .lane')).toHaveAttribute('title', 'last pass at 8 browsers, first failure at 12 browsers');
+    await expect(page.locator('.answer .cost')).toHaveAttribute('title', 'Steady state: $0.141–0.142 per 1,000 tasks; one burst $0.184–0.201');
+    await expect(page.locator('main h2')).toHaveText(['What we tested', 'How it performed', 'Latency by browsers per host', 'At the limit']);
+    // Latency by browsers per host, with no click: a mark per counting trial in each panel, against its SLO.
     const lat = page.locator('.lat');
-    await expect(lat.locator('figcaption')).toHaveText(['Slowest step p50 (ms)', 'Task p95 (ms)']);
+    await expect(lat.locator('figcaption')).toHaveText(['Slowest step p50 (ms) line: the median at each count · one mark per trial', 'Task p95 (ms)']);
     await expect(lat.locator('svg a.mark')).toHaveCount(18);
+    // One spec: one line per panel, through the median of each count's trials, and no key.
+    await expect(lat.locator('path.line')).toHaveCount(2);
+    // One spec: the key names no spec, only the not-tested shading where the campaign listed counts past its last trial.
+    await expect(lat.getByRole('list', { name: 'Key' })).toHaveText(/^\s*(not tested)?\s*$/);
     await expect(lat.locator('text.slo-label')).toHaveText(['SLO ≤ 1,000 ms', 'SLO ≤ 5,000 ms']);
-    await expect(lat.getByRole('link', { name: 'trial 1 at density 12, failed: slowest step p50 1,279 ms' })).toBeVisible();
+    await expect(lat.getByRole('link', { name: 'trial 1 at 12 browsers, failed: slowest step p50 1,279 ms' })).toBeVisible();
     // At the limit: the first failing trial, compact, and a way into it.
     const limit = page.locator('.atlimit');
     await limit.scrollIntoViewIfNeeded();
     // One spec: no Spec selector.
     await expect(limit.getByRole('button', { name: /^Spec/ })).toHaveCount(0);
-    await expect(limit.locator('.title')).toHaveText(/^Density 12\s*trial 1$/);
+    await expect(limit.locator('.title')).toHaveText(/^12 browsers\s*trial 1$/);
     await expect(limit.locator('.result')).toContainText('home p50 1,279 ms > 1,000 ms');
     await expect(limit.getByRole('link', { name: 'Open this trial →' })).toHaveAttribute('href', `#/results/${CAP}/runs/${RUN}/trials/d12-t1`);
     await expect(limit.locator('.lanes svg a')).toHaveCount(12);
     await expect(limit.locator('figure.tc figcaption')).toContainText(['Host CPU by process (vCPUs)', 'Host CPU pressure, the rule that ran out']);
     await expect(limit.getByRole('list', { name: 'Host CPU key' })).toContainText("microVMs' vCPUs");
-    // Every trial: its marks open their trials, and say so.
-    await expect(page.locator('figure.chart .hint')).toHaveText(/^(Click|Tap) a mark to open its trial$/);
+    // Every trial and replica, folded under How it performed: its marks open their trials. "Click a mark" is said
+    // once on the page, by the latency chart.
+    await expect(page.getByText(/^(Click|Tap) a mark to open its trial$/)).toHaveCount(1);
+    await page.locator('details.trials summary').click();
     await expect(page.locator('figure.chart > svg a[href*="/trials/"]')).toHaveCount(9);
     await expect(page.locator('figure.chart')).toContainText('9–11 not tested');
   });
@@ -202,7 +222,7 @@ test.describe('the published cap-baseline-1', () => {
     await expect(page.locator('p.crumbs')).toHaveText(/› m8i\.4xlarge$/);
     await expect(page.locator('table.densities tbody tr').nth(4)).toContainText('home p50 1,063–1,563 ms');
     await expect(page.locator('table.densities tbody tr').nth(5)).toContainText('not tested');
-    await expect(page.getByRole('link', { name: /^trial \d at density (8|12), (passed|failed)$/ })).toHaveCount(6);
+    await expect(page.getByRole('link', { name: /^trial \d at (8|12) browsers, (passed|failed)$/ })).toHaveCount(6);
   });
 
   test('shows every final screen of a trial and the illustration filmstrip', async ({ page }) => {
@@ -249,11 +269,17 @@ test.describe('the published nested-hv-1', () => {
 
   test('chooses campaigns from the picker, by pointer or keyboard', async ({ page }) => {
     await page.goto(`./${href({ name: 'results', campaign: HV })}`);
-    // The closed picker names the campaign: its title, its question and its headline figure on its host.
+    // The closed picker names the campaign: its title, its question, and its answer as a figure (D102): the lead
+    // spec's steady-state cost over that spec's short name and its browsers per host.
     const picker = page.getByRole('button', { name: /^Campaign/ });
     await expect(picker).toContainText(hv.title);
     await expect(picker).toContainText(hv.question);
-    await expect(picker).toContainText(/\d+ microVMs on m8i\.4xlarge · 3 specs/);
+    const entry = index.campaigns.find((c) => c.id === HV)!;
+    const lead = campaignCost(entry).lead!;
+    const short = hv.specs.find((s) => s.name === lead.spec)!.short!;
+    await expect(picker.locator('.fig .line').first()).toHaveText(`≈ ${costText(lead.cost!)} per 1,000 tasks`);
+    await expect(picker.locator('.fig .line').first()).toHaveAttribute('title', costNote(lead)!);
+    await expect(picker.locator('.fig .sub')).toHaveText(`${short} · ${browsers(lead.count!)} per host`);
     // ArrowDown opens on the selected campaign; ArrowDown again moves to the next, newest first; Enter opens it, and
     // focus comes back to the picker.
     const newest = [...index.campaigns].sort((a, b) => (a.started < b.started ? 1 : a.started > b.started ? -1 : 0));
@@ -269,23 +295,55 @@ test.describe('the published nested-hv-1', () => {
     await expect(page).toHaveURL(new RegExp(`#/results/${next.id}$`));
     await expect(page.locator('h1')).toHaveText(next.title);
     await expect(page.getByRole('button', { name: /^Campaign/ })).toBeFocused();
-    // And by a click on an option.
+    // And by a click on an option. Its card: four lines, a dot per spec on the shared strip, the winner named under
+    // its dot, and the cost at the right with "best".
     await page.getByRole('button', { name: /^Campaign/ }).click();
-    await page.locator(`#campaign-picker-option-${HV}`).click();
+    const card = page.locator(`#campaign-picker-option-${HV}`);
+    await expect(card.locator('.strip .dot')).toHaveCount(3);
+    await expect(card.locator('.strip .unit')).toHaveText(/^[\d.]+ browsers \/ vCPU$/);
+    await expect(card.locator('.fig .v')).toHaveText(`≈ ${costText(lead.cost!)}`);
+    if (campaignCost(entry).clear) {
+      await expect(card.locator('.strip .name')).toHaveText(short);
+      await expect(card.locator('.fig .w')).toHaveText(`best: ${short}`);
+    } else {
+      await expect(card.locator('.strip .name')).toHaveCount(0);
+      await expect(card.locator('.fig .w')).toHaveText('no clear winner');
+    }
+    await card.click();
     await expect(page.locator('h1')).toHaveText(hv.title);
     await expect(page.getByRole('listbox')).toHaveCount(0);
   });
 
-  test('shows latency by density for every spec and replica without a click', async ({ page }) => {
+  test('shows a campaign with no fleet cost by its browser count, and says why', async ({ page }) => {
+    // metal_host: its one host was never full, so there is no steady-state cost; the count stands in.
+    const METAL = 'hv-host-2';
+    const entry = index.campaigns.find((c) => c.id === METAL)!;
+    const doc = read<CampaignDoc>('campaigns', METAL, 'campaign.json');
+    // One spec, so it leads. (shape.ts is not imported here: under Node it would pull in the schema JSON.)
+    const spec = entry.featured_spec ?? entry.specs[0].name;
+    const sc = specCost(entry, spec);
+    expect(sc.cost).toBeNull();
+    expect(sc.count).toMatch(/^≥ /);
+    await page.goto(`./${href({ name: 'results', campaign: METAL })}`);
+    const picker = page.getByRole('button', { name: /^Campaign/ });
+    await expect(picker.locator('.fig .line').first()).toHaveText(`${sc.count} browsers per host`);
+    await expect(picker.locator('.fig .sub')).toHaveText(`${doc.specs.find((s) => s.name === spec)!.short} · no fleet cost`);
+    await picker.click();
+    const card = page.locator(`#campaign-picker-option-${METAL}`);
+    await expect(card.locator('.fig')).toHaveText(new RegExp(`^${sc.count}\\s*browsers per host\\s*no fleet cost$`));
+    await expect(card.locator('.strip .dot')).toHaveCount(1);
+  });
+
+  test('shows latency by browsers per host for every spec and replica without a click', async ({ page }) => {
     await page.goto(`./${href({ name: 'results', campaign: HV })}`);
     const lat = page.locator('.lat');
     await expect(lat.locator('svg a.mark')).toHaveCount(counting * 2);
-    await expect(lat.getByRole('list', { name: 'Key' })).toHaveText(
-      /Firecracker\s*Cloud Hypervisor\s*Firecracker with MMIO\s*replica 1\s*replica 2\s*failed\s*over the SLO/,
-    );
+    await expect(lat.getByRole('list', { name: 'Key' })).toHaveText(/^\s*Firecracker\s*Cloud Hypervisor\s*Firecracker with MMIO\s*(not tested)?\s*$/);
+    // A line per spec through the median at each count; the replica is in each mark's name and the readout.
+    await expect(lat.locator('.pn-step path.line')).toHaveCount(3);
     // Pointing at (or tabbing to) a trial reads it out.
-    await lat.getByRole('link', { name: /^Cloud Hypervisor · replica 2 · trial 3 at density 10, failed: slowest step p50/ }).focus();
-    await expect(lat.locator('.read')).toContainText('Cloud Hypervisor · replica 2 · trial 3 at density 10');
+    await lat.getByRole('link', { name: /^Cloud Hypervisor · replica 2 · trial 3 at 10 browsers, failed: slowest step p50/ }).focus();
+    await expect(lat.locator('.read')).toContainText('Cloud Hypervisor · replica 2 · trial 3 at 10 browsers');
   });
 
   test('loads one trial at the limit, only when it comes into view, and switches spec from a dropdown', async ({ page }) => {
@@ -303,7 +361,7 @@ test.describe('the published nested-hv-1', () => {
     await limit.scrollIntoViewIfNeeded();
     // The Spec dropdown's button: the spec shown, by its short name, and where it stopped passing.
     const spec = limit.getByRole('button', { name: /^Spec/ });
-    await expect(spec).toHaveText(/^\s*Firecracker\s*fails at 10\s*$/);
+    await expect(spec).toHaveText(/^\s*Firecracker\s*fails at 10 browsers\s*$/);
     const open = limit.getByRole('link', { name: 'Open this trial →' });
     await expect(open).toHaveAttribute('href', `#/results/${HV}/runs/firecracker-r1/trials/d10-t1`);
     await expect(limit.locator('.lanes svg a')).toHaveCount(10);
@@ -312,13 +370,13 @@ test.describe('the published nested-hv-1', () => {
     // Open, every spec the same way, the shown one selected; a click chooses.
     await spec.click();
     const list = page.getByRole('listbox', { name: 'Spec' });
-    await expect(list.getByRole('option')).toHaveText([/^\s*Firecracker\s*fails at 10\s*$/, /^\s*Cloud Hypervisor\s*fails at 10\s*$/, /^\s*Firecracker with MMIO\s*fails at 9\s*$/]);
-    await expect(list.getByRole('option', { selected: true })).toHaveText(/^\s*Firecracker\s*fails at 10\s*$/);
+    await expect(list.getByRole('option')).toHaveText([/^\s*Firecracker\s*fails at 10 browsers\s*$/, /^\s*Cloud Hypervisor\s*fails at 10 browsers\s*$/, /^\s*Firecracker with MMIO\s*fails at 9 browsers\s*$/]);
+    await expect(list.getByRole('option', { selected: true })).toHaveText(/^\s*Firecracker\s*fails at 10 browsers\s*$/);
     await list.getByRole('option', { name: /^Firecracker with MMIO/ }).click();
     await expect(list).toHaveCount(0);
-    await expect(spec).toHaveText(/^\s*Firecracker with MMIO\s*fails at 9\s*$/);
+    await expect(spec).toHaveText(/^\s*Firecracker with MMIO\s*fails at 9 browsers\s*$/);
     await expect(open).toHaveAttribute('href', `#/results/${HV}/runs/firecracker-mmio-r1/trials/d9-t3`);
-    await expect(limit.locator('.title')).toHaveText(/^Density 9\s*trial 3 · replica 1$/);
+    await expect(limit.locator('.title')).toHaveText(/^9 browsers\s*trial 3 · replica 1$/);
     await expect(limit.locator('.lanes svg a')).toHaveCount(9);
     expect(trials).toHaveLength(2);
     // By keyboard: ArrowUp opens on the shown spec, ArrowUp again moves to the one before it, Enter chooses.
@@ -327,10 +385,10 @@ test.describe('the published nested-hv-1', () => {
     await page.keyboard.press('ArrowUp');
     await page.keyboard.press('Enter');
     await expect(list).toHaveCount(0);
-    await expect(spec).toHaveText(/^\s*Cloud Hypervisor\s*fails at 10\s*$/);
+    await expect(spec).toHaveText(/^\s*Cloud Hypervisor\s*fails at 10 browsers\s*$/);
     await expect(open).toHaveAttribute('href', `#/results/${HV}/runs/cloud-hypervisor-r1/trials/d10-t1`);
     await open.click();
-    await expect(page.locator('h1')).toHaveText('Trial 1 at density 10');
+    await expect(page.locator('h1')).toHaveText('Trial 1 at 10 browsers');
   });
 });
 
@@ -359,7 +417,7 @@ test.describe('every published campaign stands as judged by its own SLOs (D74, D
   };
   const campaigns = index.campaigns.map((e) => read<CampaignDoc>('campaigns', e.id, 'campaign.json'));
 
-  test('About states the standard SLOs, whichever campaign is featured, and the featured result names its own', async ({ page }) => {
+  test('About states the standard SLOs, whichever campaign is featured, and leads with the featured spec\u2019s cost', async ({ page }) => {
     await page.goto('./');
     await expect(page.getByRole('list', { name: 'Success criteria' }).getByRole('listitem')).toHaveText([
       /^≤ 180 s\s*Browser ready$/,
@@ -368,30 +426,68 @@ test.describe('every published campaign stands as judged by its own SLOs (D74, D
       /^≤ 3 s\s*Each step p95$/,
       /^≤ 10 s\s*Whole task p95$/,
     ]);
-    const tag = page.getByRole('complementary', { name: 'Featured result' }).locator('.slo-tag');
-    const want = tagFor(featured);
-    if (want === null) await expect(tag).toHaveCount(0);
-    else await expect(tag).toHaveText(want);
+    // The featured card (D102): the featured spec's steady-state cost (or its browser count where there is none),
+    // the host it ran on, and no SLO note or vCPU count: the SLOs row of the spec below has the detail.
+    const entry = index.campaigns.find((c) => c.id === index.featured)!;
+    // The catalog names the featured spec (else the card would lead with the cheapest, campaignCost's lead).
+    const spec = entry.featured_spec ?? campaignCost(entry).lead!.spec;
+    const sc = specCost(entry, spec);
+    const host = featured.specs.find((s) => s.name === spec)!.host;
+    const card = page.getByRole('complementary', { name: 'Featured result' });
+    await expect(card.locator('.slo-tag')).toHaveCount(0);
+    await expect(card.locator('.detail strong')).toHaveText(host.instance_type);
+    if (sc.cost !== null) {
+      await expect(card.locator('.big')).toHaveText(`≈ ${costText(sc.cost)}`);
+      await expect(card.locator('.big')).toHaveAttribute('title', costNote(sc)!);
+      await expect(card.locator('.unit')).toHaveText('per 1,000 tasks');
+      await expect(card.locator('.detail')).toHaveText(new RegExp(`^${browsers(sc.count!)} on one ${host.instance_type.replace('.', '\\.')}$`));
+      await expect(card.locator('.note')).toHaveCount(0);
+    } else {
+      await expect(card.locator('.big')).toHaveText(sc.count!);
+      await expect(card.locator('.unit')).toHaveText('browsers per host');
+      await expect(card.locator('.note')).toHaveText('No fleet cost: the host was never full');
+    }
   });
 
-  test('tags each campaign card whose SLOs are not the standard ones, and only those', async ({ page }) => {
+  test('marks each campaign card whose SLOs differ from most of its peers with one word, defined on hover, and only those', async ({ page }) => {
     await page.goto(`./${href({ name: 'results', campaign: METAL })}`);
     await page.getByRole('button', { name: /^Campaign/ }).click();
     const list = page.getByRole('listbox', { name: 'Campaign' });
-    await expect(list.locator(`#campaign-picker-option-${METAL} .slo-tag`)).toHaveText(METAL_TAG);
-    await expect(list.locator('.slo-tag')).toHaveCount(campaigns.filter((c) => tagFor(c) !== null).length);
+    await expect(list.locator('.slo-tag')).toHaveCount(0);
+    // The tag most campaigns carry says nothing on a card; only the others carry the word.
+    const tally = new Map<string | null, number>();
+    for (const c of campaigns) tally.set(tagFor(c), (tally.get(tagFor(c)) ?? 0) + 1);
+    const usual = [...tally.entries()].sort((a, b) => b[1] - a[1])[0][0];
+    const marked = campaigns.filter((c) => tagFor(c) !== usual);
+    expect(marked.map((c) => c.id)).toContain(METAL);
+    await expect(list.locator('.card .slo .term')).toHaveCount(marked.length);
     for (const c of campaigns) {
       const want = tagFor(c);
-      const tag = list.locator(`#campaign-picker-option-${c.id} .slo-tag`);
-      if (want === null) await expect(tag).toHaveCount(0);
-      else await expect(tag).toHaveText(want);
+      const word = list.locator(`#campaign-picker-option-${c.id} .slo .term`);
+      if (want === usual) await expect(word).toHaveCount(0);
+      else {
+        await expect(word).toHaveText('SLOs');
+        await expect(page.locator('#' + (await word.getAttribute('aria-describedby')))).toHaveText(want ?? /standard SLOs/);
+      }
     }
+    // Hovering the word shows its definition, whole; the list stays open.
+    const metal = list.locator(`#campaign-picker-option-${METAL} .slo .term`);
+    await metal.scrollIntoViewIfNeeded();
+    await metal.hover();
+    await expect(page.getByRole('tooltip')).toHaveText(METAL_TAG);
+    await expect(list).toBeVisible();
   });
 
   test('names the standard beside each SLO that differs from it, in the SLOs row of What we tested', async ({ page }) => {
     await page.goto(`./${href({ name: 'results', campaign: METAL })}`);
     const slos = page.locator('table.tested tbody tr', { has: page.locator('th', { hasText: /^SLOs$/ }) });
-    await expect(slos.locator('td')).toHaveText('ready ≤ 900 s (standard 180 s) · tasks 100% · step p50 ≤ 2 s · step p95 ≤ 3 s · task p95 ≤ 5 s (standard 10 s)');
+    await expect(slos.getByRole('list', { name: 'SLOs' }).getByRole('listitem')).toHaveText([
+      /^Browser ready\s*≤ 900 s\s*standard 180 s$/,
+      /^Tasks succeed\s*100%$/,
+      /^Each step p50\s*≤ 2 s$/,
+      /^Each step p95\s*≤ 3 s$/,
+      /^Whole task p95\s*≤ 5 s\s*standard 10 s$/,
+    ]);
   });
 
   test('says the SLOs differ above the charts when a metal spec is compared with nested ones', async ({ page }) => {

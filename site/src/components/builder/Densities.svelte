@@ -3,6 +3,7 @@
   // or a range ("9-11"), then Enter. Backspace in the empty box removes the last one; the left arrow moves onto the
   // chips, where Backspace or Delete removes one.
   import type { Json } from '../../lib/campaign';
+  import { browsers } from '../../lib/glossary';
 
   let {
     id,
@@ -73,7 +74,7 @@
         type="button"
         tabindex="-1"
         bind:this={chips[i]}
-        aria-label="Remove density {d}"
+        aria-label="Remove {browsers(String(d))}"
         onclick={() => remove(i)}
         onkeydown={(e) => chipKey(e, i)}>×</button
       ></span

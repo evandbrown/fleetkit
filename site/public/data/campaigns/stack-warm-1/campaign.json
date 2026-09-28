@@ -7,7 +7,7 @@
   "ended": "2026-09-28T10:42Z",
   "status": "complete",
   "definition_path": "experiments/campaigns/stack-warm-1.json",
-  "answer": "Yes: warm, the tuned guest held 6 microVMs on c8i.xlarge at $0.039–0.049 per 1,000 tasks, against 4 at $0.103–0.107 for 2 vCPU / 2 GiB. Plain 1 vCPU / 1 GiB microVMs held 4–5 at $0.076–0.081; host CPU ran out first, and cold the tuned guest also held 6.",
+  "answer": "Yes: warm, 1 vCPU / 1 GiB tuned cost ≈ $0.043 per 1,000 tasks against ≈ $0.106 for 2 vCPU / 2 GiB and ≈ $0.079 for plain 1 vCPU / 1 GiB. Host CPU ran out first; cold, the tuned guest cost the same (guest_boot_tuning).",
   "definition": {
     "name": "stack-warm-1",
     "question": "With a 5 s warm start, does the full stack cost less per task than lean 2-vCPU microVMs?",

@@ -7,7 +7,7 @@
   "ended": "2026-09-28T03:04Z",
   "status": "complete",
   "definition_path": "experiments/campaigns/hv-host-2.json",
-  "answer": "One m8i.metal-48xl held at least 192 microVMs, 1.0 microVMs per host vCPU, one burst costing $0.216–0.221 per 1,000 tasks; every density passed. It was judged at the design's step targets, with task p95 within 5 s and ready within 900 s; the harness caps a host at 200.",
+  "answer": "One m8i.metal-48xl (192 vCPUs) held at least 192 browsers, every count passing; the harness caps a host at 200. One burst cost ≈ $0.219 per 1,000 tasks, judged at the design's step targets, task p95 within 5 s and ready within 900 s.",
   "definition": {
     "name": "hv-host-2",
     "question": "How does a metal host change density per vCPU and cost?",
@@ -407,6 +407,6 @@
   ],
   "notes": [
     "Its step targets are the design's (p50 within 2 s, p95 within 3 s), not the nested campaigns' 1 s and 2 s.",
-    "Every density passed. A host runs at most 200 microVMs in this harness, so the limit is above 192."
+    "Every browser count passed. A host runs at most 200 microVMs in this harness, so the limit is above 192."
   ]
 }

@@ -1,6 +1,6 @@
 <script lang="ts">
   // Campaign → runs → trials → microVMs, as four panels: left to right on a wide screen, two by two below 600 px.
-  // All four are an illustration. The trials panel is an example ladder: a column of squares per density (one square
+  // All four are an illustration. The trials panel is an example ladder: a column of squares per browser count (one square
   // per microVM) under the trial's mark (passed, failed, not tested), with the number of trials where there were
   // more than one.
   import { num } from '../../lib/format';
@@ -87,7 +87,7 @@
 <div
   class="units"
   role="img"
-  aria-label="A campaign asks one question with several specs. Each run is one spec on its own worker host; a replica is the same spec on another host. A run tests its densities as trials, lowest first, with 3 trials at the boundary between pass and fail. A trial at density N starts N microVMs at once, one browser task in each."
+  aria-label="A campaign asks one question with several specs. Each run is one spec on its own worker host; a replica is the same spec on another host. A run tests its browser counts as trials, lowest first, with 3 trials at the boundary between pass and fail. A trial at N browsers starts N microVMs at once, one browser task in each."
 >
   <div class="pane p-campaign">
     <p class="h">Campaign</p>
@@ -115,7 +115,7 @@
   <span class="arrow" aria-hidden="true">→</span>
   <div class="pane p-trials">
     <p class="h">Trials</p>
-    <p class="s">one per density, 3 at the boundary</p>
+    <p class="s">one per browser count, 3 at the boundary</p>
     <svg viewBox="0 0 {FW} 150" aria-hidden="true">
       <rect class="frame" x="0.5" y="0.5" width={FW - 1} height="149" rx="10" />
       {#each layout as c (c.r.density)}
@@ -135,10 +135,10 @@
   <span class="arrow" aria-hidden="true">→</span>
   <div class="pane p-vms">
     <p class="h">MicroVMs</p>
-    <p class="s">density N starts N at once</p>
+    <p class="s">N browsers: N microVMs at once</p>
     <svg viewBox="0 0 220 {tiles.height}" aria-hidden="true">
       <rect class="frame" x="0.5" y="0.5" width="219" height={tiles.height - 1} rx="10" />
-      <text class="t-item" x="10" y="22">Density {num(focus)}</text>
+      <text class="t-item" x="10" y="22">{num(focus)} browsers</text>
       {#each tiles.out as t, k (k)}
         <rect class="tile" x={t.x} y={t.y} width={tiles.w} height={tiles.h} rx="4" />
         <line class="tile-bar" x1={t.x} y1={t.y + 8} x2={t.x + tiles.w} y2={t.y + 8} />

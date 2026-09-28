@@ -7,7 +7,7 @@
   "ended": "2026-09-28T00:04Z",
   "status": "complete",
   "definition_path": "experiments/campaigns/nested-sizes-1.json",
-  "answer": "Close: m8i.4xlarge (16 vCPUs) held 9 microVMs on both replicas and m8i.2xlarge (8 vCPUs) held 4, 0.56 against 0.50 microVMs per host vCPU. Host CPU ran out first on every host.",
+  "answer": "Close: m8i.4xlarge (16 vCPUs) held 9 browsers at ≈ $0.150 per 1,000 tasks, m8i.2xlarge (8 vCPUs) held 4 at ≈ $0.132. Host CPU ran out first on both.",
   "definition": {
     "name": "nested-sizes-1",
     "question": "Is density per host vCPU the same on 8 and 16 vCPU hosts?",

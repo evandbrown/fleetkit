@@ -1,33 +1,36 @@
 <script lang="ts">
-  // How one spec (or one run) performed, in four figures: the highest density that met every SLO, that density per
-  // host vCPU, the cost per 1,000 tasks there, and what ran out at the first density that failed (a link to it, when
-  // there's one run to open).
+  // How one spec (or one run) performed, in four figures, each saying what it counts: browsers per host that met
+  // every SLO, browsers per vCPU, the cost per 1,000 tasks there as one number (D102, its ranges in a tooltip; the
+  // ≈ is base.css's .approx), and what ran out at the first count that failed (a link to it, when there's one run
+  // to open).
   import type { Headline } from '../lib/shape';
+  import Term from './Term.svelte';
 
   let { h, ranOutHref = null }: { h: Headline; ranOutHref?: string | null } = $props();
+
+  const COST_TERM = 'Steady state: what a full fleet pays per 1,000 tasks, boot included. Hover a figure for its range and the one burst it was measured from.';
+  /** "1.50" → "1.5", "0.38–0.50" → "0.38–0.5": a ratio without its trailing zeros. */
+  const trim = (s: string) => s.replace(/(\.\d*?)0+(?=$|–)/g, '$1').replace(/\.(?=$|–)/g, '');
 </script>
 
 <dl class="stats">
   <div class="stat">
-    <dt>Max density</dt>
-    <dd><span class="v">{h.density}</span>{#if h.densityNote}<span class="n">{h.densityNote}</span>{/if}</dd>
+    <dt>Browsers per host</dt>
+    <dd><span class="v">{h.count ?? h.density}</span>{#if h.densityNote}<span class="n">{h.densityNote}</span>{/if}</dd>
   </div>
   <div class="stat">
-    <dt>Per vCPU</dt>
-    <dd><span class="v">{h.perVcpu ?? '–'}</span></dd>
+    <dt>Browsers per vCPU</dt>
+    <dd><span class="v">{h.perVcpu === null ? '–' : trim(h.perVcpu)}</span></dd>
   </div>
-  <!-- Each cost says what it counts, in About's words: the steady-state cost (D81) is what a full fleet pays, with
-       what one burst is charged under it. Where the host wasn't full at the result there is no fleet figure, so the
-       burst stands alone and says why. -->
   <div class="stat">
-    <dt>$ / 1k tasks</dt>
-    <dd>
+    <dt><Term text={COST_TERM}>$ / 1k tasks</Term></dt>
+    <dd title={h.costNote}>
       {#if h.cost}
-        <span class="v small">{h.cost} <span class="what">full fleet</span></span><span class="n">{h.burst} one burst</span>
+        <span class="v small"><span class="approx">≈</span>{' '}{h.cost}</span>
       {:else if h.burst}
-        <span class="v small">{h.burst} <span class="what">one burst</span></span><span class="n">host not full, no fleet figure</span>
+        <span class="v small burst"><Term text={h.costNote ?? ''}><span class="approx">≈</span>{' '}{h.burst}</Term></span>
       {:else}
-        <span class="v small">–</span>
+        <span class="v small none">—</span>
       {/if}
     </dd>
   </div>
@@ -96,16 +99,15 @@
   .v.small {
     font-size: clamp(1.1rem, 0.9rem + 1vw, 1.5rem);
     line-height: 1.6;
-    /* So "full fleet" can drop under the figure on a phone. */
-    white-space: normal;
   }
-  /* What a cost figure counts, muted beside it. */
-  .what {
-    font-size: 0.82rem;
-    font-weight: 400;
-    letter-spacing: 0;
-    color: var(--ink-2);
-    white-space: nowrap;
+  /* A burst figure alone: the same glyph, one shade quieter. */
+  .v.burst {
+    color: var(--muted);
+    font-weight: 600;
+  }
+  .v.none {
+    color: var(--muted);
+    font-weight: 500;
   }
   .n {
     font-size: 0.82rem;

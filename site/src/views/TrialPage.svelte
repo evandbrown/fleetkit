@@ -7,7 +7,7 @@
   import { href } from '../lib/router';
   import * as f from '../lib/format';
   import { coresStack, lanes, limitPanels, runTitle, trialSlos } from '../lib/shape';
-  import { GUEST_GROUP_LABEL, HOST_CONSUMER_LABEL, NOT_JUDGED, RULE_LABEL, SUBJECT_LABEL, trialLabel, VERDICT_SHORT } from '../lib/glossary';
+  import { browsers, GUEST_GROUP_LABEL, HOST_CONSUMER_LABEL, NOT_JUDGED, RULE_LABEL, SUBJECT_LABEL, trialLabel, VERDICT_SHORT } from '../lib/glossary';
   import { HOST_CONSUMER_COLOR } from '../lib/colors';
   import { GUEST_GROUPS, HOST_CONSUMERS, STEP_NAMES } from '../lib/types';
   import Failed from '../components/Failed.svelte';
@@ -45,7 +45,7 @@
       <a href={href({ name: 'results', campaign: null })}>Results</a> ›
       <a href={href({ name: 'results', campaign: c.id })}>{c.title}</a> ›
       <a href={href({ name: 'run', campaign: c.id, run: r.id, density: null })}>{runTitle(c, r.id)}</a> ›
-      <a href={href({ name: 'run', campaign: c.id, run: r.id, density: s.density })}>density {s.density}</a>
+      <a href={href({ name: 'run', campaign: c.id, run: r.id, density: s.density })}>{browsers(s.density)}</a>
     </p>
     {#if r.synthetic}<SyntheticBanner />{/if}
 
@@ -163,7 +163,12 @@
       {#if s.attribution}
         {@const a = s.attribution}
         <p class="verdict-line">
-          <strong>{a.verdicts.map((v) => VERDICT_SHORT[v]).join(', ')}</strong>
+          <!-- Nothing ran out is good news, and reads as such, not as an error. -->
+          {#if a.verdicts.every((v) => v === 'none')}
+            <strong class="good">Nothing ran out</strong>
+          {:else}
+            <strong>{a.verdicts.map((v) => VERDICT_SHORT[v]).join(', ')}</strong>
+          {/if}
           {#if a.missing.length}<span class="muted">not recorded: {a.missing.map((k) => RULE_LABEL[k]).join(', ')}</span>{/if}
         </p>
         <div class="charts">
@@ -289,6 +294,9 @@
   .verdict-line .muted {
     font-size: 0.88rem;
     margin-left: 8px;
+  }
+  .verdict-line .good {
+    color: var(--good);
   }
   .charts {
     display: grid;

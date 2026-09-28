@@ -1,7 +1,9 @@
 <script lang="ts">
   // Compare specs (D61): any published specs, from any campaigns, on one scale (density per host vCPU across host
-  // sizes, D52): what they tested in one table, each campaign named over its specs, then the charts. Specs are grouped
-  // under their campaign. When their SLOs differ, one line above the charts says how (D74). The choice lives in the URL.
+  // sizes, D52). A two-column picker (campaign · its specs as checkboxes), then the same sections as a campaign page:
+  // what they tested in one table, each campaign named over its specs; how each performed, one row per spec, with
+  // every trial folded under it; latency by browsers per host. When their SLOs differ, one line above the charts says
+  // how (D74). The choice lives in the URL.
   import { loadCampaign, loadIndex, loadRun } from '../lib/data';
   import { href } from '../lib/router';
   import { answerRows, campaignRefs, chartRows, latency, sharedBands, sloDifferences, specResults, type SpecRef } from '../lib/shape';
@@ -64,58 +66,105 @@
 
   <fieldset class="picker">
     <legend class="pl">Pick specs to compare</legend>
-    <div class="campaign cols" aria-hidden="true"><span class="cname">Campaign</span><span>Specs</span></div>
-    {#each index.campaigns as c (c.id)}
-      <div class="campaign">
-        <span class="cname">{c.title}</span>
-        <div class="chips">
-          {#each campaignRefs(docs.get(c.id)!) as r (r.spec.name)}
-            {@const k = key(c.id, r.spec.name)}
-            <label class:on={chosen.includes(k)}>
-              <input
-                type="checkbox"
-                checked={chosen.includes(k)}
-                onchange={(e) => toggle(chosen, k, (e.currentTarget as HTMLInputElement).checked)}
-              />
-              {r.groupLabel}
-            </label>
-          {/each}
-        </div>
-      </div>
-    {/each}
+    <table>
+      <thead>
+        <tr class="cols">
+          <th class="cname" scope="col">Campaign</th>
+          <th scope="col">Specs</th>
+        </tr>
+      </thead>
+      <tbody>
+        {#each index.campaigns as c (c.id)}
+          <tr class="campaign">
+            <th class="cname" scope="row">{c.title}</th>
+            <td class="chips">
+              {#each campaignRefs(docs.get(c.id)!) as r (r.spec.name)}
+                {@const k = key(c.id, r.spec.name)}
+                <label class:on={chosen.includes(k)}>
+                  <input
+                    type="checkbox"
+                    checked={chosen.includes(k)}
+                    onchange={(e) => toggle(chosen, k, (e.currentTarget as HTMLInputElement).checked)}
+                  />
+                  {r.groupLabel}
+                </label>
+              {/each}
+            </td>
+          </tr>
+        {/each}
+      </tbody>
+    </table>
   </fieldset>
 
   {#if refs.length === 0}
     <p class="muted">Pick one or more specs.</p>
   {:else}
-    <section>
+    <section class="band">
       <h2>What we tested</h2>
+      <p class="sub">Each spec is one configuration of host, microVM and guest, named under its campaign. Rows that differ between specs are bold.</p>
       <SpecTable {refs} replicas={new Map([...docs.values()].map((d) => [d.id, d.definition.replicas]))} {campaigns} />
     </section>
     <section>
       <h2>How it performed</h2>
+      <p class="sub">The last browser count that met every SLO and the first that failed, replica by replica, with what 1,000 tasks cost there. A clear winner on cost is highlighted.</p>
       {#if sloDiff}<p class="slo-diff" role="note"><strong>SLOs differ:</strong> {sloDiff}</p>{/if}
       <AnswerChart rows={answerRows(results, docs)} {campaigns} />
       {#await runsFor(refs, docs) then runs}
         {@const lat = latency(refs, docs, runs)}
         {@const rows = chartRows(refs, docs, runs)}
         {@const bands = sharedBands(lat, rows)}
-        {#if lat.series.some((s) => s.points.length)}
-          <h3>Latency by density</h3>
-          <LatencyChart data={lat} {bands} />
-        {/if}
-        <h3>Every trial</h3>
-        <ResultChart {rows} {bands} perVcpu={lat.perVcpu} caption="Every trial of the chosen specs' runs, by density" />
+        <details class="trials">
+          <summary>Every trial and replica <span class="runs">· {rows.length} {rows.length === 1 ? 'run' : 'runs'}</span></summary>
+          <ResultChart {rows} {bands} perVcpu={lat.perVcpu} hint={false} caption="Every trial of the chosen specs' runs, by browsers per host" />
+        </details>
       {/await}
     </section>
+    {#await runsFor(refs, docs) then runs}
+      {@const lat = latency(refs, docs, runs)}
+      {@const rows = chartRows(refs, docs, runs)}
+      {@const bands = sharedBands(lat, rows)}
+      {#if lat.series.some((s) => s.points.length)}
+        <section>
+          <h2>Latency by browsers per host</h2>
+          <p class="sub">Each trial's slowest step against its SLO, as browsers are added. It shows how close each spec ran to the line before it failed.</p>
+          <LatencyChart data={lat} {bands} />
+        </section>
+      {/if}
+    {/await}
   {/if}
 {:catch e}
   <Failed error={e} />
 {/await}
 
 <style>
-  h3 {
-    margin-top: 36px;
+  summary .runs {
+    color: var(--muted);
+    font-weight: 400;
+  }
+  /* Sections of equal standing, 72 px apart, each a heading and one sentence over its figure. */
+  section {
+    margin-top: 72px;
+  }
+  .picker + section {
+    margin-top: 48px;
+  }
+  section > :global(h2) {
+    margin-top: 0;
+  }
+  /* What we tested on a band the full width of the window: see Campaign.svelte. */
+  .band {
+    position: relative;
+    z-index: 0;
+    padding: 28px 0 32px;
+  }
+  .band::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background: var(--surface);
+    box-shadow: 0 0 0 100vmax var(--surface);
+    clip-path: inset(0 -100vmax);
   }
   .slo-diff {
     margin: -4px 0 14px;
@@ -131,76 +180,87 @@
     color: var(--accent-ink);
     font-weight: 650;
   }
+  .trials {
+    margin-top: 16px;
+    font-size: 0.9rem;
+  }
+  .trials summary {
+    font-weight: 600;
+  }
+  /* The picker: a borderless two-column table, a campaign's name beside its specs as checkbox labels. */
   .picker {
     border: 0;
     padding: 0;
     margin: 16px 0 0;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
     min-width: 0;
   }
   .pl {
     padding: 0;
-    margin-bottom: 2px;
+    margin-bottom: 4px;
     font-weight: 650;
     font-size: 0.95rem;
   }
-  .cols {
+  .picker table {
+    min-width: 0;
+    width: auto;
+    font-size: 0.9rem;
+  }
+  .picker th,
+  .picker td {
+    border: 0;
+    padding: 3px 24px 3px 0;
+    vertical-align: baseline;
+  }
+  .cols th {
+    padding-bottom: 6px;
     font-size: 0.75rem;
     font-weight: 600;
     color: var(--muted);
-    margin-bottom: -4px;
   }
-  .cols .cname {
-    font-size: 0.75rem;
-  }
-  @media (max-width: 560px) {
-    /* Both classes, so this outranks the `.campaign { display: flex }` rule below; the header row has nothing to head
-       once the campaigns stack. */
-    .campaign.cols {
-      display: none;
-    }
-    /* A campaign's name over its specs, so the rows don't wrap unevenly. */
-    .campaign {
-      flex-direction: column;
-      align-items: stretch;
-      gap: 4px;
-    }
-  }
-  .campaign {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 6px 12px;
+  .picker tbody tr:hover > th,
+  .picker tbody tr:hover > td {
+    background: none;
   }
   .cname {
     font-weight: 600;
-    font-size: 0.9rem;
-    min-width: 11rem;
+    color: var(--ink);
+    white-space: nowrap;
   }
   .chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
+    padding-right: 0;
   }
   label {
     display: inline-flex;
-    align-items: center;
+    align-items: baseline;
     gap: 6px;
-    font-size: 0.88rem;
-    border: 1px solid var(--rule);
-    border-radius: 6px; /* a small control: a name can wrap, so no fully rounded ends */
-    padding: 3px 12px 3px 8px;
+    margin-right: 18px;
     cursor: pointer;
-    background: var(--bg);
+    color: var(--ink-2);
   }
   label.on {
-    border-color: var(--accent);
-    background: var(--highlight);
+    color: var(--ink);
   }
   input {
     accent-color: var(--accent);
     margin: 0;
+    transform: translateY(1px);
+  }
+  @media (max-width: 560px) {
+    /* The header row has nothing to head once a campaign's name sits over its specs. */
+    .cols {
+      display: none;
+    }
+    .campaign {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      padding: 4px 0;
+    }
+    .picker th,
+    .picker td {
+      padding: 0;
+    }
+    .picker th {
+      padding-bottom: 2px;
+    }
   }
 </style>

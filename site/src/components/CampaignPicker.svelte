@@ -5,30 +5,50 @@
 
 <script lang="ts">
   // Results: the campaign to show, chosen from a select-style dropdown (Dropdown.svelte), newest first. The closed
-  // control names the selected campaign: its title, the question it answers on one line, and its headline figure
-  // ("26 microVMs on c8i.4xlarge · 3 specs"). Each option is a card: title, question, and its figure: one spec's
-  // density and density per host vCPU, or a small bar per spec of what the campaign compares, in the specs' colours.
-  // A campaign judged by other than the standard SLOs says how (D74); when every campaign says the same, it is said
-  // once above the list instead. Choosing opens the campaign by its address.
+  // control names the selected campaign: its title, its question on one line, and its answer as one figure: the
+  // lead spec's steady-state cost ("≈ $0.043 per 1,000 tasks", the ≈ small: base.css's .approx) over that spec's name
+  // and browsers per host. Each
+  // option is a card of four lines whatever its spec count: title, question, one strip with a dot per spec at its
+  // browsers per vCPU (a shared scale, the best spec named under its dot), and the lead spec's cost at the right
+  // with "best: <spec>" or "no clear winner" under it (cost.ts, D102). A campaign judged by other SLOs than most of
+  // its peers carries one muted word, "SLOs", whose tooltip lists them (D74); when every campaign was judged alike
+  // the word would say nothing, so none carries it (About states the SLOs). Choosing opens the campaign by its address.
   import { onMount } from 'svelte';
   import { specColor } from '../lib/colors';
+  import { campaignCost, costNote, costText, specCost, type SpecCost } from '../lib/cost';
   import { loadCampaign } from '../lib/data';
+  import * as f from '../lib/format';
+  import { browsers } from '../lib/glossary';
   import { href } from '../lib/router';
-  import { campaignFigure, campaignHeadline, sloTag, specLabels } from '../lib/shape';
+  import { linear, niceDomain } from '../lib/scale';
+  import { campaignHeadline, sloTag, specLabels } from '../lib/shape';
   import type { CampaignEntry, Index } from '../lib/types';
   import Dropdown from './Dropdown.svelte';
+  import Term from './Term.svelte';
 
   let { index, selected, panel }: { index: Index; selected: string; panel: string } = $props();
   const campaigns = $derived([...index.campaigns].sort((a, b) => (a.started < b.started ? 1 : a.started > b.started ? -1 : 0)));
   const specs = $derived(index.campaigns.reduce((n, c) => n + c.specs.length, 0));
 
   /**
-   * From each campaign's document, once it loads: the specs' short names (the index's labels until then), each
-   * spec's host, and a tag if its SLOs aren't the standard ones.
+   * From each campaign's document, once it loads: the specs' short names (the index's labels until then), and a tag
+   * if its SLOs aren't the standard ones.
    */
   let names = $state<Record<string, string[]>>({});
-  let hosts = $state<Record<string, Record<string, string>>>({});
   let slo = $state<Record<string, string | null>>({});
+  /** The tag most campaigns carry, once every document has loaded; a card shows the word only where it differs. */
+  const usual = $derived.by(() => {
+    const tags = index.campaigns.map((c) => slo[c.id]);
+    if (tags.some((t) => t === undefined)) return undefined;
+    const tally = new Map<string | null, number>();
+    for (const t of tags) tally.set(t, (tally.get(t) ?? 0) + 1);
+    return [...tally.entries()].sort((a, b) => b[1] - a[1])[0][0];
+  });
+  const sloWord = (id: string): string | null => {
+    const t = slo[id];
+    if (t === undefined || usual === undefined || t === usual) return null;
+    return t ?? 'Judged by the design\u2019s standard SLOs';
+  };
   const asked = new Set<string>();
   $effect(() => {
     for (const c of index.campaigns) {
@@ -44,48 +64,80 @@
               return d.specs[j]?.short ?? labels[j] ?? s.label;
             }),
           };
-          hosts = { ...hosts, [c.id]: Object.fromEntries(d.specs.map((s) => [s.name, s.host.instance_type])) };
           slo = { ...slo, [c.id]: sloTag(d.specs.map((s) => s.spec.criteria)) };
         })
         .catch(() => {});
     }
   });
 
-  /**
-   * When every campaign carries the same SLO tag, the tag is said once above the list, as a sentence, and left off
-   * the cards. Null until every campaign's document has loaded, and whenever the tags differ.
-   */
-  const common = $derived.by(() => {
-    const tags = index.campaigns.map((c) => slo[c.id]);
-    if (!tags.length || tags.some((t) => t === undefined)) return null;
-    const first = tags[0];
-    if (!first || tags.some((t) => t !== first)) return null;
-    const m = /^(Tighter|Looser) SLOs?: (.+)$/.exec(first);
-    return m && !m[2].includes(' · ') ? `All judged at ${m[2]}, ${m[1].toLowerCase()} than the design's` : `All judged alike. ${first}`;
-  });
+  /** A spec's short name, by its place in the campaign's list. */
+  const name = (c: CampaignEntry, spec: string) => {
+    const i = c.specs.findIndex((s) => s.name === spec);
+    return names[c.id]?.[i] ?? c.specs[i]?.label ?? spec;
+  };
 
   /**
-   * The campaign's headline: the density of the spec the catalog features (the same spec About's card leads with),
-   * else of its best spec ("8", "3–4"; "≥ 200" when no replica failed), with its unit, that density per host vCPU,
-   * and the spec's host once its document loads. Only a label when nothing ran or passed.
+   * The figure a campaign is chosen by. `cost`: the lead spec's steady-state cost, and whether it is a clear winner
+   * among several. `count`: no spec has a fleet cost (no host was ever full), so the best spec's browsers per host
+   * stand in. `none`: nothing has run or passed, with the label to say so.
    */
-  function headline(c: CampaignEntry): { density: string | null; unit: string; perVcpu: string | null; host: string | null } {
+  type Figure =
+    | { kind: 'cost'; spec: SpecCost; several: boolean; clear: boolean }
+    | { kind: 'count'; spec: SpecCost }
+    | { kind: 'none'; label: string };
+  function figure(c: CampaignEntry): Figure {
+    const cc = campaignCost(c);
+    if (cc.lead) return { kind: 'cost', spec: cc.lead, several: c.specs.length > 1, clear: cc.clear };
     const h = campaignHeadline(c, c.featured_spec ?? null);
-    if (h.density === null) return { density: null, unit: h.label, perVcpu: null, host: null };
-    const reps = c.outcomes.find((o) => o.spec === h.spec)?.replicas ?? [];
-    const noFailure = reps.length > 0 && reps.every((r) => r.first_failed === null);
-    return {
-      density: `${noFailure ? '≥ ' : ''}${h.density}`,
-      unit: h.label,
-      perVcpu: h.perVcpu,
-      host: (h.spec && hosts[c.id]?.[h.spec]) || null,
-    };
+    const s = h.spec ? specCost(c, h.spec) : null;
+    if (s?.count) return { kind: 'count', spec: s };
+    return { kind: 'none', label: h.label === 'not run yet' ? 'Not run yet' : 'None passed' };
+  }
+  const figures = $derived(new Map(campaigns.map((c) => [c.id, figure(c)])));
+
+  /** The strip's scale, shared by every card: 0 to a round number at or above every spec's browsers per vCPU. */
+  const top = $derived(niceDomain(index.campaigns.flatMap((c) => c.specs.map((s) => specCost(c, s.name).perVcpu ?? 0)), { count: 4 })[1]);
+  const x = $derived(linear([0, top], [0, 100]));
+  const ticks = $derived(x.ticks(2).filter((t) => t > 0 && t < top));
+
+  interface Dot {
+    key: string;
+    label: string;
+    color: string;
+    /** Left edge, in % of the strip. */
+    pct: number;
+    /** Dots at the same value are stacked a little, so both show. */
+    dy: number;
+    best: boolean;
+    title: string;
+  }
+  /** A dot per spec that has run and passed, at its browsers per vCPU; the best spec's is larger and named. */
+  function dots(c: CampaignEntry): Dot[] {
+    const fig = figures.get(c.id);
+    const best = fig?.kind === 'cost' && (!fig.several || fig.clear) ? fig.spec.spec : fig?.kind === 'count' ? fig.spec.spec : null;
+    const seen = new Map<number, number>();
+    return c.specs.flatMap((s, i) => {
+      const sc = specCost(c, s.name);
+      if (sc.perVcpu === null) return [];
+      const n = seen.get(sc.perVcpu) ?? 0;
+      seen.set(sc.perVcpu, n + 1);
+      const label = name(c, s.name);
+      return [
+        {
+          key: s.name,
+          label,
+          color: specColor(i),
+          pct: x(sc.perVcpu),
+          dy: n === 0 ? 0 : n % 2 ? -5 * Math.ceil(n / 2) : 5 * Math.ceil(n / 2),
+          best: s.name === best,
+          title: `${label}: ${f.ratio(sc.perVcpu)} browsers per vCPU, ${browsers(sc.count ?? '')} on ${sc.hostVcpus} vCPUs`,
+        },
+      ];
+    });
   }
 
-  /** The metric over the bars names the unit their figures abbreviate: "0.75 / vCPU" under "microVMs per host vCPU". */
-  const metricName = (m: ReturnType<typeof campaignFigure>['metric']) => (m === 'Per vCPU' ? 'microVMs per host vCPU' : m);
-  /** A bar's figure says what it counts, compactly: "8 microVMs", "0.75 / vCPU" under "microVMs per host vCPU". */
-  const unit = (m: ReturnType<typeof campaignFigure>['metric']) => (m === 'Per vCPU' ? ' / vCPU' : ' microVMs');
+  /** A name under a dot stays inside the strip: centred, or flush with the edge it is near. */
+  const align = (pct: number) => (pct < 18 ? 'start' : pct > 82 ? 'end' : 'center');
 
   function pick(id: string) {
     refocus = true;
@@ -101,29 +153,41 @@
 
 <div class="campaign-picker">
   <div class="bar">
-    <span class="label" id="campaign-label">Campaign</span>
+    <span class="label" id="campaign-label">Choose a campaign</span>
     {#if specs > 1}<a class="compare" href={href({ name: 'compare', specs: null })}>Compare specs →</a>{/if}
   </div>
-  {#if common}<p class="common">{common}</p>{/if}
   <Dropdown items={campaigns} {selected} label="Campaign" id="campaign-picker" controls={panel} onselect={pick} bind:this={dropdown}>
     {#snippet button(c: CampaignEntry)}
-      {@const h = headline(c)}
+      {@const fig = figures.get(c.id) ?? figure(c)}
       <span class="sel">
         <span class="text">
           <span class="title">{c.title}</span>
           <span class="q">{c.question}</span>
         </span>
         <span class="fig">
-          <!-- On one line, the spaces written as strings: Svelte trims whitespace at a block's edges and collapses a line break between blocks to a space. -->
-          {#if h.density !== null}<strong>{h.density}</strong>{' '}{h.unit}{#if h.host}{' on '}{h.host}{/if}{:else}{h.unit}{/if}{#if c.specs.length > 1}{' · '}{c.specs.length} specs{/if}
+          {#if fig.kind === 'cost'}
+            <span class="line" title={costNote(fig.spec) ?? undefined}><strong><span class="approx">≈</span>{' '}{costText(fig.spec.cost!)}</strong> per 1,000 tasks</span>
+            <span class="line sub">{name(c, fig.spec.spec)} · {browsers(fig.spec.count ?? '')} per host</span>
+          {:else if fig.kind === 'count'}
+            <span class="line"><strong>{fig.spec.count}</strong> browsers per host</span>
+            <span class="line sub">{name(c, fig.spec.spec)} · no fleet cost</span>
+          {:else}
+            <span class="line sub">{fig.label}</span>
+          {/if}
         </span>
       </span>
     {/snippet}
     {#snippet option(c: CampaignEntry, on: boolean)}
-      {@const fig = campaignFigure(c, names[c.id])}
+      {@const fig = figures.get(c.id) ?? figure(c)}
+      {@const ds = dots(c)}
       <div class="card" class:on>
         <div class="title">
           <span class="t">{c.title}</span>
+          {#if sloWord(c.id)}
+            <!-- The word shows its tooltip; the tap or click that pins it must not also choose the campaign. -->
+            <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
+            <span class="slo" onclick={(e) => e.stopPropagation()}><Term text={sloWord(c.id)!}>SLOs</Term></span>
+          {/if}
           {#if on}
             <svg class="check" aria-hidden="true" viewBox="0 0 16 16" width="16" height="16">
               <path d="M3 8.5l3.2 3.2L13 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
@@ -131,28 +195,34 @@
           {/if}
         </div>
         <div class="q">{c.question}</div>
-        {#if fig.single}
-          {@const h = headline(c)}
-          <div class="one">
-            {#if h.density !== null}<strong>{h.density}</strong>{' '}{h.unit}{:else}{h.unit}{/if}{#if h.perVcpu !== null}{' · '}<strong>{h.perVcpu}</strong> microVMs per host vCPU{/if}
-          </div>
-        {:else}
-          <div class="bars">
-            <span class="metric">{metricName(fig.metric)}</span>
-            {#each fig.bars as b, i (b.key)}
-              <span class="brow">
-                <span class="bl">{b.label}</span>
-                <span class="track" aria-hidden="true"
-                  ><i style:width="{fig.max ? (b.lo / fig.max) * 100 : 0}%" style:background={specColor(i)}></i
-                  >{#if b.hi > b.lo}<i class="spread" style:width="{((b.hi - b.lo) / fig.max) * 100}%" style:--c={specColor(i)}></i>{/if}</span
-                >
-                <!-- A label ("not run yet", "none passed") has no ends, so no unit. -->
-                <span class="bv">{b.text}{#if b.hi > 0}{unit(fig.metric)}{/if}</span>
-              </span>
-            {/each}
+        {#if ds.length}
+          <div class="strip" aria-hidden="true">
+            <span class="end">0</span>
+            <span class="scale">
+              {#each ticks as t (t)}<i class="tick" style:left="{x(t)}%"></i>{/each}
+              {#each ds as d (d.key)}
+                <i class="dot" class:best={d.best} style:left="{d.pct}%" style:background={d.color} style:--dy="{d.dy}px" title={d.title}></i>
+              {/each}
+              {#each ds.filter((d) => d.best) as d (d.key)}
+                <span class="name {align(d.pct)}" style:left="{d.pct}%">{d.label}</span>
+              {/each}
+            </span>
+            <span class="end unit">{f.num(top, Number.isInteger(top) ? 0 : 1)} browsers / vCPU</span>
           </div>
         {/if}
-        {#if slo[c.id] && !common}<span class="slo-tag">{slo[c.id]}</span>{/if}
+        <div class="fig">
+          {#if fig.kind === 'cost'}
+            <span class="v" class:win={fig.several && fig.clear} title={costNote(fig.spec) ?? undefined}><span class="approx">≈</span>{' '}{costText(fig.spec.cost!)}</span>
+            <span class="u">per 1,000 tasks</span>
+            {#if fig.several}<span class="w">{fig.clear ? `best: ${name(c, fig.spec.spec)}` : 'no clear winner'}</span>{/if}
+          {:else if fig.kind === 'count'}
+            <span class="v">{fig.spec.count}</span>
+            <span class="u">browsers per host</span>
+            <span class="w">no fleet cost</span>
+          {:else}
+            <span class="w">{fig.label}</span>
+          {/if}
+        </div>
       </div>
     {/snippet}
   </Dropdown>
@@ -181,13 +251,6 @@
     font-weight: 600;
     white-space: nowrap;
   }
-  /* The one SLO line every campaign shares, above the control. */
-  .common {
-    margin: -2px 0 8px;
-    font-size: 0.82rem;
-    color: var(--ink-2);
-    font-variant-numeric: tabular-nums;
-  }
 
   /* The closed control: title and question at the left, the figure at the right (under them on a phone). */
   .sel {
@@ -207,44 +270,66 @@
     font-size: 1rem;
     line-height: 1.35;
   }
-  .sel .q {
+  /* The question on one line, cut at a word, never mid-word. */
+  .q {
     font-size: 0.85rem;
     line-height: 1.4;
     color: var(--ink-2);
-    white-space: nowrap;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 1;
+    line-clamp: 1;
     overflow: hidden;
-    text-overflow: ellipsis;
+    overflow-wrap: normal;
   }
-  .fig {
+  .sel .fig {
     flex: none;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    text-align: right;
     font-size: 0.85rem;
+    line-height: 1.35;
     color: var(--ink-2);
     white-space: nowrap;
     font-variant-numeric: tabular-nums;
   }
-  strong {
+  .sel .fig strong {
+    font-size: 1.05rem;
     font-weight: 650;
     color: var(--ink);
-    font-variant-numeric: tabular-nums;
   }
-  .fig strong {
-    font-size: 1rem;
+  .sel .fig .sub {
+    font-size: 0.78rem;
+  }
+  @media (max-width: 640px) {
+    .sel .fig {
+      align-items: flex-start;
+      text-align: left;
+    }
   }
 
-  /* An option: a card of the campaign's title, question and figure. */
+  /* An option: four lines whatever its spec count, the figure at the right beside them. */
   .card {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) max-content;
+    grid-template-rows: auto auto auto;
+    gap: 2px 20px;
     min-width: 0;
   }
   .card .title {
     display: flex;
     align-items: center;
-    justify-content: space-between;
     gap: 8px;
     font-weight: 600;
     line-height: 1.35;
+    min-width: 0;
+  }
+  .card .title .t {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .card.on .title {
     color: var(--accent-ink);
@@ -253,82 +338,136 @@
     flex: none;
     color: var(--accent);
   }
-  /* The question in full where it fits, two lines at most. */
+  .slo {
+    flex: none;
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: var(--muted);
+  }
   .card .q {
     font-size: 0.82rem;
-    line-height: 1.4;
-    color: var(--ink-2);
-    display: -webkit-box;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-    line-clamp: 2;
-    overflow: hidden;
   }
-  .one {
-    margin-top: 4px;
-    font-size: 0.85rem;
-    color: var(--ink-2);
-  }
-  /* A label column at least 9rem wide, grown to the longest name, so the bars line up from card to card; then the bar
-     and its figure right beside it. The grid hugs its content, so the figure never drifts to the card's far edge. */
-  .bars {
+
+  /* The strip: "0" at the left, the scale between, its top at the right; a dot per spec on the line, the best named. */
+  .strip {
     margin-top: 6px;
-    display: grid;
-    grid-template-columns: minmax(9rem, max-content) 120px max-content;
-    justify-content: start;
-    align-items: center;
-    gap: 2px 8px;
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    height: 32px;
+    font-size: 0.68rem;
+    line-height: 14px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .end {
+    flex: none;
+  }
+  .scale {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    height: 14px;
+  }
+  /* the line the dots sit on */
+  .scale::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: 1px;
+    background: var(--axis);
+  }
+  .tick {
+    position: absolute;
+    top: 3px;
+    height: 8px;
+    width: 1px;
+    background: var(--axis);
+  }
+  .dot {
+    position: absolute;
+    top: 50%;
+    width: 9px;
+    height: 9px;
+    margin: -4.5px 0 0 -4.5px;
+    border-radius: 50%;
+    box-shadow: 0 0 0 1.5px var(--bg);
+    transform: translateY(var(--dy, 0));
+  }
+  .dot.best {
+    width: 12px;
+    height: 12px;
+    margin: -6px 0 0 -6px;
+    z-index: 1;
+  }
+  .name {
+    position: absolute;
+    top: 16px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    line-height: 1.2;
+    color: var(--ink);
+    white-space: nowrap;
+  }
+  .name.center {
+    transform: translateX(-50%);
+  }
+  .name.end {
+    transform: translateX(-100%);
+  }
+
+  /* The figure: the number, its unit, and which spec it belongs to. */
+  .card .fig {
+    grid-column: 2;
+    grid-row: 1 / span 3;
+    align-self: center;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    text-align: right;
+    line-height: 1.25;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+  .card .fig .v {
+    font-size: 1.1rem;
+    font-weight: 650;
+    color: var(--ink);
+  }
+  /* A clear winner among several specs. */
+  .card .fig .v.win {
+    color: var(--accent-ink);
+  }
+  .card .fig .u {
     font-size: 0.78rem;
     color: var(--ink-2);
   }
-  .metric {
-    grid-column: 1 / -1;
-    font-size: 0.72rem;
-    font-weight: 600;
+  .card .fig .w {
+    font-size: 0.78rem;
     color: var(--muted);
-  }
-  .brow {
-    display: contents;
-  }
-  .bl {
-    min-width: 0;
-    white-space: nowrap;
+    max-width: 12rem;
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  .track {
-    display: flex;
-    height: 8px;
-    border-radius: 2px;
-    background: var(--surface-2);
-    overflow: hidden;
-  }
-  .track i {
-    display: block;
-    height: 100%;
-  }
-  .track i.spread {
-    background: repeating-linear-gradient(135deg, var(--c) 0 2px, transparent 2px 4px);
-  }
-  .bv {
-    font-weight: 650;
-    color: var(--ink);
-    font-variant-numeric: tabular-nums;
-    text-align: right;
-    white-space: nowrap;
-  }
-  /* On a phone the label takes what the bar and figure leave, and wraps rather than cutting a spec's name short.
-     After the rules above, so it overrides them. */
+  /* On a phone the figure goes under the strip, at the left, so the strip keeps its width. */
   @media (max-width: 640px) {
-    .bars {
-      grid-template-columns: minmax(0, 1fr) 84px auto;
+    .card {
+      grid-template-columns: minmax(0, 1fr);
     }
-    .bl {
-      white-space: normal;
+    .card .fig {
+      grid-column: 1;
+      grid-row: auto;
+      margin-top: 4px;
+      flex-direction: row;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 0 6px;
+      text-align: left;
     }
-  }
-  .slo-tag {
-    align-self: flex-start;
-    margin-top: 6px;
+    .card .fig .u + .w::before {
+      content: '· ';
+    }
   }
 </style>

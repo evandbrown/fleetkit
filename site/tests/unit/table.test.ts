@@ -86,7 +86,7 @@ describe('the rows', () => {
       ['slos', true, false],
       ['support', false, false],
     ]);
-    expect(rows.filter((r) => r.shown).map((r) => r.label)).toEqual(['Host', 'Hypervisor', 'MicroVM', 'Densities', 'Replicas', 'SLOs']);
+    expect(rows.filter((r) => r.shown).map((r) => r.label)).toEqual(['Host', 'Hypervisor', 'MicroVM', 'Browsers per host', 'Replicas', 'SLOs']);
     expect(find(rows, 'host').values).toEqual([
       { main: 'm8i.4xlarge', sub: `16${NB}vCPU · 64${NB}GiB · nested` },
       { main: 'm8i.2xlarge', sub: `8${NB}vCPU · 32${NB}GiB · nested` },

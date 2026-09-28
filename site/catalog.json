@@ -7,7 +7,7 @@
       "id": "cap-baseline-1",
       "title": "baseline",
       "question": "How many microVMs fit on one m8i.4xlarge?",
-      "answer": "One m8i.4xlarge (16 vCPUs) held 8 microVMs of 2 vCPU / 2 GiB, 0.50 microVMs per host vCPU; 12 failed. Host CPU ran out first; 9–11 were not tried.",
+      "answer": "One m8i.4xlarge (16 vCPUs) held 8 browsers of 2 vCPU / 2 GiB, ≈ $0.141 per 1,000 tasks. Host CPU ran out first at 12; 9–11 were not tried.",
       "whys": {
         "baseline": "The starting point for every later campaign"
       },
@@ -28,7 +28,7 @@
     {
       "id": "nested-sizes-1",
       "title": "m8i_host_size",
-      "answer": "Close: m8i.4xlarge (16 vCPUs) held 9 microVMs on both replicas and m8i.2xlarge (8 vCPUs) held 4, 0.56 against 0.50 microVMs per host vCPU. Host CPU ran out first on every host.",
+      "answer": "Close: m8i.4xlarge (16 vCPUs) held 9 browsers at ≈ $0.150 per 1,000 tasks, m8i.2xlarge (8 vCPUs) held 4 at ≈ $0.132. Host CPU ran out first on both.",
       "whys": {
         "m8i-4xlarge": "The same host as the baseline campaign",
         "m8i-2xlarge": "Half the vCPUs of the same family"
@@ -41,7 +41,7 @@
     {
       "id": "nested-mem-1",
       "title": "host_memory",
-      "answer": "No: with 4 GiB microVMs, c8i.4xlarge (32 GiB) held 9 microVMs on both replicas and m8i.4xlarge (64 GiB) held 9 and 8. Host CPU ran out first on every host, never memory.",
+      "answer": "No: with 4 GiB browsers, c8i.4xlarge (32 GiB) held 9 at ≈ $0.139 per 1,000 tasks and m8i.4xlarge (64 GiB) held 8 at ≈ $0.150. Host CPU ran out first on both, never memory.",
       "whys": {
         "m8i-4xlarge": "The 16-vCPU host again, with 64 GiB of memory",
         "c8i-4xlarge": "The same vCPUs with half the memory, 32 GiB"
@@ -54,7 +54,7 @@
     {
       "id": "nested-hv-1",
       "title": "hypervisor",
-      "answer": "Yes: Cloud Hypervisor and Firecracker each held 9 microVMs on both m8i.4xlarge replicas; Firecracker with MMIO devices and no random-number device held 8 and 9. Host CPU ran out first every time.",
+      "answer": "Yes: Cloud Hypervisor held 9 browsers on m8i.4xlarge (16 vCPUs) at ≈ $0.145 per 1,000 tasks, Firecracker 9 at ≈ $0.146, Firecracker with MMIO 8 at ≈ $0.144. Host CPU ran out first every time.",
       "whys": {
         "firecracker": "Firecracker set up with the same devices as Cloud Hypervisor",
         "cloud-hypervisor": "Cloud Hypervisor instead of Firecracker",
@@ -69,7 +69,7 @@
     {
       "id": "hv-host-2",
       "title": "metal_host",
-      "answer": "One m8i.metal-48xl held at least 192 microVMs, 1.0 microVMs per host vCPU, one burst costing $0.216–0.221 per 1,000 tasks; every density passed. It was judged at the design's step targets, with task p95 within 5 s and ready within 900 s; the harness caps a host at 200.",
+      "answer": "One m8i.metal-48xl (192 vCPUs) held at least 192 browsers, every count passing; the harness caps a host at 200. One burst cost ≈ $0.219 per 1,000 tasks, judged at the design's step targets, task p95 within 5 s and ready within 900 s.",
       "whys": {
         "firecracker-metal": "The first metal host tried"
       },
@@ -78,14 +78,14 @@
       },
       "notes": [
         "Its step targets are the design's (p50 within 2 s, p95 within 3 s), not the nested campaigns' 1 s and 2 s.",
-        "Every density passed. A host runs at most 200 microVMs in this harness, so the limit is above 192."
+        "Every browser count passed. A host runs at most 200 microVMs in this harness, so the limit is above 192."
       ]
     },
     {
       "id": "hv-host-3",
       "title": "metal_host_tight_slo",
       "question": "At the nested campaigns' step targets (p50 within 1 s, p95 within 2 s), how many microVMs fit on a metal host?",
-      "answer": "One m8i.metal-48xl (192 vCPUs) held 140 microVMs at $0.121–0.126 per 1,000 tasks, 0.73 microVMs per host vCPU against 0.56 on a nested m8i.4xlarge. Host CPU ran out first at 144.",
+      "answer": "One m8i.metal-48xl (192 vCPUs) held 140 browsers at ≈ $0.123 per 1,000 tasks, against 9 at ≈ $0.150 on a nested m8i.4xlarge (16 vCPUs, m8i_host_size). Host CPU ran out first at 144.",
       "whys": {
         "firecracker-metal": "The metal host again, held to the nested campaigns' step targets"
       },
@@ -94,13 +94,13 @@
       },
       "notes": [
         "The same SLO as the nested campaigns: each step's p50 within 1 s and p95 within 2 s.",
-        "Densities are close together between 128 and 144, around where hv-host-2's trials would have crossed this SLO."
+        "The browser counts tested are close together between 128 and 144, around where hv-host-2's trials would have crossed this SLO."
       ]
     },
     {
       "id": "c8i-sizes-1",
       "title": "small_c8i_hosts",
-      "answer": "Only the smallest did: c8i.xlarge held 2 microVMs at $0.105–0.111 per 1,000 tasks, against $0.117–0.147 on the larger hosts, all 0.50–0.56 microVMs per host vCPU. Host CPU ran out first everywhere: c8i.2xlarge held 4, c8i.4xlarge 8–9, m8i.4xlarge 9.",
+      "answer": "Yes, at every step down: c8i.xlarge cost ≈ $0.108 per 1,000 tasks, c8i.2xlarge ≈ $0.118, c8i.4xlarge ≈ $0.124 and m8i.4xlarge ≈ $0.146. Host CPU ran out first on every host.",
       "whys": {
         "m8i-4xlarge": "2 vCPU / 2 GiB on m8i.4xlarge, for comparison",
         "c8i-4xlarge": "The same vCPUs as m8i.4xlarge at a lower price",
@@ -117,7 +117,7 @@
     {
       "id": "shape-cold-1",
       "title": "microvm_size_cold",
-      "answer": "No, not started cold: on c8i.xlarge, 1-vCPU microVMs held 2 and 1 against 2 for 2-vCPU, one burst costing $0.148–0.288 against $0.137–0.140 per 1,000 tasks. With 1 vCPU the host was never full; each microVM's own vCPU was busy starting up.",
+      "answer": "No, not started cold: on c8i.xlarge, 2 vCPU / 2 GiB cost ≈ $0.107 per 1,000 tasks; 1 vCPU / 2 GiB held 1 browser, one burst costing ≈ $0.217. With 1 vCPU the host was never full: each browser's own vCPU was busy starting up.",
       "whys": {
         "c8i-xlarge": "2 vCPU / 2 GiB on c8i.xlarge, for comparison",
         "c8i-xlarge-1vcpu": "One vCPU per microVM instead of two",
@@ -132,7 +132,7 @@
     {
       "id": "shape-warm-1",
       "title": "microvm_size_warm",
-      "answer": "No: over the microVM's whole life, 2-vCPU microVMs cost $0.108–0.120 per 1,000 tasks against $0.100–0.105 for 1 vCPU / 1 GiB. Warm, 1 vCPU / 1 GiB microVMs held 4 on c8i.xlarge, 1.0 microVMs per host vCPU; host CPU ran out.",
+      "answer": "No: warm, 2 vCPU / 2 GiB cost ≈ $0.114 per 1,000 tasks against ≈ $0.107 cold (microvm_size_cold). Warm, 1 vCPU / 1 GiB was cheapest at ≈ $0.101 and 1 vCPU / 2 GiB ≈ $0.103, each holding 4 browsers on c8i.xlarge; host CPU ran out first.",
       "whys": {
         "c8i-xlarge": "2 vCPU / 2 GiB on c8i.xlarge, now with a warm start",
         "c8i-xlarge-1vcpu": "One vCPU per microVM instead of two",
@@ -149,7 +149,7 @@
     {
       "id": "browser-lean-1",
       "title": "chromium_no_preload",
-      "answer": "Yes: without the preload c8i.xlarge held 3–4 microVMs instead of 2, at $0.092–0.106 instead of $0.105–0.109 per 1,000 tasks. On m8i.4xlarge it held 13 instead of 9, at $0.130–0.134 instead of $0.144–0.149; host CPU ran out first everywhere.",
+      "answer": "Yes: without the preload c8i.xlarge cost ≈ $0.099 per 1,000 tasks instead of ≈ $0.108, and m8i.4xlarge ≈ $0.133 instead of ≈ $0.146. Host CPU ran out first everywhere.",
       "whys": {
         "c8i-xlarge": "2 vCPU / 2 GiB on c8i.xlarge, for comparison",
         "c8i-xlarge-nopre": "The same spec with the omnibox preload turned off",
@@ -167,7 +167,7 @@
       "id": "metal-lean-1",
       "title": "metal_chromium_no_preload",
       "question": "Does headless Chromium without its omnibox preload fit more microVMs on a metal host?",
-      "answer": "Yes: without the preload one m8i.metal-48xl (192 vCPUs) held at least 200 microVMs (the harness's cap), 1.04 microVMs per host vCPU. With it the same spec held 140 (metal_host_tight_slo); one burst fell from $0.218–0.219 to $0.182–0.190 per 1,000 tasks.",
+      "answer": "Yes: without the preload one m8i.metal-48xl (192 vCPUs) held at least 200 browsers, the harness's cap, against 140 with it (metal_host_tight_slo). One burst cost ≈ $0.186 per 1,000 tasks instead of ≈ $0.219.",
       "whys": {
         "firecracker-metal-nopre": "The metal host again, with the omnibox preload turned off"
       },
@@ -179,7 +179,7 @@
       "id": "guest-cold-1",
       "title": "guest_boot_tuning",
       "question": "Do a quiet guest console and huge pages cut CPU per task on headless Chromium without its omnibox preload?",
-      "answer": "Huge pages moved c8i.xlarge from 3 microVMs to 5–6, cutting cost from $0.089–0.092 to $0.063–0.074 per 1,000 tasks; a quiet console held 3 at $0.081–0.083. With both, the 1 vCPU / 1 GiB guest held 6 at $0.038–0.047 (host CPU ran out); m8i.4xlarge rose from 13 to at least 18.",
+      "answer": "Yes, huge pages most: on c8i.xlarge the default guest cost ≈ $0.090 per 1,000 tasks, quiet console ≈ $0.082, huge pages ≈ $0.067, both ≈ $0.060 and 1 vCPU / 1 GiB tuned ≈ $0.042. On m8i.4xlarge huge pages cut ≈ $0.132 to ≈ $0.079; host CPU ran out first.",
       "whys": {
         "c8i-xlarge-lean": "The guest unchanged, for comparison",
         "c8i-xlarge-quiet": "The guest boots without console output or a keyboard probe",
@@ -203,7 +203,7 @@
       "id": "stack-warm-1",
       "title": "tuned_guest_warm_start",
       "question": "With a 5 s warm start, is the tuned guest (1 vCPU / 1 GiB, no omnibox preload, a quiet console, huge pages) cheaper per task than a 2 vCPU / 2 GiB microVM?",
-      "answer": "Yes: warm, the tuned guest held 6 microVMs on c8i.xlarge at $0.039–0.049 per 1,000 tasks, against 4 at $0.103–0.107 for 2 vCPU / 2 GiB. Plain 1 vCPU / 1 GiB microVMs held 4–5 at $0.076–0.081; host CPU ran out first, and cold the tuned guest also held 6.",
+      "answer": "Yes: warm, 1 vCPU / 1 GiB tuned cost ≈ $0.043 per 1,000 tasks against ≈ $0.106 for 2 vCPU / 2 GiB and ≈ $0.079 for plain 1 vCPU / 1 GiB. Host CPU ran out first; cold, the tuned guest cost the same (guest_boot_tuning).",
       "whys": {
         "c8i-xlarge-lean": "The spec the tuned guest has to beat",
         "c8i-xlarge-1vcpu-1gib-lean": "The smaller microVM alone, without the guest tuning",
@@ -221,7 +221,7 @@
       "id": "host16-stack-1",
       "title": "tuned_guest_host_size",
       "question": "Is the tuned guest (1 vCPU / 1 GiB, no omnibox preload, a quiet console, huge pages) cheaper per task on a 4-vCPU or a 16-vCPU c8i host?",
-      "answer": "The 4-vCPU host is cheaper: c8i.xlarge held 6–7 microVMs at $0.038–0.047 per 1,000 tasks, c8i.4xlarge 25–28 at $0.046–0.053. Host CPU ran out first on both.",
+      "answer": "The 4-vCPU host is cheaper: c8i.xlarge cost ≈ $0.043 per 1,000 tasks, c8i.4xlarge (16 vCPUs) ≈ $0.046 and m8i.4xlarge not tuned ≈ $0.133. Host CPU ran out first on all three.",
       "featured_spec": "c8i-xlarge-stack",
       "whys": {
         "c8i-xlarge-stack": "The tuned guest on the 4-vCPU host",
@@ -238,7 +238,7 @@
       "id": "metal-stack-1",
       "title": "tuned_guest_metal",
       "question": "Is the tuned guest (1 vCPU / 1 GiB, no omnibox preload, a quiet console, huge pages) cheaper per task on a metal host than on c8i.xlarge?",
-      "answer": "No: on m8i.metal-48xl the tuned guest held at least 200 microVMs; one burst cost $0.163–0.165 per 1,000 tasks against $0.039–0.049 on c8i.xlarge. With 4 KiB pages it held 192 at $0.178–0.187 per 1,000 tasks, host CPU running out at 200; the harness caps a host at 200.",
+      "answer": "No: on m8i.metal-48xl (192 vCPUs) the tuned guest held at least 200 browsers, the harness's cap, and one burst cost ≈ $0.164 per 1,000 tasks against ≈ $0.044 for one on c8i.xlarge (tuned_guest_host_size). With 4 KiB pages it held 192, one burst ≈ $0.183; host CPU ran out at 200.",
       "whys": {
         "metal-stack": "The tuned guest on a whole metal host",
         "metal-stack-4k": "The same guest without huge pages, for comparison"

@@ -7,7 +7,7 @@
   "ended": "2026-09-28T09:24Z",
   "status": "complete",
   "definition_path": "experiments/campaigns/browser-lean-1.json",
-  "answer": "Yes: without the preload c8i.xlarge held 3–4 microVMs instead of 2, at $0.092–0.106 instead of $0.105–0.109 per 1,000 tasks. On m8i.4xlarge it held 13 instead of 9, at $0.130–0.134 instead of $0.144–0.149; host CPU ran out first everywhere.",
+  "answer": "Yes: without the preload c8i.xlarge cost ≈ $0.099 per 1,000 tasks instead of ≈ $0.108, and m8i.4xlarge ≈ $0.133 instead of ≈ $0.146. Host CPU ran out first everywhere.",
   "definition": {
     "name": "browser-lean-1",
     "question": "Does turning off headless Chromium's hidden omnibox preload lower CPU per task?",

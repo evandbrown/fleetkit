@@ -62,7 +62,7 @@ describe('the contract refuses what breaks a rule', () => {
     expect(checkCampaign(bad)).toEqual([]);
   });
   it("a question reworded from the definition's is allowed, an empty one is not", () => {
-    const question = 'Is density per host vCPU the same on 8 and 16 vCPU hosts?';
+    const question = 'Are browsers per vCPU the same on 8 and 16 vCPU hosts?';
     expect(checkCampaign({ ...structuredClone(c), question }, { ...entry, question })).toEqual([]);
     expect(checkCampaign({ ...structuredClone(c), question: '' }).join('\n')).toMatch(/question is empty/);
   });

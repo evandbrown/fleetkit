@@ -196,7 +196,7 @@ export function checkCampaign(doc: CampaignDoc, entry?: Index['campaigns'][numbe
     if (!same(r.by_density.map((b) => b.density), spec.spec.densities)) p.push(`${wr}: by_density doesn't list the spec's densities`);
     for (const b of r.by_density) {
       if (b.trial_results.length !== b.trials || b.trial_results.filter(Boolean).length !== b.passed) {
-        p.push(`${wr} density ${b.density}: trial_results disagree with passed and trials`);
+        p.push(`${wr} at ${b.density} browsers: trial_results disagree with passed and trials`);
       }
     }
     const core = runResultCore(r.by_density);
@@ -206,9 +206,9 @@ export function checkCampaign(doc: CampaignDoc, entry?: Index['campaigns'][numbe
     const t = r.result.tested_successfully;
     if (!close(r.result.per_host_vcpu, t === null ? null : t / r.host.vcpus)) p.push(`${wr}: per_host_vcpu ≠ result ÷ host vCPUs`);
     if (!close(r.result.midpoint_per_host_vcpu, midpoint(t, r.result.first_failed, r.host.vcpus))) p.push(`${wr}: midpoint doesn't follow rule 6`);
-    if ((r.result.first_failed === null) !== (r.result.limit === null)) p.push(`${wr}: a limit exists exactly when a density failed`);
+    if ((r.result.first_failed === null) !== (r.result.limit === null)) p.push(`${wr}: a limit exists exactly when a browser count failed`);
     if (r.result.limit && r.result.limit.density !== r.result.first_failed) p.push(`${wr}: limit.density ≠ first_failed`);
-    if (t === null && r.result.cost_per_1000_tasks !== null) p.push(`${wr}: cost only when a density passed`);
+    if (t === null && r.result.cost_per_1000_tasks !== null) p.push(`${wr}: cost only when a browser count passed`);
   }
 
   // Outcomes per spec, from the runs.
@@ -258,13 +258,13 @@ export function checkRun(run: RunDoc, campaign: CampaignDoc): string[] {
       if (!t.counts) p.push(`${wt}: a d<n>-t<k> id is only for trials that count`);
       if (parsed.density !== t.density || parsed.number !== t.number) p.push(`${wt}: id doesn't match density and number`);
       const next = (numbers.get(t.density) ?? 0) + 1;
-      if (t.number !== next) p.push(`${wt}: number should be ${next} (numbered from 1 within its density, no gaps)`);
+      if (t.number !== next) p.push(`${wt}: number should be ${next} (numbered from 1 within its browser count, no gaps)`);
       numbers.set(t.density, next);
       if (t.passed === null) p.push(`${wt}: a trial that counts has a pass value`);
       else if (t.passed !== meetsEveryCriterion(t)) p.push(`${wt}: passed is ${t.passed} but rule 1 gives ${!t.passed}`);
       if (t.passed === false && t.failed.length === 0) p.push(`${wt}: a failed trial says which criteria it failed`);
       if (t.passed === true && t.failed.length) p.push(`${wt}: a passed trial lists no failures`);
-      if (!spec.spec.densities.includes(t.density)) p.push(`${wt}: density ${t.density} isn't in the spec`);
+      if (!spec.spec.densities.includes(t.density)) p.push(`${wt}: ${t.density} browsers isn't in the spec's list`);
     } else {
       if (parsed.role !== t.role) p.push(`${wt}: id doesn't match role ${t.role}`);
       const k = (nth.get(t.role) ?? 0) + 1;
@@ -274,7 +274,7 @@ export function checkRun(run: RunDoc, campaign: CampaignDoc): string[] {
       if (!t.excluded_because) p.push(`${wt}: say why it isn't judged`);
       if (t.cost_per_1000_tasks !== null) p.push(`${wt}: no cost for a labelled trial`);
     }
-    if (t.tasks.of > t.density || t.ready.microvms > t.density) p.push(`${wt}: more tasks or microVMs than its density`);
+    if (t.tasks.of > t.density || t.ready.microvms > t.density) p.push(`${wt}: more tasks or microVMs than its browser count`);
   }
 
   // Per density: rule 3 and the derived columns.
@@ -283,16 +283,16 @@ export function checkRun(run: RunDoc, campaign: CampaignDoc): string[] {
     p.push(`${w}: by_density doesn't follow rule 3 from the trials`);
   }
   for (const d of run.by_density) {
-    const wd = `${w} density ${d.density}`;
+    const wd = `${w} at ${d.density} browsers`;
     const at = run.trials.filter((t) => t.counts && t.density === d.density).sort((a, b) => a.number! - b.number!);
     if (!same(d.trial_ids, at.map((t) => t.id))) p.push(`${wd}: trial_ids`);
     if (!same(d.trial_results, at.map((t) => t.passed))) p.push(`${wd}: trial_results`);
     if (d.vcpus_allocated !== d.density * spec.spec.microvm.vcpus) p.push(`${wd}: vcpus_allocated`);
-    if (d.cost_per_1000_tasks && d.result !== 'passed') p.push(`${wd}: cost only at densities that passed`);
+    if (d.cost_per_1000_tasks && d.result !== 'passed') p.push(`${wd}: cost only at browser counts that passed`);
     if (d.cost_per_1000_tasks) {
       // Rule 5: each range is over the trials at the density; the steady-state range only when every trial has one.
       const costs = at.map((t) => t.cost_per_1000_tasks);
-      if (costs.some((c) => !c)) p.push(`${wd}: cost at a density needs a cost on every trial there`);
+      if (costs.some((c) => !c)) p.push(`${wd}: cost at a browser count needs a cost on every trial there`);
       else {
         for (const k of ['execution', 'observed', 'observed_charged'] as const) {
           if (!same(d.cost_per_1000_tasks[k], rangeOf(costs.map((c) => c![k])))) p.push(`${wd}: ${k} cost isn't the range over its trials`);
@@ -305,7 +305,7 @@ export function checkRun(run: RunDoc, campaign: CampaignDoc): string[] {
   const t = run.result.tested_successfully;
   if (t !== null) {
     const d = run.by_density.find((b) => b.density === t);
-    if (!same(d?.cost_per_1000_tasks ?? null, run.result.cost_per_1000_tasks)) p.push(`${w}: result cost ≠ cost at its result's density`);
+    if (!same(d?.cost_per_1000_tasks ?? null, run.result.cost_per_1000_tasks)) p.push(`${w}: result cost ≠ cost at its result's browser count`);
   }
   for (const tr of run.trials.filter((x) => x.counts && x.cost_per_1000_tasks && x.marks.release_ms !== null && x.marks.last_return_ms !== null)) {
     const secs = (tr.marks.last_return_ms! - tr.marks.release_ms!) / 1000;
@@ -331,7 +331,7 @@ export function checkRun(run: RunDoc, campaign: CampaignDoc): string[] {
     }
     if (c.host_cpu_per_task_s !== null && c.host_cpu_per_task_s <= 0) p.push(`${wt}: host CPU per task is positive`);
     const has = c.host_cpu_per_task_s !== null && (fullAt.get(tr.density) ?? false);
-    if ((c.steady_state !== null) !== has) p.push(`${wt}: a steady-state cost exactly when its density kept the host full and its CPU per task is known`);
+    if ((c.steady_state !== null) !== has) p.push(`${wt}: a steady-state cost exactly when its browser count kept the host full and its CPU per task is known`);
     // Costs are under a dollar, so close()'s tolerance is absolute here: 0.001 leaves room only for the rounding.
     if (c.steady_state !== null && !close(c.steady_state, steadyStatePer1000(spec.host.price_usd_per_hour, run.host.vcpus, c.host_cpu_per_task_s!), 1e-3)) {
       p.push(`${wt}: steady-state cost doesn't follow rule 5`);
@@ -362,7 +362,7 @@ export function checkTrial(doc: TrialDoc, run: RunDoc): string[] {
   if (s.density !== doc.density || s.number !== doc.number || s.role !== doc.role) p.push(`${w}: density/number/role differ from the run's summary`);
   if (!same(s.marks, doc.marks)) p.push(`${w}: marks differ from the run's summary`);
   if (!same(doc.microvms.map((m) => m.index), doc.microvms.map((_, i) => i + 1))) p.push(`${w}: microVMs are indexed 1..N`);
-  if (doc.microvms.length !== doc.density) p.push(`${w}: ${doc.microvms.length} microVMs at density ${doc.density}`);
+  if (doc.microvms.length !== doc.density) p.push(`${w}: ${doc.microvms.length} microVMs at ${doc.density} browsers`);
   if (s.attribution && !same(s.attribution.verdicts, doc.limit.verdicts)) p.push(`${w}: limit verdicts differ from the run's summary`);
   const full = fullSizeTrials(run.trials, run.result.tested_successfully, run.result.first_failed).has(doc.id);
   if (doc.full_size_screenshots !== full) p.push(`${w}: full_size_screenshots should be ${full} (rule 10)`);

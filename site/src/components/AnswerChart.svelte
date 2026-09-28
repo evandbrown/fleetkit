@@ -1,41 +1,136 @@
 <script lang="ts">
-  // How each spec performed, as one chart with its figures beside it. A row per spec: a bar per run (replica) from 0
-  // to the highest density that met every SLO, hatched on to the first density that failed (✕), and a tick at the
-  // spec's midpoint; then the highest density, per host vCPU, cost per 1,000 tasks and what ran out. Each bar and
-  // replica label opens its run. On one host size the axis is the density; across sizes, density per host vCPU.
+  // How each spec performed: one row per spec. Its colour dot and name; a strip on one shared axis (browsers per
+  // vCPU when the specs' hosts differ in vCPUs, else browsers per host) with one thin lane per replica: a dot at its
+  // last pass, a × at its first failure and a faint line between them in the spec's colour, so five replicas read as
+  // five strokes and the eye counts them; a tick at the spec's midpoint spans the lanes. Hovering a lane names the
+  // replica and its figures. Then the cost per 1,000 tasks as one number (D102) with a bar under it scaled to the
+  // dearest spec, and what ran out. The clear winner on cost is highlighted; when there is none, one muted phrase
+  // says so. The replica links live in "Every trial and replica" under this chart. The axis ticks sit once above the
+  // first row, with the axis title at their left; the row reads out whole to a screen reader.
   import * as f from '../lib/format';
   import { specColor } from '../lib/colors';
   import { tickText } from '../lib/bands';
   import { niceDomain } from '../lib/scale';
   import { ticks as d3ticks } from 'd3-array';
-  import type { AnswerRow } from '../lib/shape';
+  import type { AnswerRow, AnswerRun } from '../lib/shape';
+  import { browsers } from '../lib/glossary';
   import Mark from './Mark.svelte';
+  import Term from './Term.svelte';
 
   let { rows, campaigns = false }: { rows: AnswerRow[]; campaigns?: boolean } = $props();
 
+  const COST_TERM = 'Steady state: what a full fleet pays per 1,000 tasks, boot included. Hover a figure for its range and the one burst it was measured from.';
+  /** Lanes are this many px apart; five of them sit inside the 44 px row. */
+  const PITCH = 5;
+
   const perVcpu = $derived(new Set(rows.flatMap((r) => r.runs.map((x) => x.hostVcpus))).size > 1);
+  const axisTitle = $derived(perVcpu ? 'Browsers per vCPU' : 'Browsers per host');
   const v = (d: number, vcpus: number) => (perVcpu ? d / vcpus : d);
+  /** The axis's top: a round number at or above the highest count marked, in about five steps. */
   const top = $derived(
     niceDomain(
-      rows.flatMap((r) => r.runs.flatMap((x) => [x.failed, x.passed].filter((d): d is number => d !== null).map((d) => v(d, x.hostVcpus) * 1.04))),
-      { count: 6 },
+      rows.flatMap((r) => r.runs.flatMap((x) => [x.failed, x.passed].filter((d): d is number => d !== null).map((d) => v(d, x.hostVcpus)))),
+      { count: 5 },
     )[1],
   );
-  const pos = (x: number) => `${Math.max(0, Math.min(100, (x / top) * 100))}%`;
-  const axis = $derived(d3ticks(0, top, perVcpu ? 5 : 8).filter((t) => t <= top + 1e-9 && (perVcpu || Number.isInteger(t))));
+  const pct = (x: number) => Math.max(0, Math.min(100, (x / top) * 100));
+  const pos = (x: number) => `${pct(x)}%`;
+  const axis = $derived(d3ticks(0, top, 5).filter((t) => t <= top + 1e-9 && (perVcpu || Number.isInteger(t))));
   const midX = (r: AnswerRow) => (r.midpoint === null ? null : perVcpu ? r.midpoint : r.midpoint * r.hostVcpus);
+  /** "1.68" per vCPU; "10" or "9.5" per host. */
+  const midText = (mid: number) => f.num(mid, perVcpu ? 2 : Number.isInteger(mid) ? 0 : 1);
   const replicas = $derived(rows.some((r) => r.runs.length > 1));
-  const runLabel = (k: number) => (replicas ? `replica ${k}` : 'run');
+  const costed = $derived(rows.filter((r) => r.costValue !== null).length);
+  const noWinner = $derived(costed > 1 && !rows.some((r) => r.best));
+
+  /** One lane per replica that ran: where its marks go, in % of the strip, and its title. */
+  interface Lane {
+    replica: number;
+    /** Its offset from the strip's middle, px. */
+    dy: number;
+    pass: string | null;
+    /** The last pass is where the replica stopped without a failure: a dashed ring instead of a dot. */
+    early: boolean;
+    fail: string | null;
+    /** The connector from the last pass to the first failure. */
+    line: { left: string; width: string } | null;
+    title: string;
+  }
+  function lanes(r: AnswerRow): Lane[] {
+    const runs = r.runs.filter((x) => x.href);
+    const n = runs.length;
+    return runs.map((x, i) => {
+      const early = x.failed === null && x.stoppedEarly;
+      const p = x.passed === null ? null : v(x.passed, x.hostVcpus);
+      const q = x.failed === null ? null : v(x.failed, x.hostVcpus);
+      const parts = [
+        x.passed !== null ? `${early ? 'stopped early after' : 'last pass at'} ${browsers(x.passed)}` : 'none passed',
+        x.failed !== null ? `first failure at ${browsers(x.failed)}` : early ? null : 'no failure',
+      ].filter(Boolean);
+      return {
+        replica: x.replica,
+        dy: (i - (n - 1) / 2) * PITCH,
+        pass: p === null ? null : pos(p),
+        early,
+        fail: q === null ? null : pos(q),
+        line: p !== null && q !== null ? { left: pos(Math.min(p, q)), width: `${Math.abs(pct(q) - pct(p))}%` } : null,
+        title: `${replicas ? `Replica ${x.replica}: ` : ''}${parts.join(', ')}`,
+      };
+    });
+  }
+
+  /** One entry per distinct count for the readout: the replicas that agree stack, and `n` says how many. */
+  interface Stack {
+    at: number;
+    n: number;
+  }
+  const stack = (runs: AnswerRun[], of: (x: AnswerRun) => number | null): Stack[] => {
+    const tally = new Map<number, number>();
+    for (const run of runs) {
+      const d = of(run);
+      if (d !== null) tally.set(d, (tally.get(d) ?? 0) + 1);
+    }
+    return [...tally].sort((a, b) => a[0] - b[0]).map(([at, n]) => ({ at, n }));
+  };
+  /** The replicas' marks: last passes, first failures, and the last passes of replicas that stopped without a failure. */
+  const marks = (r: AnswerRow) => ({
+    pass: stack(r.runs, (x) => (x.href && !(x.failed === null && x.stoppedEarly) ? x.passed : null)),
+    fail: stack(r.runs, (x) => (x.href ? x.failed : null)),
+    early: stack(r.runs, (x) => (x.href && x.failed === null && x.stoppedEarly ? x.passed : null)),
+  });
+  const ran = (r: AnswerRow) => r.runs.some((x) => x.href);
+  const stoppedEarly = $derived(rows.some((r) => r.runs.some((x) => x.href && x.failed === null && x.stoppedEarly)));
+
+  /** The row read out: "c8i.xlarge: last pass at 6 in 4 replicas and 7 in 1, first failure at 7 in 4 and 8 in 1; midpoint …". */
+  function readout(r: AnswerRow): string {
+    if (!ran(r)) return `${r.label}: not run yet`;
+    const m = marks(r);
+    const list = (xs: Stack[]) => xs.map((s) => `${s.at}${replicas ? ` in ${s.n === 1 ? '1 replica' : `${s.n} replicas`}` : ''}`).join(', ');
+    const parts = [
+      m.pass.length ? `last pass at ${list(m.pass)}` : null,
+      m.early.length ? `stopped early after ${list(m.early)}` : null,
+      m.fail.length ? `first failure at ${list(m.fail)}` : 'no failure',
+      !m.pass.length && !m.early.length ? 'none passed' : null,
+    ].filter(Boolean);
+    const mid = midX(r);
+    const cost = r.cost ? `≈ ${r.cost} per 1,000 tasks` : r.burst ? `one burst ≈ ${r.burst} per 1,000 tasks, no steady-state figure` : 'no cost';
+    return `${r.label}: ${parts.join(', ')}${mid !== null ? `; midpoint ${midText(mid)} ${perVcpu ? 'browsers per vCPU' : 'browsers per host'}` : ''}; ${cost}; ran out: ${r.ranOut}${r.ranOutAt ? ` ${r.ranOutAt}` : ''}${r.best ? '; the clear winner on cost' : ''}`;
+  }
 </script>
 
-<div class="answer" class:replicas>
-  <div class="head" aria-hidden="true">
+<div class="answer">
+  <div class="head">
     <span>Spec</span>
-    <span class="chartcol">Densities that met every SLO</span>
-    <span class="num">Max density</span>
-    <span class="num">Per vCPU</span>
-    <span class="num">$ / 1k tasks</span>
+    <!-- The axis title, on a phone only: wider, it sits on the tick row. -->
+    <span class="chartcol phone-title">{axisTitle}</span>
+    <span class="num"><Term text={COST_TERM}>$ / 1k tasks</Term></span>
     <span>Ran out</span>
+  </div>
+  <div class="axis" aria-hidden="true">
+    <span class="axis-title">{axisTitle}</span>
+    <span class="chartcol ticks">
+      {#each axis as t, i (t)}<span class="t" class:first={i === 0} class:last={i === axis.length - 1} style:left={pos(t)}>{tickText(t, perVcpu)}</span>{/each}
+    </span>
   </div>
   <ol aria-label="How each spec performed">
     {#each rows as r, i (r.key)}
@@ -43,108 +138,101 @@
         <li class="group" aria-hidden="true">{r.campaignTitle}</li>
       {/if}
       {@const mid = midX(r)}
-      <li class="spec" style:--c={specColor(r.series)}>
-        <p class="name"><i class="dot" aria-hidden="true"></i>{r.label}</p>
-        <div class="chartcol bars">
-          {#each r.runs as run (run.runId)}
-            {@const p = run.passed === null ? null : v(run.passed, run.hostVcpus)}
-            {@const x = run.failed === null ? null : v(run.failed, run.hostVcpus)}
-            {@const aria = `${r.label}, ${runLabel(run.replica)}: ${run.passed === null ? 'none passed' : `passed up to ${run.passed}`}${run.failed === null ? (run.stoppedEarly ? ', stopped early' : '') : `, failed at ${run.failed}`}`}
-            <svelte:element this={run.href ? 'a' : 'div'} class="run" href={run.href} aria-label={run.href ? `${aria}. Open the run` : aria}>
-              <span class="rl" data-r={run.replica}>{runLabel(run.replica)}</span>
-              <span class="track">
-                {#if run.href === null}
-                  <span class="none">not run yet</span>
-                {:else}
-                  {#if p !== null}<span class="pass" style:width={pos(p)}><b>{run.passed}</b></span>{/if}
-                  {#if x !== null}
-                    <span class="gap" style:left={pos(p ?? 0)} style:width="calc({pos(x)} - {pos(p ?? 0)})"></span>
-                    <span class="x" style:left={pos(x)}><Mark kind="fail" size={11} /></span>
-                  {/if}
-                  {#if x === null && run.stoppedEarly}
-                    <span class="x" style:left={pos(p ?? 0)}><Mark kind="untested" size={10} /></span>
-                  {/if}
-                  {#if p === null}<span class="val" style:left="0">none passed</span>{/if}
-                  {#if x === null && run.stoppedEarly}<span class="val note" style:left={pos(p ?? 0)}>stopped early</span>{/if}
+      {@const m = marks(r)}
+      <li class="spec" class:best={r.best} style:--c={specColor(r.series)} aria-label={readout(r)}>
+        <p class="name" aria-hidden="true"><i class="dot"></i><span>{r.label}</span></p>
+        <div class="chartcol strip" aria-hidden="true">
+          {#each axis as t (t)}{#if t > 0}<i class="grid" style:left={pos(t)}></i>{/if}{/each}
+          {#if !ran(r)}
+            <span class="none">not run yet</span>
+          {:else}
+            {#each lanes(r) as l (l.replica)}
+              <span class="lane" style:top="calc(50% + {l.dy}px)" title={l.title}>
+                {#if l.line}<i class="link" style:left={l.line.left} style:width={l.line.width}></i>{/if}
+                {#if l.pass !== null}
+                  <span class="p" style:left={l.pass}>{#if l.early}<Mark kind="untested" size={7} />{:else}<i class="dot"></i>{/if}</span>
                 {/if}
+                {#if l.fail !== null}<span class="x" style:left={l.fail}><Mark kind="fail" size={7} /></span>{/if}
               </span>
-            </svelte:element>
-          {/each}
-          {#if mid !== null}
-            <span class="mid" style:left="calc(var(--rl) + (100% - var(--rl)) * {Math.min(1, mid / top)})" title="Midpoint {f.num(mid, perVcpu ? 2 : 1)}{r.partial ? ` (${r.partial})` : ''}"></span>
+            {/each}
+            {#if mid !== null}
+              <i class="mid" style:left={pos(mid)} title="Midpoint {midText(mid)}{r.partial ? ` (${r.partial})` : ''}"></i>
+            {/if}
+            {#if !m.pass.length && !m.early.length}<span class="none">none passed</span>{/if}
           {/if}
         </div>
-        <dl class="figs">
-          <div class="num"><dt>Max density</dt><dd><strong>{r.density}</strong></dd></div>
-          <div class="num"><dt>Per vCPU</dt><dd>{r.perVcpu ?? '–'}</dd></div>
-          <!-- Each cost says what it counts, in About's words: the steady-state cost (D81) is what a full fleet pays,
-               with what one burst is charged under it. Where the host wasn't full at the result there is no fleet
-               figure, so the burst stands alone and says why. -->
-          <div class="num cost">
-            <dt>$ / 1k tasks</dt>
-            <dd>
-              {#if r.cost}
-                {r.cost} <span class="what">full fleet</span><span class="burst">{r.burst} one burst</span>
-              {:else if r.burst}
-                {r.burst} <span class="what">one burst</span><span class="burst">host not full, no fleet figure</span>
-              {:else}
-                –
-              {/if}
-            </dd>
-          </div>
-          <div class="out"><dt>Ran out</dt><dd>{r.ranOut}{#if r.ranOutAt}<span class="at">{r.ranOutAt}</span>{/if}</dd></div>
-        </dl>
+        <div class="cost" aria-hidden="true" title={r.costNote}>
+          {#if r.cost}
+            <span class="v"><span class="approx">≈</span>{' '}{r.cost}</span>
+            {#if r.share !== null}<span class="bar"><i style:width="{r.share * 100}%"></i></span>{/if}
+          {:else if r.burst}
+            <span class="v burst"><Term text={r.costNote ?? ''}><span class="approx">≈</span>{' '}{r.burst}</Term></span>
+          {:else}
+            <span class="v none">—</span>
+          {/if}
+        </div>
+        <div class="out" aria-hidden="true">{r.ranOut}{#if r.ranOutAt}<span class="at">{r.ranOutAt}</span>{/if}</div>
       </li>
     {/each}
   </ol>
-  <div class="axis" aria-hidden="true">
-    <span></span>
-    <span class="chartcol ticks">
-      {#each axis as t (t)}<span class="t" style:left="calc(var(--rl) + (100% - var(--rl)) * {t / top})">{tickText(t, perVcpu)}</span>{/each}
-      <span class="title">{perVcpu ? 'Density per host vCPU' : 'Density (microVMs)'}</span>
-    </span>
-  </div>
   <p class="key" aria-hidden="true">
-    <span><i class="sw" style:background={specColor(0)}></i>met every SLO, up to the density shown</span>
-    <span><i class="sw gap-sw"></i>last pass to first failure</span>
-    <span><Mark kind="fail" size={10} />first failure</span>
-    <span><i class="sw mid-sw"></i>midpoint</span>
-    {#if rows.some((r) => r.runs.some((x) => x.failed === null && x.stoppedEarly))}<span><Mark kind="untested" size={10} />stopped early</span>{/if}
-    <!-- On a phone the row labels shorten to r1, r2…; the key says what r is. -->
-    {#if replicas}<span class="rkey">r = replica</span>{/if}
+    <span><i class="dot"></i>last pass</span>
+    <span><Mark kind="fail" size={7} />first failure</span>
+    <span><i class="mid-sw"></i>midpoint</span>
+    {#if stoppedEarly}<span><Mark kind="untested" size={7} />stopped early</span>{/if}
+    {#if noWinner}<span class="nowin">no clear winner on cost</span>{/if}
   </p>
 </div>
 
 <style>
   .answer {
-    --rl: 0px;
     margin: 4px 0 0;
     font-size: 0.92rem;
-  }
-  .answer.replicas {
-    --rl: 64px;
   }
   .head,
   .spec,
   .axis {
     display: grid;
-    /* The cost column holds "$0.216–0.221 one burst" on one line. */
-    grid-template-columns: 11.5rem minmax(0, 1fr) 5.5rem 4.5rem 10.5rem 7.5rem;
-    column-gap: 16px;
+    grid-template-columns: 11.5rem minmax(0, 1fr) 8rem 7.5rem;
+    column-gap: 20px;
     align-items: center;
   }
   .head {
     font-size: 0.78rem;
     font-weight: 600;
     color: var(--muted);
-    padding-bottom: 6px;
+    padding-bottom: 4px;
     border-bottom: 1px solid var(--rule);
-  }
-  .head .chartcol {
-    padding-left: var(--rl);
   }
   .num {
     text-align: right;
+  }
+  /* The axis ticks, once, above the first row, its title at their left in the name column. */
+  .axis {
+    height: 22px;
+  }
+  .axis-title,
+  .t {
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .axis-title {
+    text-align: right;
+    padding-top: 2px;
+    line-height: 1.3;
+  }
+  .phone-title {
+    display: none;
+  }
+  .ticks {
+    position: relative;
+    height: 100%;
+  }
+  .t {
+    position: absolute;
+    top: 4px;
+    transform: translateX(-50%);
+    font-variant-numeric: tabular-nums;
   }
   ol {
     list-style: none;
@@ -153,206 +241,163 @@
     max-width: none;
   }
   .group {
-    padding: 12px 0 0;
+    padding: 12px 0 2px;
     font-size: 0.78rem;
     font-weight: 600;
     color: var(--muted);
   }
   .spec {
-    padding: 10px 0;
+    min-height: 44px;
+    padding: 0;
     border-bottom: 1px solid var(--rule);
+    border-radius: 6px;
+  }
+  .spec.best {
+    background: var(--highlight);
   }
   .name {
     margin: 0;
+    padding-left: 8px;
     font-weight: 600;
     display: flex;
     align-items: baseline;
     gap: 8px;
     min-width: 0;
+    line-height: 1.3;
+  }
+  .name .dot {
+    transform: translateY(1px);
   }
   .dot {
     flex: none;
-    width: 10px;
-    height: 10px;
+    display: inline-block;
+    width: 9px;
+    height: 9px;
     border-radius: 50%;
-    background: var(--c);
-    transform: translateY(1px);
+    background: var(--c, var(--ink-2));
   }
-  .bars {
+  /* The strip: a lane per replica, PITCH px apart and centred on the row; its marks overflow the lane's own height. */
+  .strip {
     position: relative;
-    overflow-x: clip;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
+    height: 44px;
     min-width: 0;
   }
-  .run {
-    display: grid;
-    grid-template-columns: var(--rl) minmax(0, 1fr);
-    align-items: center;
-    height: 20px;
-    color: var(--ink);
-    text-decoration: none;
-    border-radius: 4px;
-  }
-  a.run:hover .track,
-  a.run:focus-visible .track {
-    background: var(--highlight);
-  }
-  a.run:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
-  }
-  .rl {
-    font-size: 0.8rem;
-    color: var(--accent-ink);
-    text-decoration: underline;
-    text-decoration-color: color-mix(in srgb, var(--accent) 45%, transparent);
-    text-underline-offset: 2px;
-    white-space: nowrap;
-  }
-  div.run .rl {
-    color: var(--muted);
-    text-decoration: none;
-  }
-  .answer:not(.replicas) .rl {
-    display: none;
-  }
-  .answer:not(.replicas) .run {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .track {
-    position: relative;
-    height: 20px;
-    border-radius: 3px;
-  }
-  .pass {
-    position: absolute;
-    left: 0;
-    top: 3px;
-    height: 14px;
-    border-radius: 2px 0 0 2px;
-    background: var(--c);
-    display: flex;
-    justify-content: flex-end;
-    align-items: center;
-    overflow: hidden;
-  }
-  .pass b {
-    padding-right: 4px;
-    font-size: 0.7rem;
-    font-weight: 700;
-    line-height: 1;
-    color: #fff;
-    font-variant-numeric: tabular-nums;
-  }
-  .gap {
-    position: absolute;
-    top: 3px;
-    height: 14px;
-    background: repeating-linear-gradient(135deg, var(--axis) 0 2px, transparent 2px 5px);
-  }
-  .x {
-    position: absolute;
-    top: 3px;
-    transform: translateX(-50%);
-    line-height: 0;
-  }
-  .val {
+  .grid {
     position: absolute;
     top: 0;
-    margin-left: 12px;
-    font-size: 0.8rem;
-    font-weight: 400;
-    font-variant-numeric: tabular-nums;
-    white-space: nowrap;
-    line-height: 20px;
+    bottom: 0;
+    width: 1px;
+    background: var(--grid);
   }
-  .note,
-  .none {
-    font-weight: 400;
-    color: var(--muted);
-    font-size: 0.78rem;
+  .lane {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 5px;
+    margin-top: -2.5px;
   }
-  .none {
-    line-height: 20px;
+  .link {
+    position: absolute;
+    top: 50%;
+    height: 1px;
+    margin-top: -0.5px;
+    background: var(--c, var(--ink-2));
+    opacity: 0.35;
+  }
+  .p,
+  .x {
+    position: absolute;
+    top: 50%;
+    display: inline-flex;
+    line-height: 0;
+    transform: translate(-50%, -50%);
+  }
+  .p :global(svg),
+  .x :global(svg) {
+    display: block;
+  }
+  .p .dot {
+    width: 6px;
+    height: 6px;
+    box-shadow: 0 0 0 1px var(--bg);
   }
   .mid {
     position: absolute;
-    top: -3px;
-    bottom: -3px;
+    top: 6px;
+    bottom: 6px;
     width: 0;
-    border-left: 2px solid var(--ink);
-    pointer-events: none;
+    border-left: 1.5px solid var(--ink);
   }
-  .figs {
-    display: contents;
-  }
-  .figs dt {
-    display: none;
-  }
-  .figs dd {
-    margin: 0;
-    font-variant-numeric: tabular-nums;
-  }
-  .figs strong {
-    font-size: 1.15rem;
-    font-weight: 650;
-  }
-  .out dd {
-    display: flex;
-    flex-direction: column;
-    line-height: 1.3;
-  }
-  .cost dd {
-    line-height: 1.3;
-  }
-  /* What a cost figure counts, muted beside it ("full fleet", "one burst"). */
-  .what {
+  .none {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
     font-size: 0.8rem;
-    color: var(--ink-2);
+    color: var(--muted);
+  }
+  /* One number per spec, with a bar under it for its share of the dearest spec's cost: the winner's in the accent,
+     the others in the axis grey, so the dearest bar is never the heaviest mark. */
+  .cost {
+    text-align: right;
+    padding-right: 4px;
+    min-width: 0;
+  }
+  .v {
+    display: block;
+    font-size: 1.35rem;
+    font-weight: 650;
+    line-height: 1.2;
+    letter-spacing: -0.01em;
+    font-variant-numeric: tabular-nums;
     white-space: nowrap;
   }
-  /* The second line of the cost: "$0.042 one burst" under the fleet cost, or why there is no fleet cost under the
-     burst alone. It wraps rather than run into the next column. */
-  .burst {
+  .best .v {
+    color: var(--accent-ink);
+  }
+  .v.burst {
+    color: var(--muted);
+    font-weight: 600;
+  }
+  .v.none {
+    color: var(--muted);
+    font-weight: 500;
+  }
+  .bar {
     display: block;
-    font-size: 0.8rem;
-    color: var(--ink-2);
+    position: relative;
+    height: 4px;
+    margin-top: 4px;
+    border-radius: 2px;
+    background: var(--surface-2);
+    overflow: hidden;
+  }
+  .bar i {
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    background: var(--axis);
+  }
+  .best .bar i {
+    background: var(--accent);
+  }
+  .out {
+    font-size: 0.9rem;
+    line-height: 1.25;
+    display: flex;
+    flex-direction: column;
   }
   .at {
     font-size: 0.8rem;
     color: var(--ink-2);
   }
-  .axis {
-    padding-top: 4px;
-  }
-  .ticks {
-    position: relative;
-    height: 34px;
-  }
-  .t {
-    position: absolute;
-    top: 0;
-    transform: translateX(-50%);
-    font-size: 11px;
-    color: var(--muted);
-    font-variant-numeric: tabular-nums;
-  }
-  .title {
-    position: absolute;
-    left: var(--rl);
-    bottom: 0;
-    font-size: 12px;
-    color: var(--muted);
-  }
   .key {
     display: flex;
     flex-wrap: wrap;
     gap: 4px 16px;
-    margin: 6px 0 0;
-    font-size: 0.82rem;
-    color: var(--ink-2);
+    margin: 8px 0 0;
+    font-size: 0.8rem;
+    color: var(--muted);
     max-width: none;
   }
   .key span {
@@ -360,83 +405,82 @@
     align-items: center;
     gap: 6px;
   }
-  .sw {
-    display: inline-block;
-    width: 16px;
-    height: 10px;
-    border-radius: 2px;
-  }
-  .gap-sw {
-    background: repeating-linear-gradient(135deg, var(--axis) 0 2px, transparent 2px 5px);
-    border: 1px solid var(--axis);
+  .key .dot {
+    width: 6px;
+    height: 6px;
+    background: var(--ink-2);
   }
   .mid-sw {
-    width: 2px;
-    height: 14px;
+    display: inline-block;
+    width: 1.5px;
+    height: 12px;
     background: var(--ink);
-    border-radius: 0;
   }
-  .rkey {
-    display: none;
+  .nowin {
+    margin-left: auto;
+    font-style: italic;
   }
 
-  /* Narrower: the figures move under the bars, one line of labelled numbers. */
+  /* Narrower: the name over the strip at the row's full width, the cost and what ran out on a line under it. */
   @media (max-width: 760px) {
-    .head {
+    .head,
+    .axis {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .head > :not(.chartcol),
+    .axis-title {
       display: none;
     }
+    .phone-title {
+      display: block;
+    }
+    /* The strip spans the page, so the end labels keep inside it. */
+    .t.first {
+      transform: none;
+    }
+    .t.last {
+      transform: translateX(-100%);
+    }
     .spec {
-      grid-template-columns: repeat(4, minmax(0, auto));
-      justify-content: start;
-      row-gap: 6px;
-      column-gap: 18px;
+      grid-template-columns: minmax(0, 1fr) auto;
+      column-gap: 24px;
+      row-gap: 2px;
+      padding: 8px 0;
     }
     .name,
-    .bars {
+    .strip {
       grid-column: 1 / -1;
     }
-    .figs dt {
-      display: block;
+    .name {
+      padding-left: 0;
+    }
+    .cost,
+    .out {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+    }
+    .cost::before,
+    .out::before {
       font-size: 0.72rem;
       font-weight: 600;
       color: var(--muted);
     }
-    .figs .num {
+    .cost::before {
+      content: '$ / 1k tasks';
+    }
+    .out::before {
+      content: 'Ran out';
+    }
+    .cost {
       text-align: left;
+      padding: 0;
     }
-    .figs > div {
-      align-self: start;
+    .bar {
+      max-width: 8rem;
     }
-    .figs strong {
-      font-size: 1rem;
-    }
-    .axis {
-      grid-template-columns: minmax(0, 1fr);
-    }
-    .axis > span:first-child {
-      display: none;
-    }
-  }
-  @media (max-width: 480px) {
-    /* Two figures per row, each with room for its two lines. */
-    .spec {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-    .answer.replicas {
-      --rl: 28px;
-    }
-    .note {
-      display: none;
-    }
-    .rl {
-      font-size: 0;
-    }
-    .rl::before {
-      content: 'r' attr(data-r);
-      font-size: 0.8rem;
-    }
-    .rkey {
-      display: inline-flex;
+    .out {
+      text-align: right;
     }
   }
 </style>
