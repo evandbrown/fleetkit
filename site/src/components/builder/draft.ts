@@ -49,6 +49,7 @@ export const TITLES: Record<string, string> = {
   'guest-cold-1': 'Guest boot levers, cold start',
   'stack-warm-1': 'Full stack, warm start',
   'host16-stack-1': 'Full stack, host size',
+  'metal-stack-1': 'Full stack on metal',
 };
 
 /** The campaign files in experiments/campaigns/, campaigns first, then the examples that aren't approved to run. */

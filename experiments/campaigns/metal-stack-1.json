@@ -1,0 +1,35 @@
+{
+  "name": "metal-stack-1",
+  "question": "Is the full stack cheaper per task on a metal host than on c8i.xlarge?",
+  "replicas": 1,
+  "shutdown_after_minutes": 60,
+  "base": {
+    "worker_host": { "instance_type": "m8i.metal-48xl" },
+    "hypervisor": { "name": "firecracker", "virtio_transport": "pci", "virtio_rng": true },
+    "microvm": { "vcpus": 1, "memory_mib": 1024, "console": "quiet-i8042", "memory_pages": "thp" },
+    "densities": [1, 48, 96, 144, 192, 200],
+    "criteria": {
+      "step_p50_target_ms": 1000,
+      "step_p95_target_ms": 2000,
+      "task_p95_target_ms": 5000,
+      "ready_timeout_s": 900,
+      "step_timeout_ms": 10000,
+      "task_timeout_ms": 45000
+    },
+    "procedure": { "trials_per_density": 2, "boundary_trials": 2, "settle_s": 10 },
+    "support_host": { "instance_type": "m8i.4xlarge" },
+    "workload": {
+      "chromium_extra_flags": ["--disable-features=PreloadTopChromeWebUI,WebUIOmniboxPopup,WebUIOmniboxAimPopup,WebUIOmniboxFullPopup"]
+    }
+  },
+  "specs": {
+    "metal-stack": {},
+    "metal-stack-4k": {
+      "microvm": { "memory_pages": "4k" }
+    }
+  },
+  "why": {
+    "metal-stack": "The nested frontier's guest on a 192-vCPU metal host: predicted about 40% dearer per task (steady state).",
+    "metal-stack-4k": "The same with 4 KiB pages: THP predicted to save about 13% on metal, against 41-49% nested."
+  }
+}
