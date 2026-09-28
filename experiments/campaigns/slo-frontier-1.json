@@ -1,0 +1,37 @@
+{
+  "name": "slo-frontier-1",
+  "question": "How do latency and density trade off past the standard SLO?",
+  "replicas": 4,
+  "shutdown_after_minutes": 60,
+  "base": {
+    "worker_host": { "instance_type": "c8i.xlarge" },
+    "hypervisor": { "name": "firecracker", "virtio_transport": "pci", "virtio_rng": true },
+    "microvm": { "vcpus": 2, "memory_mib": 2048 },
+    "densities": [1, 2, 3, 4, 5, 6, 7, 8],
+    "criteria": {
+      "step_p50_target_ms": 8000,
+      "step_p95_target_ms": 9500,
+      "task_p95_target_ms": 30000,
+      "ready_timeout_s": 180,
+      "step_timeout_ms": 10000,
+      "task_timeout_ms": 45000
+    },
+    "procedure": { "trials_per_density": 3, "boundary_trials": 2, "settle_s": 10 },
+    "support_host": { "instance_type": "m8i.xlarge" }
+  },
+  "specs": {
+    "c8i-xlarge": {},
+    "c8i-xlarge-1vcpu": {
+      "microvm": { "vcpus": 1 }
+    },
+    "m8i-4xlarge": {
+      "worker_host": { "instance_type": "m8i.4xlarge" },
+      "densities": [1, 4, 6, 8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24, 28, 32]
+    }
+  },
+  "why": {
+    "c8i-xlarge": "Cheapest 2-vCPU spec at the standard SLO, run to 2 microVMs per vCPU.",
+    "c8i-xlarge-1vcpu": "One vCPU: can a looser SLO replace a warm pool?",
+    "m8i-4xlarge": "The standing control, run to 2 microVMs per vCPU."
+  }
+}

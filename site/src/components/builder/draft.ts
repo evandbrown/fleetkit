@@ -42,6 +42,7 @@ export const TITLES: Record<string, string> = {
   'c8i-sizes-1': 'Smaller c8i hosts',
   'shape-cold-1': 'MicroVM shape, cold start',
   'shape-warm-1': 'MicroVM shape, warm start',
+  'slo-frontier-1': 'SLO frontier',
   'hv-host-3': 'Metal, nested SLO',
 };
 
