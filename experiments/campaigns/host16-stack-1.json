@@ -1,0 +1,55 @@
+{
+  "name": "host16-stack-1",
+  "question": "Is the full stack cheaper per task on a 4-vCPU or a 16-vCPU c8i host?",
+  "replicas": 5,
+  "shutdown_after_minutes": 35,
+  "base": {
+    "worker_host": { "instance_type": "c8i.xlarge" },
+    "hypervisor": { "name": "firecracker", "virtio_transport": "pci", "virtio_rng": true },
+    "microvm": { "vcpus": 2, "memory_mib": 2048 },
+    "densities": [1, 2, 3, 4, 5, 6],
+    "criteria": {
+      "step_p50_target_ms": 1000,
+      "step_p95_target_ms": 2000,
+      "task_p95_target_ms": 5000,
+      "ready_timeout_s": 180,
+      "step_timeout_ms": 10000,
+      "task_timeout_ms": 45000
+    },
+    "procedure": { "trials_per_density": 1, "boundary_trials": 2, "settle_s": 10 },
+    "support_host": { "instance_type": "m8i.xlarge" },
+    "workload": {
+      "chromium_extra_flags": ["--disable-features=PreloadTopChromeWebUI,WebUIOmniboxPopup,WebUIOmniboxAimPopup,WebUIOmniboxFullPopup"]
+    }
+  },
+  "specs": {
+    "c8i-xlarge-stack": {
+      "microvm": {
+        "vcpus": 1,
+        "memory_mib": 1024,
+        "console": "quiet-i8042",
+        "memory_pages": "thp"
+      },
+      "densities": [1, 2, 3, 4, 5, 6, 7, 8]
+    },
+    "c8i-4xlarge-stack": {
+      "worker_host": { "instance_type": "c8i.4xlarge" },
+      "microvm": {
+        "vcpus": 1,
+        "memory_mib": 1024,
+        "console": "quiet-i8042",
+        "memory_pages": "thp"
+      },
+      "densities": [1, 4, 8, 16, 20, 22, 24, 25, 26, 27, 28, 29, 30, 31, 32]
+    },
+    "m8i-4xlarge-lean": {
+      "worker_host": { "instance_type": "m8i.4xlarge" },
+      "densities": [1, 4, 8, 9, 10, 11, 12, 13, 14, 16, 18]
+    }
+  },
+  "why": {
+    "c8i-xlarge-stack": "Control: guest-cold-1's cheapest spec, unchanged, so it pools.",
+    "c8i-4xlarge-stack": "The same stack on a 16-vCPU host: predicted 27 microVMs, about 7% dearer.",
+    "m8i-4xlarge-lean": "Standing control, lean: guest-cold-1's spec, unchanged, so it pools."
+  }
+}
