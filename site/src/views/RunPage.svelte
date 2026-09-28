@@ -17,6 +17,9 @@
   import Mark from '../components/Mark.svelte';
   import LatencyChart from '../components/LatencyChart.svelte';
   import SourceLinks from '../components/SourceLinks.svelte';
+  import Flags from '../components/Flags.svelte';
+  import { chromiumFlags } from '../lib/spec';
+  import type { SpecDoc } from '../lib/types';
 
   let { campaign, run, density }: { campaign: string; run: string; density: number | null } = $props();
   const data = $derived(Promise.all([loadCampaign(campaign), loadRun(campaign, run)]));
@@ -28,6 +31,10 @@
   const ruleValue = (key: RuleKey, v: number, t: number) =>
     asPct(key) ? `${f.side(v * scaleOf(key), t * scaleOf(key), key.endsWith('_fraction') ? 0 : 1)}%` : f.side(v, t, 2);
   const ruleRange = (key: RuleKey, r: Range, t: number) => f.range(r, (v) => ruleValue(key, v, t));
+
+  /** A list of extra Chromium flags is shown whole, one flag to a line, breaking at the commas in a flag's value. */
+  const FLAGS = 'workload.chromium_extra_flags';
+  const baseFlags = (s: SpecDoc) => (s.changes.find((c) => c.path === FLAGS)?.base as string[] | undefined) ?? [];
   const limitText = (key: RuleKey, op: '>=' | '<', t: number) =>
     `${op === '>=' ? '≥' : '<'} ${asPct(key) ? `${f.num(t * scaleOf(key))}%` : f.num(t, 2)}`;
   /** "Intel(R) Xeon(R) 6975P-C" → "Xeon 6975P-C". */
@@ -207,6 +214,13 @@
     </div>
   {/if}
 
+  {#snippet shown(row: { path: string; value: string; base?: string })}
+    {#if row.path === FLAGS}
+      <Flags flags={chromiumFlags(spec.spec)} />{#if row.base !== undefined}<span class="was">base <Flags flags={baseFlags(spec)} /></span>{/if}
+    {:else}
+      {row.value}{#if row.base !== undefined}<span class="was">base {row.base}</span>{/if}
+    {/if}
+  {/snippet}
   <details class="spec">
     <summary>Full spec</summary>
     <div class="sections">
@@ -215,13 +229,13 @@
           <h3>{g.group}</h3>
           {#if g.rows.length === 1 && g.rows[0].label === g.group}
             {@const row = g.rows[0]}
-            <p class="solo" class:changed={row.base !== undefined}>{row.value}{#if row.base !== undefined}<span class="was">base {row.base}</span>{/if}</p>
+            <p class="solo" class:changed={row.base !== undefined}>{@render shown(row)}</p>
           {:else}
             <dl>
               {#each g.rows as row (row.path)}
                 <div class:changed={row.base !== undefined}>
                   <dt>{row.label}</dt>
-                  <dd>{row.value}{#if row.base !== undefined}<span class="was">base {row.base}</span>{/if}</dd>
+                  <dd>{@render shown(row)}</dd>
                 </div>
               {/each}
             </dl>
@@ -414,11 +428,14 @@
     background: var(--highlight);
   }
   dt {
+    flex-shrink: 0;
     color: var(--ink-2);
   }
   dd {
     margin: 0;
+    min-width: 0;
     text-align: right;
+    overflow-wrap: anywhere;
   }
   .was {
     display: block;

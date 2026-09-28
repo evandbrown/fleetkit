@@ -28,7 +28,9 @@
       },
       "microvm": {
         "vcpus": 2,
-        "memory_mib": 2048
+        "memory_mib": 2048,
+        "console": "verbose",
+        "memory_pages": "4k"
       },
       "densities": [
         1,
@@ -79,7 +81,9 @@
         },
         "microvm": {
           "vcpus": 2,
-          "memory_mib": 2048
+          "memory_mib": 2048,
+          "console": "verbose",
+          "memory_pages": "4k"
         },
         "densities": [
           1,

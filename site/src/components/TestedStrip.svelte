@@ -1,11 +1,13 @@
 <script lang="ts">
   // What a campaign tested and the SLOs it was held to, in one compact strip under its answer: the host, hypervisor,
-  // microVM and densities, where an input that differs between specs is shown per spec and highlighted, then the
-  // five SLOs as chips, where one that differs from the standard is highlighted the same way, with the standard
-  // beside it (D74). The full spec-by-spec table is further down the page.
+  // microVM, densities and, where any spec adds them, the extra Chromium flags (a long flag cut to its name, in full
+  // on hover and in the table below), where an input that differs between specs is shown per spec and highlighted,
+  // then the five SLOs as chips, where one that differs from the standard is highlighted the same way, with the
+  // standard beside it (D74). The full spec-by-spec table is further down the page.
   import * as f from '../lib/format';
   import { specColor } from '../lib/colors';
-  import { differingRows, sameCriteria, sloChips, specCard, type SpecRef } from '../lib/shape';
+  import { differingRows, sameCriteria, showsChromium, sloChips, specCard, type CardRow, type SpecRef } from '../lib/shape';
+  import { flagsWords } from '../lib/spec';
 
   let { refs, replicas }: { refs: SpecRef[]; replicas: number } = $props();
 
@@ -16,7 +18,9 @@
 
   /** The host kind once after the host, or in each host's chip when they differ (metal beside nested). */
   const kinds = $derived(new Set(refs.map((r) => r.spec.host.host_kind)).size > 1);
-  const items = $derived([
+  type Value = { main: string; sub: string | null; title?: string };
+  type Item = { key: CardRow; label: string; values: Value[]; kind?: string };
+  const items: Item[] = $derived([
     {
       key: 'host',
       label: 'Host',
@@ -30,7 +34,16 @@
       label: 'Densities',
       values: cards.map((c) => ({ main: densities(c.densities), sub: c.densities.length > 4 ? `${c.densities.length} steps` : null })),
     },
-  ] as const);
+    ...(showsChromium(refs.map((r) => r.spec))
+      ? [
+          {
+            key: 'chromium' as const,
+            label: 'Chromium flags',
+            values: flagsWords(refs.map((r) => r.spec.spec)).map((main, i) => ({ main, sub: null, title: cards[i].chromium.join(' ') || undefined })),
+          },
+        ]
+      : []),
+  ]);
 
   const same = $derived(sameCriteria(refs.map((r) => r.spec)));
 </script>
@@ -49,12 +62,12 @@
       <dd>
         {#if differs}
           {#each it.values as v, i (i)}
-            <span class="chip on"><i class="dot" style:background={specColor(i)}></i><b>{v.main}</b>{#if v.sub}<span class="sub">{v.sub}</span>{/if}</span>
+            <span class="chip on" title={v.title}><i class="dot" style:background={specColor(i)}></i><b>{v.main}</b>{#if v.sub}<span class="sub">{v.sub}</span>{/if}</span>
           {/each}
         {:else}
-          <span class="chip"><b>{it.values[0].main}</b>{#if it.values[0].sub}<span class="sub">{it.values[0].sub}</span>{/if}</span>
+          <span class="chip" title={it.values[0].title}><b>{it.values[0].main}</b>{#if it.values[0].sub}<span class="sub">{it.values[0].sub}</span>{/if}</span>
         {/if}
-        {#if it.key === 'host' && 'kind' in it && it.kind}<span class="sub kind">{it.kind}</span>{/if}
+        {#if it.key === 'host' && it.kind}<span class="sub kind">{it.kind}</span>{/if}
       </dd>
     </div>
   {/each}

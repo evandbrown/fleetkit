@@ -1,0 +1,377 @@
+{
+  "schema": "fleetkit-site-data/2",
+  "id": "metal-lean-1",
+  "title": "Metal, lean Chromium",
+  "question": "Does lean headless Chromium fit more microVMs on a metal host?",
+  "started": "2026-09-28T09:37Z",
+  "ended": "2026-09-28T09:41Z",
+  "status": "complete",
+  "definition_path": "experiments/campaigns/metal-lean-1.json",
+  "definition": {
+    "name": "metal-lean-1",
+    "question": "Does lean headless Chromium fit more microVMs on a metal host?",
+    "replicas": 1,
+    "shutdown_after_minutes": 60,
+    "base": {
+      "worker_host": {
+        "instance_type": "m8i.4xlarge"
+      },
+      "hypervisor": {
+        "name": "firecracker",
+        "virtio_transport": "pci",
+        "virtio_rng": true
+      },
+      "microvm": {
+        "vcpus": 2,
+        "memory_mib": 2048
+      },
+      "densities": [
+        1,
+        4,
+        8,
+        9,
+        10,
+        11,
+        12,
+        14,
+        16
+      ],
+      "criteria": {
+        "step_p50_target_ms": 1000,
+        "step_p95_target_ms": 2000,
+        "task_p95_target_ms": 5000,
+        "ready_timeout_s": 900,
+        "step_timeout_ms": 10000,
+        "task_timeout_ms": 45000
+      },
+      "procedure": {
+        "trials_per_density": 1,
+        "boundary_trials": 2,
+        "settle_s": 10
+      },
+      "support_host": {
+        "instance_type": "m8i.4xlarge"
+      }
+    },
+    "specs": {
+      "firecracker-metal-nopre": {
+        "worker_host": {
+          "instance_type": "m8i.metal-48xl"
+        },
+        "densities": [
+          1,
+          96,
+          140,
+          152,
+          164,
+          176,
+          188,
+          200
+        ],
+        "workload": {
+          "chromium_extra_flags": [
+            "--disable-features=PreloadTopChromeWebUI,WebUIOmniboxPopup,WebUIOmniboxAimPopup,WebUIOmniboxFullPopup"
+          ]
+        }
+      }
+    },
+    "why": {
+      "firecracker-metal-nopre": "Metal as hv-host-3 ran it, minus the hidden omnibox pages."
+    }
+  },
+  "specs": [
+    {
+      "name": "firecracker-metal-nopre",
+      "label": "m8i.metal-48xl, Firecracker, 2 vCPU / 2 GiB",
+      "why": "Metal as hv-host-3 ran it, minus the hidden omnibox pages.",
+      "changes": [
+        {
+          "path": "worker_host.instance_type",
+          "base": "m8i.4xlarge",
+          "value": "m8i.metal-48xl"
+        },
+        {
+          "path": "densities",
+          "base": [
+            1,
+            4,
+            8,
+            9,
+            10,
+            11,
+            12,
+            14,
+            16
+          ],
+          "value": [
+            1,
+            96,
+            140,
+            152,
+            164,
+            176,
+            188,
+            200
+          ]
+        },
+        {
+          "path": "workload.chromium_extra_flags",
+          "base": [],
+          "value": [
+            "--disable-features=PreloadTopChromeWebUI,WebUIOmniboxPopup,WebUIOmniboxAimPopup,WebUIOmniboxFullPopup"
+          ]
+        }
+      ],
+      "spec": {
+        "worker_host": {
+          "instance_type": "m8i.metal-48xl"
+        },
+        "hypervisor": {
+          "name": "firecracker",
+          "virtio_transport": "pci",
+          "virtio_rng": true
+        },
+        "microvm": {
+          "vcpus": 2,
+          "memory_mib": 2048
+        },
+        "densities": [
+          1,
+          96,
+          140,
+          152,
+          164,
+          176,
+          188,
+          200
+        ],
+        "criteria": {
+          "step_p50_target_ms": 1000,
+          "step_p95_target_ms": 2000,
+          "task_p95_target_ms": 5000,
+          "ready_timeout_s": 900,
+          "step_timeout_ms": 10000,
+          "task_timeout_ms": 45000
+        },
+        "procedure": {
+          "trials_per_density": 1,
+          "boundary_trials": 2,
+          "settle_s": 10
+        },
+        "support_host": {
+          "instance_type": "m8i.4xlarge"
+        },
+        "workload": {
+          "chromium_extra_flags": [
+            "--disable-features=PreloadTopChromeWebUI,WebUIOmniboxPopup,WebUIOmniboxAimPopup,WebUIOmniboxFullPopup"
+          ]
+        }
+      },
+      "host": {
+        "instance_type": "m8i.metal-48xl",
+        "host_kind": "metal",
+        "vcpus": 192,
+        "memory_gib": 768,
+        "price_usd_per_hour": 10.16064,
+        "price_estimated": false
+      }
+    }
+  ],
+  "runs": [
+    {
+      "id": "firecracker-metal-nopre-r1",
+      "spec": "firecracker-metal-nopre",
+      "replica": 1,
+      "stopped_early": false,
+      "started": "2026-09-28T09:37Z",
+      "duration_s": 229,
+      "harness_commit": "01d12c688c",
+      "host": {
+        "instance_type": "m8i.metal-48xl",
+        "host_kind": "metal",
+        "vcpus": 192,
+        "cores": 96,
+        "threads_per_core": 2,
+        "sockets": 1,
+        "cpu_model": "Intel(R) Xeon(R) 6975P-C",
+        "mem_gib": 755.6,
+        "kernel_release": "6.18.48-109.150.amzn2023.x86_64",
+        "hypervisor_version": "Firecracker v1.17.0",
+        "chromium_version": "154.0.8037.57"
+      },
+      "result": {
+        "tested_successfully": 200,
+        "first_failed": null,
+        "gap": null,
+        "not_tested": [],
+        "per_host_vcpu": 1.0417,
+        "midpoint_per_host_vcpu": null,
+        "cost_per_1000_tasks": {
+          "execution": [
+            0.0552,
+            0.0567
+          ],
+          "observed": [
+            0.1822,
+            0.1899
+          ]
+        },
+        "limit": null
+      },
+      "by_density": [
+        {
+          "density": 1,
+          "result": "passed",
+          "passed": 1,
+          "trials": 1,
+          "trial_results": [
+            true
+          ]
+        },
+        {
+          "density": 96,
+          "result": "passed",
+          "passed": 1,
+          "trials": 1,
+          "trial_results": [
+            true
+          ]
+        },
+        {
+          "density": 140,
+          "result": "passed",
+          "passed": 1,
+          "trials": 1,
+          "trial_results": [
+            true
+          ]
+        },
+        {
+          "density": 152,
+          "result": "passed",
+          "passed": 1,
+          "trials": 1,
+          "trial_results": [
+            true
+          ]
+        },
+        {
+          "density": 164,
+          "result": "passed",
+          "passed": 1,
+          "trials": 1,
+          "trial_results": [
+            true
+          ]
+        },
+        {
+          "density": 176,
+          "result": "passed",
+          "passed": 1,
+          "trials": 1,
+          "trial_results": [
+            true
+          ]
+        },
+        {
+          "density": 188,
+          "result": "passed",
+          "passed": 1,
+          "trials": 1,
+          "trial_results": [
+            true
+          ]
+        },
+        {
+          "density": 200,
+          "result": "passed",
+          "passed": 3,
+          "trials": 3,
+          "trial_results": [
+            true,
+            true,
+            true
+          ]
+        }
+      ]
+    }
+  ],
+  "outcomes": [
+    {
+      "spec": "firecracker-metal-nopre",
+      "replicas": [
+        {
+          "run": "firecracker-metal-nopre-r1",
+          "host_vcpus": 192,
+          "tested_successfully": 200,
+          "first_failed": null,
+          "stopped_early": false,
+          "per_host_vcpu": 1.0417,
+          "midpoint_per_host_vcpu": null,
+          "cost_per_1000_tasks": {
+            "execution": [
+              0.0552,
+              0.0567
+            ],
+            "observed": [
+              0.1822,
+              0.1899
+            ]
+          }
+        }
+      ],
+      "midpoint_per_host_vcpu": null
+    }
+  ],
+  "rules": [
+    {
+      "key": "host_cpu_pressure_pct",
+      "label": "Host CPU pressure",
+      "verdict": "host_cpu",
+      "op": ">=",
+      "threshold": 20
+    },
+    {
+      "key": "host_cpu_util_pct",
+      "label": "Host CPU utilisation",
+      "verdict": "host_cpu",
+      "op": ">=",
+      "threshold": 90
+    },
+    {
+      "key": "microvm_throttled_fraction",
+      "label": "MicroVM throttled fraction",
+      "verdict": "microvm_cpu_allowance",
+      "op": ">=",
+      "threshold": 0.1
+    },
+    {
+      "key": "host_mem_available_fraction",
+      "label": "Host memory available",
+      "verdict": "host_memory",
+      "op": "<",
+      "threshold": 0.1
+    },
+    {
+      "key": "host_mem_pressure_pct",
+      "label": "Host memory pressure",
+      "verdict": "host_memory",
+      "op": ">=",
+      "threshold": 5
+    },
+    {
+      "key": "host_io_pressure_pct",
+      "label": "Host IO pressure",
+      "verdict": "io",
+      "op": ">=",
+      "threshold": 10
+    },
+    {
+      "key": "host_steal_pct",
+      "label": "Steal",
+      "verdict": "steal",
+      "op": ">=",
+      "threshold": 5
+    }
+  ]
+}

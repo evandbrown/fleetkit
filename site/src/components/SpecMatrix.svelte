@@ -1,10 +1,12 @@
 <script lang="ts">
-  // What we tested. One spec: its host, hypervisor, microVM and densities side by side. Several: one column per spec
-  // and one row per input; an input that is the same for every spec is written once across the row, and one that
-  // differs is highlighted in each column. The header row names each column and gives its why; with no why, and names
+  // What we tested. One spec: its host, hypervisor, microVM and densities side by side, and its extra Chromium flags
+  // in full under them. Several: one column per spec and one row per input; an input that is the same for every spec
+  // is written once across the row, and one that differs is highlighted in each column. The Chromium flags row is
+  // there only when some spec adds flags. The header row names each column and gives its why; with no why, and names
   // that only echo the host or hypervisor row, it is left out. A cell doesn't restate its column's name.
-  import { differingRows, specCard, type CardRow } from '../lib/shape';
+  import { differingRows, showsChromium, specCard, type CardRow } from '../lib/shape';
   import type { SpecDoc } from '../lib/types';
+  import Flags from './Flags.svelte';
 
   interface Item {
     key: string;
@@ -32,12 +34,13 @@
     items.length > 1 &&
     diff.has(row) &&
     (row === 'host' ? items[i].title === cards[i].host.value : items[i].title === cards[i].hypervisor.value && !!cards[i].hypervisor.sub);
-  const ROWS: { key: CardRow; label: string }[] = [
+  const ROWS: { key: CardRow; label: string }[] = $derived([
     { key: 'host', label: 'Host' },
     { key: 'hypervisor', label: 'Hypervisor' },
     { key: 'microvm', label: 'MicroVM' },
     { key: 'densities', label: 'Densities' },
-  ];
+    ...(showsChromium(items.map((i) => i.spec)) ? [{ key: 'chromium' as const, label: 'Chromium flags' }] : []),
+  ]);
   /** Runs of neighbouring items from the same campaign, for the header row on Compare. */
   const groups = $derived(
     items.reduce<{ title: string; n: number }[]>((out, it) => {
@@ -57,6 +60,8 @@
     {#if !echo(row, i)}<strong>{c.hypervisor.value}</strong>{/if}{#if c.hypervisor.sub}<span class="sub">{c.hypervisor.sub}</span>{/if}
   {:else if row === 'microvm'}
     <strong>{c.microvm}</strong>
+  {:else if row === 'chromium'}
+    <strong><Flags flags={c.chromium} /></strong>
   {:else}
     <span class="chips">{#each c.densities as d (d)}<span>{d}</span>{/each}</span>
   {/if}
@@ -67,7 +72,7 @@
     {#if items[0].why}<p class="why">{items[0].why}</p>{/if}
     <dl>
       {#each ROWS as row (row.key)}
-        <div class="in"><dt>{row.label}</dt><dd>{@render value(row.key, 0)}</dd></div>
+        <div class="in" class:wide={row.key === 'chromium'}><dt>{row.label}</dt><dd>{@render value(row.key, 0)}</dd></div>
       {/each}
     </dl>
   </div>
@@ -119,6 +124,9 @@
     flex-direction: column;
     gap: 4px;
     min-width: 0;
+  }
+  .in.wide {
+    grid-column: 1 / -1;
   }
   dt,
   .rl {

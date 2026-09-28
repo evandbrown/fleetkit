@@ -157,7 +157,7 @@ interface SpecDoc {
   label: string;                   // what sets it apart from the campaign's other specs ("m8i.2xlarge"),
                                    // or, for a campaign's only spec, a summary ("m8i.4xlarge, Firecracker, 2 vCPU / 2 GiB")
   why?: string;                    // the definition's reason for it
-  changes: { path: string; base: unknown; value: unknown }[];   // every leaf where it differs from the base
+  changes: SpecChange[];           // every leaf where it differs from the base, in the schema's order
   spec: Spec;                      // resolved: the base merged with its changes
   host: {                          // follows from the instance type (instance-types.json); never an input (D56)
     instance_type: string; host_kind: HostKind; vcpus: number; memory_gib: number;
@@ -165,6 +165,14 @@ interface SpecDoc {
     price_estimated: boolean;      // the price is an estimate, not yet from the AWS price list
   };
 }
+
+// A leaf of the spec, flattened to its dotted path ("workload.chromium_extra_flags"). A list is one value, compared
+// item by item in order: a spec differs from the base on densities or its Chromium flags when the list does.
+// Both sides are what the specs run: an optional field either leaves out is at its schema default, so `base` is
+// the default where the base leaves it out ([] for no extra Chromium flags), and a spec that writes the default
+// (chromium_extra_flags: []) has no change there.
+type SpecValue = string | number | boolean | number[] | string[];
+interface SpecChange { path: string; base: SpecValue; value: SpecValue }
 
 interface RuleDef { key: RuleKey; label: string; verdict: Verdict; op: '>=' | '<'; threshold: number }
 ```

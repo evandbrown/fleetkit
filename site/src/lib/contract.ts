@@ -12,7 +12,7 @@ import {
   parseTrialId,
   runResultCore,
 } from './derive';
-import { flatten } from './spec';
+import { filled } from './spec';
 import { SCHEMA, type CampaignDoc, type Index, type ReplicaResult, type RunDoc, type RunEntry, type TrialDoc } from './types';
 import { retiredWordsInJson } from './words';
 
@@ -131,13 +131,16 @@ export function checkCampaign(doc: CampaignDoc, entry?: Index['campaigns'][numbe
   // Specs: the definition's, in order, each the base merged with its changes.
   const names = doc.specs.map((s) => s.name);
   if (!same(names, Object.keys(def.specs))) p.push(`${w}: specs differ from the definition's`);
-  const baseFlat = flatten(def.base);
+  // Changes are between what the base and the spec run: an optional field either leaves out is at its default, so a
+  // list the spec writes equal to the default ([] extra Chromium flags) is no change, and one that isn't is compared
+  // against the default, item by item in order.
+  const baseFlat = filled(def.base);
   for (const s of doc.specs) {
     const ws = `${w} spec ${s.name}`;
     if (!ID.test(s.name)) p.push(`${ws}: bad name`);
     if (!same(merge(def.base, def.specs[s.name] ?? {}), s.spec)) p.push(`${ws}: spec isn't the base merged with its changes`);
-    const flat = flatten(s.spec);
-    const differ = Object.keys(flat).filter((k) => !same(flat[k], baseFlat[k]));
+    const flat = filled(s.spec);
+    const differ = [...new Set([...Object.keys(flat), ...Object.keys(baseFlat)])].filter((k) => !same(flat[k], baseFlat[k]));
     if (!same(s.changes.map((c) => c.path).sort(), differ.sort())) p.push(`${ws}: changes don't list exactly where it differs from the base`);
     for (const c of s.changes) {
       if (!same(c.base, baseFlat[c.path]) || !same(c.value, flat[c.path])) p.push(`${ws}: change ${c.path} has the wrong values`);

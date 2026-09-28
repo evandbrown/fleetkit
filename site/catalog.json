@@ -56,6 +56,14 @@
     {
       "id": "shape-warm-1",
       "title": "MicroVM shape, warm start"
+    },
+    {
+      "id": "browser-lean-1",
+      "title": "Leaner headless Chromium"
+    },
+    {
+      "id": "metal-lean-1",
+      "title": "Metal, lean Chromium"
     }
   ],
   "gate_allow": []

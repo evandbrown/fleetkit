@@ -50,6 +50,18 @@ export interface Spec {
   workload?: { chromium_extra_flags?: string[] };
 }
 
+/** A spec leaf's value, as `flatten` gives it: a scalar, or a list (densities, workload.chromium_extra_flags), which is
+ * one value, compared item by item in order. */
+export type SpecValue = string | number | boolean | number[] | string[];
+
+/** Where a named spec differs from its campaign's base (DATA.md, SpecDoc.changes). An optional field the base leaves
+ * out is at its default: `base` is then the default ([] for no extra Chromium flags). */
+export interface SpecChange {
+  path: string;
+  base: SpecValue;
+  value: SpecValue;
+}
+
 export type DeepPartial<T> = { [K in keyof T]?: T[K] extends object ? (T[K] extends unknown[] ? T[K] : DeepPartial<T[K]>) : T[K] };
 
 // ---- index.json ---------------------------------------------------------------------------------
@@ -136,7 +148,7 @@ export interface SpecDoc {
   name: string;
   label: string;
   why?: string;
-  changes: { path: string; base: unknown; value: unknown }[];
+  changes: SpecChange[];
   spec: Spec;
   host: {
     instance_type: string;

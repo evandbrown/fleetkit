@@ -1,7 +1,254 @@
 {
   "schema": "fleetkit-site-data/2",
-  "featured": "shape-cold-1",
+  "featured": "metal-lean-1",
   "campaigns": [
+    {
+      "id": "metal-lean-1",
+      "title": "Metal, lean Chromium",
+      "question": "Does lean headless Chromium fit more microVMs on a metal host?",
+      "started": "2026-09-28T09:37Z",
+      "status": "complete",
+      "replicas": 1,
+      "specs": [
+        {
+          "name": "firecracker-metal-nopre",
+          "label": "m8i.metal-48xl, Firecracker, 2 vCPU / 2 GiB"
+        }
+      ],
+      "runs": 1,
+      "outcomes": [
+        {
+          "spec": "firecracker-metal-nopre",
+          "replicas": [
+            {
+              "run": "firecracker-metal-nopre-r1",
+              "host_vcpus": 192,
+              "tested_successfully": 200,
+              "first_failed": null,
+              "stopped_early": false,
+              "per_host_vcpu": 1.0417,
+              "midpoint_per_host_vcpu": null,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0552,
+                  0.0567
+                ],
+                "observed": [
+                  0.1822,
+                  0.1899
+                ]
+              }
+            }
+          ],
+          "midpoint_per_host_vcpu": null
+        }
+      ]
+    },
+    {
+      "id": "browser-lean-1",
+      "title": "Leaner headless Chromium",
+      "question": "Does turning off headless Chromium's hidden omnibox preload lower CPU per task?",
+      "started": "2026-09-28T09:18Z",
+      "status": "complete",
+      "replicas": 2,
+      "specs": [
+        {
+          "name": "c8i-xlarge",
+          "label": "c8i.xlarge, no extra Chromium flags"
+        },
+        {
+          "name": "c8i-xlarge-nopre",
+          "label": "c8i.xlarge, --disable-features=PreloadTopChromeWebUI,WebUIOmniboxPopup,WebUIOmniboxAimPopup,WebUIOmniboxFullPopup"
+        },
+        {
+          "name": "m8i-4xlarge",
+          "label": "m8i.4xlarge, no extra Chromium flags"
+        },
+        {
+          "name": "m8i-4xlarge-nopre",
+          "label": "m8i.4xlarge, --disable-features=PreloadTopChromeWebUI,WebUIOmniboxPopup,WebUIOmniboxAimPopup,WebUIOmniboxFullPopup"
+        }
+      ],
+      "runs": 8,
+      "outcomes": [
+        {
+          "spec": "c8i-xlarge",
+          "replicas": [
+            {
+              "run": "c8i-xlarge-r1",
+              "host_vcpus": 4,
+              "tested_successfully": 2,
+              "first_failed": 3,
+              "stopped_early": false,
+              "per_host_vcpu": 0.5,
+              "midpoint_per_host_vcpu": 0.625,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0508,
+                  0.0552
+                ],
+                "observed": [
+                  0.1382,
+                  0.1395
+                ]
+              }
+            },
+            {
+              "run": "c8i-xlarge-r2",
+              "host_vcpus": 4,
+              "tested_successfully": 2,
+              "first_failed": 3,
+              "stopped_early": false,
+              "per_host_vcpu": 0.5,
+              "midpoint_per_host_vcpu": 0.625,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.05,
+                  0.0514
+                ],
+                "observed": [
+                  0.1384,
+                  0.1424
+                ]
+              }
+            }
+          ],
+          "midpoint_per_host_vcpu": 0.625
+        },
+        {
+          "spec": "c8i-xlarge-nopre",
+          "replicas": [
+            {
+              "run": "c8i-xlarge-nopre-r1",
+              "host_vcpus": 4,
+              "tested_successfully": 3,
+              "first_failed": 4,
+              "stopped_early": false,
+              "per_host_vcpu": 0.75,
+              "midpoint_per_host_vcpu": 0.875,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0347,
+                  0.0367
+                ],
+                "observed": [
+                  0.1071,
+                  0.1103
+                ]
+              }
+            },
+            {
+              "run": "c8i-xlarge-nopre-r2",
+              "host_vcpus": 4,
+              "tested_successfully": 4,
+              "first_failed": 5,
+              "stopped_early": false,
+              "per_host_vcpu": 1,
+              "midpoint_per_host_vcpu": 1.125,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0345,
+                  0.0361
+                ],
+                "observed": [
+                  0.1055,
+                  0.1081
+                ]
+              }
+            }
+          ],
+          "midpoint_per_host_vcpu": 1
+        },
+        {
+          "spec": "m8i-4xlarge",
+          "replicas": [
+            {
+              "run": "m8i-4xlarge-r1",
+              "host_vcpus": 16,
+              "tested_successfully": 9,
+              "first_failed": 10,
+              "stopped_early": false,
+              "per_host_vcpu": 0.5625,
+              "midpoint_per_host_vcpu": 0.5938,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0615,
+                  0.069
+                ],
+                "observed": [
+                  0.1785,
+                  0.1823
+                ]
+              }
+            },
+            {
+              "run": "m8i-4xlarge-r2",
+              "host_vcpus": 16,
+              "tested_successfully": 9,
+              "first_failed": 10,
+              "stopped_early": false,
+              "per_host_vcpu": 0.5625,
+              "midpoint_per_host_vcpu": 0.5938,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0635,
+                  0.0684
+                ],
+                "observed": [
+                  0.1819,
+                  0.1862
+                ]
+              }
+            }
+          ],
+          "midpoint_per_host_vcpu": 0.5938
+        },
+        {
+          "spec": "m8i-4xlarge-nopre",
+          "replicas": [
+            {
+              "run": "m8i-4xlarge-nopre-r1",
+              "host_vcpus": 16,
+              "tested_successfully": 13,
+              "first_failed": 14,
+              "stopped_early": false,
+              "per_host_vcpu": 0.8125,
+              "midpoint_per_host_vcpu": 0.8438,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0467,
+                  0.0474
+                ],
+                "observed": [
+                  0.1504,
+                  0.1547
+                ]
+              }
+            },
+            {
+              "run": "m8i-4xlarge-nopre-r2",
+              "host_vcpus": 16,
+              "tested_successfully": 13,
+              "first_failed": 14,
+              "stopped_early": false,
+              "per_host_vcpu": 0.8125,
+              "midpoint_per_host_vcpu": 0.8438,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0465,
+                  0.0471
+                ],
+                "observed": [
+                  0.1483,
+                  0.1496
+                ]
+              }
+            }
+          ],
+          "midpoint_per_host_vcpu": 0.8438
+        }
+      ]
+    },
     {
       "id": "shape-cold-1",
       "title": "MicroVM shape, cold start",

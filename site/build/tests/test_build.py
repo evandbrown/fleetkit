@@ -139,6 +139,21 @@ def test_the_campaign_of_one(data):
         "cost_per_1000_tasks": c["runs"][0]["result"]["cost_per_1000_tasks"]}]}]
 
 
+@pytest.mark.skipif(not (REPO / "results/browser-lean-1").exists(), reason="results/browser-lean-1 isn't downloaded here")
+def test_a_published_list_change_is_against_the_default_the_base_leaves_out(data):
+    """browser-lean-1, the first campaign whose named specs change a list (workload.chromium_extra_flags): the base
+    leaves the flags out, so each change's base is [], and the specs that leave them out too have no change there."""
+    c = read(data, "campaigns/browser-lean-1/campaign.json")
+    flags = c["definition"]["specs"]["c8i-xlarge-nopre"]["workload"]["chromium_extra_flags"]
+    assert "workload" not in c["definition"]["base"]
+    by = {s["name"]: {ch["path"]: ch for ch in s["changes"]} for s in c["specs"]}
+    for name in ("c8i-xlarge-nopre", "m8i-4xlarge-nopre"):
+        assert by[name]["workload.chromium_extra_flags"] == {"path": "workload.chromium_extra_flags", "base": [], "value": flags}
+    for name in ("c8i-xlarge", "m8i-4xlarge"):
+        assert "workload.chromium_extra_flags" not in by[name]
+    assert by["c8i-xlarge"] == {}
+
+
 IS_CLONE = (REPO / ".git").exists()
 needs_clone = pytest.mark.skipif(not IS_CLONE, reason="not a git clone: what GitHub has can't be checked here")
 

@@ -113,6 +113,27 @@ export function show(path: string, value: unknown): string {
 
 export const hypervisorName = (h: string) => HYPERVISOR[h] ?? h;
 
+/** A spec's extra Chromium flags: none when it leaves them out. */
+export const chromiumFlags = (s: Spec): string[] => s.workload?.chromium_extra_flags ?? [];
+
+/** Longer than this, a flag is cut to its name in a label or a chip: "--disable-features=…". */
+const FLAG_CHARS = 28;
+
+/** Flags in a few words: each flag, a long one cut to its name ("--disable-features=…"); none is "none". The
+ * spec table gives them in full. */
+export function flagsShort(flags: string[]): string {
+  if (!flags.length) return 'none';
+  return flags.map((x) => (x.length > FLAG_CHARS && x.includes('=') ? `${x.slice(0, x.indexOf('='))}=…` : x)).join(' ');
+}
+
+/** Each spec's extra Chromium flags in a few words (flagsShort), or in full where cutting them would make two
+ * specs with different flags read the same. */
+export function flagsWords(specs: Spec[]): string[] {
+  const full = specs.map((s) => chromiumFlags(s).join(' ') || 'none');
+  const short = specs.map((s) => flagsShort(chromiumFlags(s)));
+  return new Set(short).size === new Set(full).size ? short : full;
+}
+
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
 /** {path: default} for the fields a spec may leave out, added after the first campaigns ran (expand.py
@@ -134,10 +155,16 @@ export const OPTIONAL_DEFAULTS: Record<string, unknown> = (() => {
   return out;
 })();
 
+/** A spec's leaves as `flatten` gives them, with every optional field it leaves out at its default (expand.py
+ * filled): what it runs. */
+export function filled(spec: object): Record<string, unknown> {
+  return { ...structuredClone(OPTIONAL_DEFAULTS), ...flatten(spec) };
+}
+
 /** The paths whose values differ between the specs, in the schema's order. An optional field a spec leaves out is at
  * its default. */
 export function differing(specs: Spec[]): string[] {
-  const flat = specs.map((s) => ({ ...OPTIONAL_DEFAULTS, ...flatten(s) }));
+  const flat = specs.map((s) => filled(s));
   const paths = [...new Set(flat.flatMap((x) => Object.keys(x)))];
   const ordered = [...FIELDS.map((x) => x.path).filter((p) => paths.includes(p)), ...paths.filter((p) => !BY_PATH.has(p))];
   return ordered.filter((p) => flat.some((x) => !same(x[p], flat[0][p])));

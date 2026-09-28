@@ -25,6 +25,7 @@ import {
   runResult,
   sameCriteria,
   sharedBands,
+  showsChromium,
   specCard,
   specLabels,
   specResults,
@@ -34,8 +35,8 @@ import {
 } from '../../src/lib/shape';
 import { makeBands, tickShown } from '../../src/lib/bands';
 import { laneLayout, LANES_MAX_PX } from '../../src/lib/scale';
-import { differing, FIELDS, field, flatten, mib, show } from '../../src/lib/spec';
-import type { CampaignDoc, Index, RunDoc, TrialDoc } from '../../src/lib/types';
+import { differing, FIELDS, field, flagsShort, flagsWords, flatten, mib, show } from '../../src/lib/spec';
+import type { CampaignDoc, Index, RunDoc, SpecDoc, TrialDoc } from '../../src/lib/types';
 
 const DATA = join(__dirname, '../fixtures/data/campaigns');
 const read = <T>(...p: string[]): T => JSON.parse(readFileSync(join(DATA, ...p), 'utf8')) as T;
@@ -78,6 +79,21 @@ describe('specs, from the input schema', () => {
     ]);
     expect(groups.flatMap((g) => g.rows).length).toBe(Object.keys(flatten(syn.specs[1].spec)).length);
   });
+
+  it('mark a list a spec changed from the default the base leaves out, and write it whole', () => {
+    const flags = ['--disable-features=PreloadTopChromeWebUI,WebUIOmniboxPopup', '--no-zygote'];
+    const spec = { ...syn.specs[1].spec, workload: { chromium_extra_flags: flags } };
+    const changes = [...syn.specs[1].changes, { path: 'workload.chromium_extra_flags', base: [], value: flags }];
+    const workload = specSections(spec, changes).find((g) => g.group === 'Workload')!;
+    expect(workload.rows).toEqual([
+      { path: 'workload.chromium_extra_flags', label: 'Extra Chromium flags', value: flags.join(' '), base: 'none' },
+    ]);
+    // A spec that writes the default list shows it as none, unmarked.
+    const none = specSections({ ...syn.specs[0].spec, workload: { chromium_extra_flags: [] } }, syn.specs[0].changes);
+    expect(none.find((g) => g.group === 'Workload')!.rows).toEqual([
+      { path: 'workload.chromium_extra_flags', label: 'Extra Chromium flags', value: 'none', base: undefined },
+    ]);
+  });
 });
 
 describe('what we tested', () => {
@@ -87,6 +103,7 @@ describe('what we tested', () => {
       hypervisor: { value: 'Firecracker', sub: null },
       microvm: '2 vCPU · 2 GiB',
       densities: [1, 2, 4, 8, 12, 16],
+      chromium: [],
     });
     // The devices are named only where they differ between the specs shown.
     expect(specCard(hv.specs[1], true).hypervisor).toEqual({ value: 'Cloud Hypervisor', sub: 'PCI + RNG devices' });
@@ -104,6 +121,43 @@ describe('what we tested', () => {
     expect([...differingRows([cap.specs[0], explicit])]).toEqual([]);
     expect(differing([cap.specs[0].spec, vm({ console: 'quiet' }).spec])).toEqual(['microvm.console']);
     expect([...differingRows([cap.specs[0], vm({ memory_pages: 'thp' })])]).toEqual(['microvm']);
+  });
+
+  it('shows extra Chromium flags, a list, as its own row only where some spec adds them', () => {
+    const LEAN = ['--disable-features=PreloadTopChromeWebUI,WebUIOmniboxPopup,WebUIOmniboxAimPopup,WebUIOmniboxFullPopup'];
+    const flagged = (s: SpecDoc, flags: string[] | undefined): SpecDoc => ({
+      ...s,
+      name: `${s.name}-f${flags?.length ?? 'x'}`,
+      spec: { ...s.spec, ...(flags ? { workload: { chromium_extra_flags: flags } } : {}) },
+    });
+    const [big, small] = syn.specs;
+    const four = [big, flagged(big, LEAN), small, flagged(small, LEAN)];
+    expect(specCard(four[1]).chromium).toEqual(LEAN);
+    expect(specCard(four[0]).chromium).toEqual([]);
+    expect([...differingRows(four)]).toEqual(['host', 'densities', 'chromium']);
+    expect(differing(four.map((s) => s.spec))).toContain('workload.chromium_extra_flags');
+    // One set of flags: labels say which specs add it; the strip and the table say what it is.
+    expect(specLabels(four)).toEqual([
+      'm8i.4xlarge · no extra flags',
+      'm8i.4xlarge · extra flags',
+      'm8i.2xlarge · no extra flags',
+      'm8i.2xlarge · extra flags',
+    ]);
+    // Several: the flags, a long one cut to its name, unless cut two different lists would read the same.
+    const one = ['--renderer-process-limit=1'];
+    expect(specLabels([big, flagged(big, LEAN), { ...flagged(big, one), name: 'one' }])).toEqual([
+      'no extra flags', '--disable-features=…', '--renderer-process-limit=1',
+    ]);
+    const other = ['--disable-features=PreloadTopChromeWebUI,WebUIOmniboxPopup'];
+    expect(specLabels([flagged(big, LEAN), flagged(big, other)])).toEqual([LEAN[0], other[0]]);
+    expect(flagsWords([big.spec, flagged(big, ['--renderer-process-limit=1']).spec])).toEqual(['none', '--renderer-process-limit=1']);
+    expect(flagsShort(LEAN)).toBe('--disable-features=…');
+    // A list equal to the default, written or left out, is no difference and no row.
+    const written = flagged(big, []);
+    expect([...differingRows([big, written])]).toEqual([]);
+    expect(showsChromium([big, written])).toBe(false);
+    expect(showsChromium(four)).toBe(true);
+    expect(specLabels([big, written])).toEqual(specLabels([big, { ...big, name: 'again' }]));
   });
 
   it('names each spec by what sets it apart, never by its slug', () => {

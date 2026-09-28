@@ -397,6 +397,39 @@ test.describe('the published hv-host-2: a metal host, judged by SLOs of its own 
   });
 });
 
+test.describe('the published browser-lean-1: specs that change a list, the extra Chromium flags', () => {
+  const LEAN = 'browser-lean-1';
+  const has = index.campaigns.some((c) => c.id === LEAN);
+  const lean = has ? read<CampaignDoc>('campaigns', LEAN, 'campaign.json') : null;
+  const flags = lean?.definition.specs['c8i-xlarge-nopre']?.workload?.chromium_extra_flags ?? [];
+
+  test('labels the specs by their flags, and shows the flags short in the strip and whole in the table', async ({ page }) => {
+    test.skip(!has, `${LEAN} isn't published`);
+    await page.goto(`./${href({ name: 'results', campaign: LEAN })}`);
+    await expect(page.getByRole('heading', { name: 'What we tested', exact: true })).toBeVisible();
+    const strip = page.locator('dl.strip .item').filter({ has: page.locator('dt', { hasText: 'Chromium flags' }) });
+    await expect(strip.locator('.chip')).toHaveText(['none', '--disable-features=…', 'none', '--disable-features=…']);
+    await expect(strip.locator('.chip').nth(1)).toHaveAttribute('title', flags.join(' '));
+    const heads = page.locator('.matrix .head strong');
+    await expect(heads).toHaveText(['c8i.xlarge · no extra flags', 'c8i.xlarge · extra flags', 'm8i.4xlarge · no extra flags', 'm8i.4xlarge · extra flags']);
+    const row = page.locator('.matrix .rl', { hasText: 'Chromium flags' });
+    await expect(row).toHaveCount(1);
+    await expect(page.locator('.matrix .cell.diff code')).toHaveText([flags.join(' '), flags.join(' ')]);
+  });
+
+  test('marks the flags a run changed from the base, with the base as none', async ({ page }) => {
+    test.skip(!has, `${LEAN} isn't published`);
+    await page.goto(`./${href({ name: 'run', campaign: LEAN, run: 'c8i-xlarge-nopre-r1', density: null })}`);
+    await page.getByText('Full spec', { exact: true }).click();
+    const row = page.locator('details.spec dl div', { has: page.locator('dt', { hasText: 'Extra Chromium flags' }) });
+    await expect(row).toHaveClass(/changed/);
+    await expect(row.locator('dd > .flags code')).toHaveText(flags);
+    await expect(row.locator('.was')).toHaveText('base none');
+    const [sw, cw] = await page.evaluate(() => [document.documentElement.scrollWidth, document.documentElement.clientWidth]);
+    expect(sw).toBeLessThanOrEqual(cw);
+  });
+});
+
 test.describe('links what is public on GitHub (D73)', () => {
   const GH = 'https://github.com/evandbrown/fleetkit';
   const DATA = `${GH}/blob/main/site/public/data`;

@@ -6,7 +6,7 @@ import { makeBands, type Band } from './bands';
 import { meanMidpoint } from './derive';
 import { STOPPED_EARLY, SUBJECT_LABEL, trialLabel, VERDICT_SHORT } from './glossary';
 import { href } from './router';
-import { differing, flatten, field, hypervisorName, mib, show, STANDARD_CRITERIA } from './spec';
+import { chromiumFlags, differing, flagsWords, flatten, field, hypervisorName, mib, show, STANDARD_CRITERIA } from './spec';
 import type {
   CampaignDoc,
   CampaignEntry,
@@ -45,14 +45,19 @@ const devices = (h: Spec['hypervisor']) => `${h.virtio_transport.toUpperCase()}$
 
 /**
  * Display names for specs, from the inputs that differ between them: the instance type, the hypervisor, the microVM
- * size, then the devices to break a tie ("Firecracker MMIO"). One spec, or specs that differ in nothing named here,
+ * size, the extra Chromium flags, then the devices to break a tie ("Firecracker MMIO"). Flags are "extra flags" beside
+ * "no extra flags" where the specs add only one set of them, and the flags themselves, cut short where that stays
+ * unambiguous ("--disable-features=…"), where they add several. One spec, or specs that differ in nothing named here,
  * get "m8i.4xlarge · Firecracker"; the builder's label is the last resort. Slugs stay in URLs.
  */
 export function specLabels(specs: SpecDoc[]): string[] {
   const host = (s: SpecDoc) => s.host.instance_type;
   const hv = (s: SpecDoc) => hypervisorName(s.spec.hypervisor.name);
   const vm = (s: SpecDoc) => `${s.spec.microvm.vcpus} vCPU · ${mib(s.spec.microvm.memory_mib)} microVM`;
-  const parts = [host, hv, vm].filter((p) => new Set(specs.map(p)).size > 1);
+  const sets = new Set(specs.map((s) => chromiumFlags(s.spec).join(' ')).filter(Boolean));
+  const words = flagsWords(specs.map((s) => s.spec));
+  const flags = (s: SpecDoc) => (!chromiumFlags(s.spec).length ? 'no extra flags' : sets.size === 1 ? 'extra flags' : words[specs.indexOf(s)]);
+  const parts = [host, hv, vm, flags].filter((p) => new Set(specs.map(p)).size > 1);
   const first = specs.map((s) => parts.map((p) => p(s)).join(' · '));
   const tied = first.map((l, i) => {
     const same = specs.filter((_, j) => first[j] === l);
@@ -66,7 +71,7 @@ export function specLabels(specs: SpecDoc[]): string[] {
 
 // ---- what we tested: one card per spec ------------------------------------------------------------------
 
-export type CardRow = 'host' | 'hypervisor' | 'microvm' | 'densities';
+export type CardRow = 'host' | 'hypervisor' | 'microvm' | 'densities' | 'chromium';
 
 export interface SpecCard {
   host: { value: string; sub: string };
@@ -74,6 +79,8 @@ export interface SpecCard {
   hypervisor: { value: string; sub: string | null };
   microvm: string;
   densities: number[];
+  /** The extra Chromium flags, in full; none when the spec leaves them out. */
+  chromium: string[];
 }
 
 /** The microVM as a card shows it: its size, then its guest console and memory pages where they aren't the defaults
@@ -93,14 +100,20 @@ export function specCard(s: SpecDoc, showDevices = false): SpecCard {
     hypervisor: { value: hypervisorName(h.name), sub: showDevices ? `${devices(h)} devices` : null },
     microvm: microvmCard(s.spec.microvm),
     densities: s.spec.densities,
+    chromium: chromiumFlags(s.spec),
   };
 }
+
+/** Whether the cards show a Chromium flags row: when any spec shown adds flags. Where none does, the row would only
+ * say "none" for every spec, as every campaign before the flags existed ran. */
+export const showsChromium = (specs: SpecDoc[]) => specs.some((s) => chromiumFlags(s.spec).length > 0);
 
 const ROW_OF: [string, CardRow][] = [
   ['worker_host.', 'host'],
   ['hypervisor.', 'hypervisor'],
   ['microvm.', 'microvm'],
   ['densities', 'densities'],
+  ['workload.', 'chromium'],
 ];
 
 /** The card rows whose inputs differ between the specs: what the cards highlight. */

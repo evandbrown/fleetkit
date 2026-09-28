@@ -70,6 +70,62 @@ describe('the contract refuses what breaks a rule', () => {
   });
 });
 
+describe('a named spec that changes a list-valued field', () => {
+  // The synthetic campaign with its second spec adding extra Chromium flags, as the builder publishes it: the base
+  // leaves the optional field out, so the change's base is the default, [].
+  const c = read<CampaignDoc>('campaigns', 'nested-sizes-synthetic', 'campaign.json');
+  const FLAGS = ['--disable-features=PreloadTopChromeWebUI,WebUIOmniboxPopup', '--renderer-process-limit=2'];
+  const withFlags = (flags: string[], change: { base: unknown; value: unknown } | null) => {
+    const doc = structuredClone(c);
+    doc.definition.specs['m8i-2xlarge'] = { ...doc.definition.specs['m8i-2xlarge'], workload: { chromium_extra_flags: flags } };
+    const s = doc.specs[1];
+    s.spec.workload = { chromium_extra_flags: [...flags] };
+    if (change) s.changes.push({ path: 'workload.chromium_extra_flags', ...change } as (typeof s.changes)[number]);
+    return doc;
+  };
+  const problems = (doc: CampaignDoc) => checkCampaign(doc).filter((x) => x.includes('spec m8i-2xlarge'));
+
+  it('holds when the change gives the default as its base and the list as its value', () => {
+    expect(problems(withFlags(FLAGS, { base: [], value: FLAGS }))).toEqual([]);
+    expect(checkCampaign(withFlags(FLAGS, { base: [], value: FLAGS }))).toEqual([]);
+  });
+  it('holds when the base itself writes flags and the spec changes them, or turns them off', () => {
+    const doc = withFlags(FLAGS, { base: ['--process-per-site'], value: FLAGS });
+    doc.definition.base.workload = { chromium_extra_flags: ['--process-per-site'] };
+    doc.specs[0].spec.workload = { chromium_extra_flags: ['--process-per-site'] };
+    doc.specs[0].changes = [];
+    expect(checkCampaign(doc)).toEqual([]);
+    const off = withFlags([], { base: ['--process-per-site'], value: [] });
+    off.definition.base.workload = { chromium_extra_flags: ['--process-per-site'] };
+    off.specs[0].spec.workload = { chromium_extra_flags: ['--process-per-site'] };
+    expect(checkCampaign(off)).toEqual([]);
+  });
+  it('refuses a list change with the wrong base, the wrong items, or its items out of order', () => {
+    expect(problems(withFlags(FLAGS, { base: null, value: FLAGS }))).toEqual([
+      'campaign nested-sizes-synthetic spec m8i-2xlarge: change workload.chromium_extra_flags has the wrong values',
+    ]);
+    expect(problems(withFlags(FLAGS, { base: [], value: FLAGS.slice(0, 1) }))).toHaveLength(1);
+    expect(problems(withFlags(FLAGS, { base: [], value: [...FLAGS].reverse() }))).toHaveLength(1);
+    expect(problems(withFlags(FLAGS, { base: [], value: FLAGS.join(' ') }))).toHaveLength(1);
+  });
+  it('refuses a list change left out', () => {
+    expect(problems(withFlags(FLAGS, null))).toEqual([
+      "campaign nested-sizes-synthetic spec m8i-2xlarge: changes don't list exactly where it differs from the base",
+    ]);
+  });
+  it('a list equal to the default is no change: listing one is refused, leaving it out holds', () => {
+    expect(checkCampaign(withFlags([], null))).toEqual([]);
+    expect(problems(withFlags([], { base: [], value: [] }))).toEqual([
+      "campaign nested-sizes-synthetic spec m8i-2xlarge: changes don't list exactly where it differs from the base",
+    ]);
+  });
+  it('scalars are as before: a change with the wrong base is refused', () => {
+    const bad = structuredClone(c);
+    bad.specs[1].changes[0].base = 'm8i.xlarge';
+    expect(problems(bad)).toEqual(['campaign nested-sizes-synthetic spec m8i-2xlarge: change worker_host.instance_type has the wrong values']);
+  });
+});
+
 describe('the synthetic campaigns', () => {
   const sizes = index.campaigns.find((c) => c.id === 'nested-sizes-synthetic')!;
   const hv = read<CampaignDoc>('campaigns', 'nested-hv-synthetic', 'campaign.json');

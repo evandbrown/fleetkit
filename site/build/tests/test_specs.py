@@ -7,6 +7,8 @@ import pytest
 
 import specs as SP
 
+expand = SP.expand
+
 REPO = Path(__file__).resolve().parents[3]
 CAMPAIGNS = REPO / "experiments/campaigns"
 
@@ -54,6 +56,41 @@ def test_extra_chromium_flags_label_a_spec_and_left_out_are_none():
         {"path": "workload.chromium_extra_flags", "base": [], "value": ["--renderer-process-limit=1"]}]
     with pytest.raises(SP.SpecError, match="same spec"):
         SP.resolve({**d, "specs": {"aa": {}, "bb": {"workload": {"chromium_extra_flags": []}}}})
+
+
+LEAN = ["--disable-features=PreloadTopChromeWebUI,WebUIOmniboxPopup,WebUIOmniboxAimPopup,WebUIOmniboxFullPopup"]
+
+
+def test_a_list_change_is_the_whole_list_against_the_bases_list_or_its_default():
+    base = load("nested-sizes-1")["base"]
+    assert "workload" not in base
+    lean = expand.merge(base, {"workload": {"chromium_extra_flags": LEAN}, "densities": [1, 4, 8]})
+    # Left out by the base, the flags are at their default: the change's base is [], never null.
+    assert SP.changes(base, lean) == [
+        {"path": "densities", "base": [1, 4, 8, 9, 10, 11, 12, 14, 16], "value": [1, 4, 8]},
+        {"path": "workload.chromium_extra_flags", "base": [], "value": LEAN}]
+    # Written by the base, a list is compared item by item, in order: other items, the same items reordered, and
+    # the default are each a change.
+    two = expand.merge(base, {"workload": {"chromium_extra_flags": ["--process-per-site", "--no-zygote"]}})
+    for value in (LEAN, ["--no-zygote", "--process-per-site"], []):
+        spec = expand.merge(two, {"workload": {"chromium_extra_flags": value}})
+        assert SP.changes(two, spec) == [
+            {"path": "workload.chromium_extra_flags", "base": ["--process-per-site", "--no-zygote"], "value": value}]
+    # A list is published as a JSON list, not a string or its words.
+    doc = json.loads(json.dumps(SP.spec_doc("lean", "lean", None, base, lean)))
+    assert doc["changes"][-1] == {"path": "workload.chromium_extra_flags", "base": [], "value": LEAN}
+    assert doc["spec"]["workload"] == {"chromium_extra_flags": LEAN}
+
+
+def test_a_list_equal_to_the_bases_or_its_default_is_no_change():
+    base = load("nested-sizes-1")["base"]
+    assert SP.changes(base, expand.merge(base, {"workload": {"chromium_extra_flags": []}})) == []
+    assert SP.changes(base, expand.merge(base, {"densities": list(base["densities"])})) == []
+    written = expand.merge(base, {"workload": {"chromium_extra_flags": []}})
+    assert SP.changes(written, base) == [] and SP.changes(written, written) == []
+    # Scalars are as before: only the fields that differ, each with the base's value.
+    assert SP.changes(base, expand.merge(base, {"microvm": {"vcpus": 1}})) == [
+        {"path": "microvm.vcpus", "base": 2, "value": 1}]
 
 
 def test_the_guest_console_and_memory_pages_label_a_spec_and_left_out_are_verbose_and_4k():
