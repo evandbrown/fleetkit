@@ -1,7 +1,49 @@
 {
   "schema": "fleetkit-site-data/2",
-  "featured": "hv-host-2",
+  "featured": "hv-host-3",
   "campaigns": [
+    {
+      "id": "hv-host-3",
+      "title": "Metal, nested SLO",
+      "question": "At the nested campaigns' SLO, how many microVMs fit on a metal host?",
+      "started": "2026-09-28T03:58Z",
+      "status": "complete",
+      "replicas": 1,
+      "specs": [
+        {
+          "name": "firecracker-metal",
+          "label": "m8i.metal-48xl, Firecracker, 2 vCPU / 2 GiB"
+        }
+      ],
+      "runs": 1,
+      "outcomes": [
+        {
+          "spec": "firecracker-metal",
+          "replicas": [
+            {
+              "run": "firecracker-metal-r1",
+              "host_vcpus": 192,
+              "tested_successfully": 140,
+              "first_failed": 144,
+              "stopped_early": false,
+              "per_host_vcpu": 0.7292,
+              "midpoint_per_host_vcpu": 0.7396,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0717,
+                  0.0747
+                ],
+                "observed": [
+                  0.2179,
+                  0.2193
+                ]
+              }
+            }
+          ],
+          "midpoint_per_host_vcpu": 0.7396
+        }
+      ]
+    },
     {
       "id": "hv-host-2",
       "title": "Metal host",

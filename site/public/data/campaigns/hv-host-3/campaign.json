@@ -1,0 +1,397 @@
+{
+  "schema": "fleetkit-site-data/2",
+  "id": "hv-host-3",
+  "title": "Metal, nested SLO",
+  "question": "At the nested campaigns' SLO, how many microVMs fit on a metal host?",
+  "started": "2026-09-28T03:58Z",
+  "ended": "2026-09-28T04:03Z",
+  "status": "complete",
+  "definition": {
+    "name": "hv-host-3",
+    "question": "At the nested campaigns' SLO, how many microVMs fit on a metal host?",
+    "replicas": 1,
+    "shutdown_after_minutes": 60,
+    "base": {
+      "worker_host": {
+        "instance_type": "m8i.4xlarge"
+      },
+      "hypervisor": {
+        "name": "firecracker",
+        "virtio_transport": "pci",
+        "virtio_rng": true
+      },
+      "microvm": {
+        "vcpus": 2,
+        "memory_mib": 2048
+      },
+      "densities": [
+        1,
+        4,
+        8,
+        9,
+        10,
+        11,
+        12,
+        14,
+        16
+      ],
+      "criteria": {
+        "step_p50_target_ms": 1000,
+        "step_p95_target_ms": 2000,
+        "task_p95_target_ms": 5000,
+        "ready_timeout_s": 900,
+        "step_timeout_ms": 10000,
+        "task_timeout_ms": 45000
+      },
+      "procedure": {
+        "trials_per_density": 1,
+        "boundary_trials": 2,
+        "settle_s": 10
+      },
+      "support_host": {
+        "instance_type": "m8i.4xlarge"
+      }
+    },
+    "specs": {
+      "firecracker-metal": {
+        "worker_host": {
+          "instance_type": "m8i.metal-48xl"
+        },
+        "densities": [
+          1,
+          96,
+          120,
+          128,
+          132,
+          136,
+          140,
+          144,
+          152
+        ]
+      }
+    },
+    "why": {
+      "firecracker-metal": "Metal at the nested campaigns' SLO, around where hv-host-2 would have crossed it."
+    }
+  },
+  "specs": [
+    {
+      "name": "firecracker-metal",
+      "label": "m8i.metal-48xl, Firecracker, 2 vCPU / 2 GiB",
+      "why": "Metal at the nested campaigns' SLO, around where hv-host-2 would have crossed it.",
+      "changes": [
+        {
+          "path": "worker_host.instance_type",
+          "base": "m8i.4xlarge",
+          "value": "m8i.metal-48xl"
+        },
+        {
+          "path": "densities",
+          "base": [
+            1,
+            4,
+            8,
+            9,
+            10,
+            11,
+            12,
+            14,
+            16
+          ],
+          "value": [
+            1,
+            96,
+            120,
+            128,
+            132,
+            136,
+            140,
+            144,
+            152
+          ]
+        }
+      ],
+      "spec": {
+        "worker_host": {
+          "instance_type": "m8i.metal-48xl"
+        },
+        "hypervisor": {
+          "name": "firecracker",
+          "virtio_transport": "pci",
+          "virtio_rng": true
+        },
+        "microvm": {
+          "vcpus": 2,
+          "memory_mib": 2048
+        },
+        "densities": [
+          1,
+          96,
+          120,
+          128,
+          132,
+          136,
+          140,
+          144,
+          152
+        ],
+        "criteria": {
+          "step_p50_target_ms": 1000,
+          "step_p95_target_ms": 2000,
+          "task_p95_target_ms": 5000,
+          "ready_timeout_s": 900,
+          "step_timeout_ms": 10000,
+          "task_timeout_ms": 45000
+        },
+        "procedure": {
+          "trials_per_density": 1,
+          "boundary_trials": 2,
+          "settle_s": 10
+        },
+        "support_host": {
+          "instance_type": "m8i.4xlarge"
+        }
+      },
+      "host": {
+        "instance_type": "m8i.metal-48xl",
+        "host_kind": "metal",
+        "vcpus": 192,
+        "memory_gib": 768,
+        "price_usd_per_hour": 10.16064,
+        "price_estimated": false
+      }
+    }
+  ],
+  "runs": [
+    {
+      "id": "firecracker-metal-r1",
+      "spec": "firecracker-metal",
+      "replica": 1,
+      "stopped_early": false,
+      "started": "2026-09-28T03:58Z",
+      "duration_s": 327,
+      "host": {
+        "instance_type": "m8i.metal-48xl",
+        "host_kind": "metal",
+        "vcpus": 192,
+        "cores": 96,
+        "threads_per_core": 2,
+        "sockets": 1,
+        "cpu_model": "Intel(R) Xeon(R) 6975P-C",
+        "mem_gib": 755.6,
+        "kernel_release": "6.18.48-109.150.amzn2023.x86_64",
+        "hypervisor_version": "Firecracker v1.17.0",
+        "chromium_version": "154.0.8037.57"
+      },
+      "result": {
+        "tested_successfully": 140,
+        "first_failed": 144,
+        "gap": [
+          141,
+          143
+        ],
+        "not_tested": [],
+        "per_host_vcpu": 0.7292,
+        "midpoint_per_host_vcpu": 0.7396,
+        "cost_per_1000_tasks": {
+          "execution": [
+            0.0717,
+            0.0747
+          ],
+          "observed": [
+            0.2179,
+            0.2193
+          ]
+        },
+        "limit": {
+          "density": 144,
+          "verdicts": [
+            "host_cpu"
+          ],
+          "trials_with_verdict": 3,
+          "trials": 3,
+          "missed": [
+            "the home step's median took 949–1,037 ms against 1,000 (1 of 3 trials)"
+          ],
+          "host_consumer": "microvm_vcpus",
+          "guest_group": "renderer",
+          "guest_share": [
+            0.4574,
+            0.4631
+          ]
+        }
+      },
+      "by_density": [
+        {
+          "density": 1,
+          "result": "passed",
+          "passed": 1,
+          "trials": 1,
+          "trial_results": [
+            true
+          ]
+        },
+        {
+          "density": 96,
+          "result": "passed",
+          "passed": 1,
+          "trials": 1,
+          "trial_results": [
+            true
+          ]
+        },
+        {
+          "density": 120,
+          "result": "passed",
+          "passed": 1,
+          "trials": 1,
+          "trial_results": [
+            true
+          ]
+        },
+        {
+          "density": 128,
+          "result": "passed",
+          "passed": 1,
+          "trials": 1,
+          "trial_results": [
+            true
+          ]
+        },
+        {
+          "density": 132,
+          "result": "passed",
+          "passed": 1,
+          "trials": 1,
+          "trial_results": [
+            true
+          ]
+        },
+        {
+          "density": 136,
+          "result": "passed",
+          "passed": 1,
+          "trials": 1,
+          "trial_results": [
+            true
+          ]
+        },
+        {
+          "density": 140,
+          "result": "passed",
+          "passed": 3,
+          "trials": 3,
+          "trial_results": [
+            true,
+            true,
+            true
+          ]
+        },
+        {
+          "density": 144,
+          "result": "failed",
+          "passed": 2,
+          "trials": 3,
+          "trial_results": [
+            true,
+            true,
+            false
+          ]
+        },
+        {
+          "density": 152,
+          "result": "failed",
+          "passed": 0,
+          "trials": 3,
+          "trial_results": [
+            false,
+            false,
+            false
+          ]
+        }
+      ]
+    }
+  ],
+  "outcomes": [
+    {
+      "spec": "firecracker-metal",
+      "replicas": [
+        {
+          "run": "firecracker-metal-r1",
+          "host_vcpus": 192,
+          "tested_successfully": 140,
+          "first_failed": 144,
+          "stopped_early": false,
+          "per_host_vcpu": 0.7292,
+          "midpoint_per_host_vcpu": 0.7396,
+          "cost_per_1000_tasks": {
+            "execution": [
+              0.0717,
+              0.0747
+            ],
+            "observed": [
+              0.2179,
+              0.2193
+            ]
+          }
+        }
+      ],
+      "midpoint_per_host_vcpu": 0.7396
+    }
+  ],
+  "rules": [
+    {
+      "key": "host_cpu_pressure_pct",
+      "label": "Host CPU pressure",
+      "verdict": "host_cpu",
+      "op": ">=",
+      "threshold": 20
+    },
+    {
+      "key": "host_cpu_util_pct",
+      "label": "Host CPU utilisation",
+      "verdict": "host_cpu",
+      "op": ">=",
+      "threshold": 90
+    },
+    {
+      "key": "microvm_throttled_fraction",
+      "label": "MicroVM throttled fraction",
+      "verdict": "microvm_cpu_allowance",
+      "op": ">=",
+      "threshold": 0.1
+    },
+    {
+      "key": "host_mem_available_fraction",
+      "label": "Host memory available",
+      "verdict": "host_memory",
+      "op": "<",
+      "threshold": 0.1
+    },
+    {
+      "key": "host_mem_pressure_pct",
+      "label": "Host memory pressure",
+      "verdict": "host_memory",
+      "op": ">=",
+      "threshold": 5
+    },
+    {
+      "key": "host_io_pressure_pct",
+      "label": "Host IO pressure",
+      "verdict": "io",
+      "op": ">=",
+      "threshold": 10
+    },
+    {
+      "key": "host_steal_pct",
+      "label": "Steal",
+      "verdict": "steal",
+      "op": ">=",
+      "threshold": 5
+    }
+  ],
+  "notes": [
+    "The same SLO as the nested campaigns: each step's p50 within 1 s and p95 within 2 s.",
+    "Densities are close together between 128 and 144, around where hv-host-2's trials would have crossed this SLO."
+  ]
+}

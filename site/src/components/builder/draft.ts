@@ -39,6 +39,7 @@ export const TITLES: Record<string, string> = {
   'nested-mem-1': 'Host memory',
   'hv-host-1': 'Hypervisor and host kind',
   'hv-host-2': 'Metal host',
+  'hv-host-3': 'Metal, nested SLO',
 };
 
 /** The campaign files in experiments/campaigns/, campaigns first, then the examples that aren't approved to run. */

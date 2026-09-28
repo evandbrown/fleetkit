@@ -36,6 +36,14 @@
         "Its SLO is looser than the nested campaigns': each step's p50 within 2 s and p95 within 3 s, not 1 s and 2 s.",
         "Every density passed. A host runs at most 200 microVMs in this harness, so the limit is above 192."
       ]
+    },
+    {
+      "id": "hv-host-3",
+      "title": "Metal, nested SLO",
+      "notes": [
+        "The same SLO as the nested campaigns: each step's p50 within 1 s and p95 within 2 s.",
+        "Densities are close together between 128 and 144, around where hv-host-2's trials would have crossed this SLO."
+      ]
     }
   ],
   "gate_allow": []
