@@ -28,6 +28,14 @@
     {
       "id": "nested-hv-1",
       "title": "Hypervisor"
+    },
+    {
+      "id": "hv-host-2",
+      "title": "Metal host",
+      "notes": [
+        "Its SLO is looser than the nested campaigns': each step's p50 within 2 s and p95 within 3 s, not 1 s and 2 s.",
+        "Every density passed. A host runs at most 200 microVMs in this harness, so the limit is above 192."
+      ]
     }
   ],
   "gate_allow": []

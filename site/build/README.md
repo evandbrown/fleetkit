@@ -39,8 +39,8 @@ somewhere else; `--catalog` and `--repo` point it at another catalog and results
      URLs, availability zones, or image metadata in any published byte (a legitimate match needs a
      `gate_allow` entry in the catalog, with its reason);
    - no retired word in any key or value;
-   - the size budget ([sizes.py](sizes.py)): index 5 KB, each document 25 KB, each thumbnail 10 KB, each
-     full-size image 60 KB, the dataset 2 MB, all gzipped;
+   - the size budget ([sizes.py](sizes.py)): index 5 KB, each document 80 KB, each thumbnail 10 KB, each
+     full-size image 60 KB, the dataset 8 MB, all gzipped;
    - the site's own contract ([contract.test.ts](contract.test.ts) runs `src/lib/contract.ts` through vitest).
 
 ## Publishing a campaign

@@ -1,7 +1,49 @@
 {
   "schema": "fleetkit-site-data/2",
-  "featured": "nested-mem-1",
+  "featured": "hv-host-2",
   "campaigns": [
+    {
+      "id": "hv-host-2",
+      "title": "Metal host",
+      "question": "How does a metal host change density per vCPU and cost?",
+      "started": "2026-09-28T02:59Z",
+      "status": "complete",
+      "replicas": 1,
+      "specs": [
+        {
+          "name": "firecracker-metal",
+          "label": "m8i.metal-48xl, Firecracker, 2 vCPU / 2 GiB"
+        }
+      ],
+      "runs": 1,
+      "outcomes": [
+        {
+          "spec": "firecracker-metal",
+          "replicas": [
+            {
+              "run": "firecracker-metal-r1",
+              "host_vcpus": 192,
+              "tested_successfully": 192,
+              "first_failed": null,
+              "stopped_early": false,
+              "per_host_vcpu": 1,
+              "midpoint_per_host_vcpu": null,
+              "cost_per_1000_tasks": {
+                "execution": [
+                  0.0733,
+                  0.0756
+                ],
+                "observed": [
+                  0.2163,
+                  0.2213
+                ]
+              }
+            }
+          ],
+          "midpoint_per_host_vcpu": null
+        }
+      ]
+    },
     {
       "id": "nested-mem-1",
       "title": "Host memory",

@@ -1,0 +1,31 @@
+{
+  "name": "hv-host-3",
+  "question": "At the nested campaigns' SLO, how many microVMs fit on a metal host?",
+  "replicas": 1,
+  "shutdown_after_minutes": 60,
+  "base": {
+    "worker_host": { "instance_type": "m8i.4xlarge" },
+    "hypervisor": { "name": "firecracker", "virtio_transport": "pci", "virtio_rng": true },
+    "microvm": { "vcpus": 2, "memory_mib": 2048 },
+    "densities": [1, 4, 8, 9, 10, 11, 12, 14, 16],
+    "criteria": {
+      "step_p50_target_ms": 1000,
+      "step_p95_target_ms": 2000,
+      "task_p95_target_ms": 5000,
+      "ready_timeout_s": 900,
+      "step_timeout_ms": 10000,
+      "task_timeout_ms": 45000
+    },
+    "procedure": { "trials_per_density": 1, "boundary_trials": 2, "settle_s": 10 },
+    "support_host": { "instance_type": "m8i.4xlarge" }
+  },
+  "specs": {
+    "firecracker-metal": {
+      "worker_host": { "instance_type": "m8i.metal-48xl" },
+      "densities": [1, 96, 120, 128, 132, 136, 140, 144, 152]
+    }
+  },
+  "why": {
+    "firecracker-metal": "Metal at the nested campaigns' SLO, around where hv-host-2 would have crossed it."
+  }
+}
