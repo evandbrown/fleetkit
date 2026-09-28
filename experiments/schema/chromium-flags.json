@@ -60,7 +60,11 @@
         "BackForwardCache": "Keeps pages the task has left alive in memory for going back. The task never goes back.",
         "Translate": "The page-translation service: background work, no page content.",
         "OptimizationHints": "Background fetches of page hints: no page content.",
-        "MediaRouter": "Cast device discovery: background work only."
+        "MediaRouter": "Cast device discovery: background work only.",
+        "PreloadTopChromeWebUI": "Loads the browser's own WebUI pages, such as the address-bar popup, in hidden renderers before they are shown; headless never shows them, and the task's pages are unaffected.",
+        "WebUIOmniboxPopup": "Draws the address-bar popup as a WebUI page in its own renderer, which headless Chromium keeps as a hidden target; the task's pages are unaffected.",
+        "WebUIOmniboxAimPopup": "Another WebUI address-bar popup that headless Chromium keeps as a hidden target; the task's pages are unaffected.",
+        "WebUIOmniboxFullPopup": "The full WebUI address-bar popup, another hidden target in headless Chromium; the task's pages are unaffected."
       }
     },
     "--js-flags": {

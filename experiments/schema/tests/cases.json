@@ -517,6 +517,25 @@
       "errors": ["base.workload.chromium_extra_flags[0]: --disable-features: LazyImageLoading is not an allowed feature", "base.workload.chromium_extra_flags[0]: --disable-features: BackForwardCache appears twice", "base.workload.chromium_extra_flags[1]: --js-flags: --allow-natives-syntax is not an allowed V8 flag", "base.workload.chromium_extra_flags[1]: --js-flags: --max-old-space-size takes a whole number from 16 to 16384"]
     },
     {
+      "name": "a named spec that turns off headless Chromium's hidden omnibox pages",
+      "quota": 32,
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "specs": { "m8i-2xlarge": null, "no-omnibox": { "workload": { "chromium_extra_flags": ["--disable-features=PreloadTopChromeWebUI,WebUIOmniboxPopup,WebUIOmniboxAimPopup,WebUIOmniboxFullPopup"] } } }, "why": null },
+      "valid": true,
+      "warnings": [],
+      "runs": ["m8i-4xlarge-r1", "m8i-4xlarge-r2", "no-omnibox-r1", "no-omnibox-r2"],
+      "differs": ["workload.chromium_extra_flags"],
+      "expected_usd": 1.55,
+      "worst_case_usd": 3.18
+    },
+    {
+      "name": "beside the omnibox features, one not listed and one in the wrong case",
+      "from": "campaigns/nested-sizes-1.json",
+      "patch": { "base": { "workload": { "chromium_extra_flags": ["--disable-features=PreloadTopChromeWebUI,WebUIOmniboxPopup,WebUIOmniboxAimPopup,WebUIOmniboxFullPopup,WebUITabStrip,webuiomniboxpopup"] } } },
+      "valid": false,
+      "errors": ["base.workload.chromium_extra_flags[0]: --disable-features: WebUITabStrip is not an allowed feature", "base.workload.chromium_extra_flags[0]: --disable-features: webuiomniboxpopup is not an allowed feature"]
+    },
+    {
       "name": "Chromium flags that aren't a list of --name=value",
       "from": "campaigns/nested-sizes-1.json",
       "patch": { "specs": { "text": { "workload": { "chromium_extra_flags": "--no-zygote" } }, "bare": { "workload": { "chromium_extra_flags": ["renderer-process-limit=1", 7, "--disable-extensions=", "--no-zygote\n"] } } } },

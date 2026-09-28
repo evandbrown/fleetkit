@@ -44,6 +44,7 @@ export const TITLES: Record<string, string> = {
   'shape-warm-1': 'MicroVM shape, warm start',
   'slo-frontier-1': 'SLO frontier',
   'hv-host-3': 'Metal, nested SLO',
+  'browser-lean-1': 'Leaner headless Chromium',
 };
 
 /** The campaign files in experiments/campaigns/, campaigns first, then the examples that aren't approved to run. */

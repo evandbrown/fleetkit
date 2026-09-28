@@ -1,0 +1,48 @@
+{
+  "name": "browser-lean-1",
+  "question": "Does turning off headless Chromium's hidden omnibox preload lower CPU per task?",
+  "replicas": 2,
+  "shutdown_after_minutes": 45,
+  "base": {
+    "worker_host": { "instance_type": "c8i.xlarge" },
+    "hypervisor": { "name": "firecracker", "virtio_transport": "pci", "virtio_rng": true },
+    "microvm": { "vcpus": 2, "memory_mib": 2048 },
+    "densities": [1, 2, 3, 4],
+    "criteria": {
+      "step_p50_target_ms": 1000,
+      "step_p95_target_ms": 2000,
+      "task_p95_target_ms": 5000,
+      "ready_timeout_s": 180,
+      "step_timeout_ms": 10000,
+      "task_timeout_ms": 45000
+    },
+    "procedure": { "trials_per_density": 1, "boundary_trials": 2, "settle_s": 10 },
+    "support_host": { "instance_type": "m8i.xlarge" }
+  },
+  "specs": {
+    "c8i-xlarge": {},
+    "c8i-xlarge-nopre": {
+      "densities": [1, 2, 3, 4, 5, 6],
+      "workload": {
+        "chromium_extra_flags": ["--disable-features=PreloadTopChromeWebUI,WebUIOmniboxPopup,WebUIOmniboxAimPopup,WebUIOmniboxFullPopup"]
+      }
+    },
+    "m8i-4xlarge": {
+      "worker_host": { "instance_type": "m8i.4xlarge" },
+      "densities": [1, 4, 8, 9, 10, 11, 12, 14, 16]
+    },
+    "m8i-4xlarge-nopre": {
+      "worker_host": { "instance_type": "m8i.4xlarge" },
+      "densities": [1, 4, 8, 9, 10, 11, 12, 13, 14, 16, 18],
+      "workload": {
+        "chromium_extra_flags": ["--disable-features=PreloadTopChromeWebUI,WebUIOmniboxPopup,WebUIOmniboxAimPopup,WebUIOmniboxFullPopup"]
+      }
+    }
+  },
+  "why": {
+    "c8i-xlarge": "The frontier spec, unchanged; pools with rounds 1 and 2.",
+    "c8i-xlarge-nopre": "The frontier spec without the hidden omnibox pages.",
+    "m8i-4xlarge": "The standing control, unchanged.",
+    "m8i-4xlarge-nopre": "The control without the hidden omnibox pages."
+  }
+}
