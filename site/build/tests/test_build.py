@@ -154,6 +154,18 @@ def test_a_published_list_change_is_against_the_default_the_base_leaves_out(data
     assert by["c8i-xlarge"] == {}
 
 
+
+@pytest.mark.skipif(not (REPO / "results/host16-stack-1").exists(), reason="results/host16-stack-1 isn't downloaded here")
+def test_an_interruption_after_the_boundary_is_outside_the_experiment(data):
+    """host16-stack-1's m8i-4xlarge-lean-r4 tested both ends of its boundary in full, then its time bound cut the
+    illustration before it started: the run is published as finished, with the illustration left out (D63)."""
+    c = read(data, "campaigns/host16-stack-1/campaign.json")
+    entry = next(r for r in c["runs"] if r["id"] == "m8i-4xlarge-lean-r4")
+    assert entry["stopped_early"] is False
+    assert (entry["result"]["tested_successfully"], entry["result"]["first_failed"]) == (13, 14)
+    run = read(data, "campaigns/host16-stack-1/runs/m8i-4xlarge-lean-r4.json")
+    assert "illustration" not in [t["id"] for t in run["trials"]]
+
 IS_CLONE = (REPO / ".git").exists()
 needs_clone = pytest.mark.skipif(not IS_CLONE, reason="not a git clone: what GitHub has can't be checked here")
 

@@ -468,11 +468,17 @@ def build_run(src: S.RunSource, *, campaign: str, run_id: str, spec_name: str, r
     # Stopped early: the run ended before its procedure finished (its shutdown timer, an interruption). A run the
     # harness stopped because a density couldn't be tested cleanly finished as the method says: that density and
     # those above it are not tested (D63), which by_density already shows.
-    stopped_early = plan.get("complete") is not True and plan.get("stop_reason") != "not_clean"
+    boundary = plan.get("boundary") or {}
+    # An interruption after both ends of the boundary were tested in full cut only what comes after them (the
+    # illustration, which measures nothing), so the measurement finished and the run didn't stop early (D63).
+    needed = 1 + int(plan.get("boundary_trials") or 0)
+    measured = (plan.get("stop_reason") == "interrupted" and plan.get("stop_at_first_miss") is True
+                and boundary.get("first_miss") is not None and boundary.get("first_miss_trials", 0) >= needed
+                and boundary.get("last_pass") is not None and boundary.get("last_pass_trials", 0) >= needed)
+    stopped_early = plan.get("complete") is not True and plan.get("stop_reason") != "not_clean" and not measured
     core = R.result_core(briefs)
     tested, first_failed = core["tested_successfully"], core["first_failed"]
-    boundary = plan.get("boundary") or {}
-    if plan.get("complete") is True and boundary and \
+    if (plan.get("complete") is True or measured) and boundary and \
             (tested, first_failed) != (boundary.get("last_pass"), boundary.get("first_miss")):
         raise BuildError(f"{run_id}: result {tested}/{first_failed} differs from the run's plan {boundary}")
     at_t = next((b for b in by_density if b["density"] == tested), None)

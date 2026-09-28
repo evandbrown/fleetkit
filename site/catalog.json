@@ -72,6 +72,10 @@
     {
       "id": "stack-warm-1",
       "title": "Full stack, warm start"
+    },
+    {
+      "id": "host16-stack-1",
+      "title": "Full stack, host size"
     }
   ],
   "gate_allow": []

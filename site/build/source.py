@@ -120,6 +120,10 @@ def read_run(run_dir: Path, types: dict, env_file: Path | None = None) -> tuple[
         if kind not in ROLES:
             dropped[kind] += 1
             continue
+        if kind == "illustration" and doc["timestamps"].get("create_start") is None:
+            # An illustration shows the task, it measures nothing: one cut off before it started has nothing to show.
+            dropped["illustration not started"] += 1
+            continue
         rep = report_trials.get(tid)
         if rep is None:
             raise SourceError(f"{run_dir}: trial {tid} is missing from the harness's report")
