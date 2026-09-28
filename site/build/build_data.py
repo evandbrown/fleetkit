@@ -342,7 +342,7 @@ def main(argv=None) -> int:
     log(f"wrote {args.out.relative_to(args.repo) if args.out.is_relative_to(args.repo) else args.out}: "
         f"{len(entries)} campaigns, {n_json} documents, {img['count']} screenshots "
         f"({img['thumbs'] // 1024} KB thumbnails; {img['full_count']} also at full size, {img['fulls'] // 1024} KB); "
-        f"{totals['raw'] / 1024:.0f} KB raw, {totals['gz'] / 1024:.0f} KB gzipped of the 8,192 KB budget "
+        f"{totals['raw'] / 1024:.0f} KB raw, {totals['gz'] / 1024:.0f} KB gzipped of the 16,384 KB budget "
         f"(largest document {totals['largest_doc'][0]}, {totals['largest_doc'][1] / 1024:.1f} KB gz)"
         + ("" if args.no_contract else "; contract checks passed"))
     return 0

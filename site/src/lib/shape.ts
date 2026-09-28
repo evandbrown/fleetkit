@@ -537,7 +537,14 @@ export function answerText(results: SpecResult[]): string {
   const sorted = [...groups].sort((a, b) => ends(b[0])[1] - ends(a[0])[1] || ends(b[0])[0] - ends(a[0])[0]);
   const parts: string[] = [];
   if (sorted.length === 1 && !missing.length) parts.push(`${EVERY[results.length] ?? `all ${results.length}`} fit ${sorted[0][0]}${unit}.`);
-  else if (sorted.length) {
+  else if (sorted.length > 3) {
+    // Many specs: the best, and the range of the rest, so the line stays a line.
+    const [[v, labels], ...rest] = sorted;
+    const others = rest.reduce((n, [, ls]) => n + ls.length, 0);
+    const [lo, hi] = [Math.min(...rest.map(([x]) => ends(x)[0])), Math.max(...rest.map(([x]) => ends(x)[1]))];
+    const fmt = (n: number) => (perVcpu ? n.toFixed(2) : `${n}`);
+    parts.push(`${listed(labels)} ${labels.length > 1 ? 'fit' : 'fits'} the most, ${v}${unit}; the other ${others} specs ${lo === hi ? fmt(lo) : `${fmt(lo)}–${fmt(hi)}`}.`);
+  } else if (sorted.length) {
     parts.push(
       `${sorted.map(([v, labels], i) => (i === 0 ? `${listed(labels)} ${labels.length > 1 ? 'fit' : 'fits'} ${v}${unit}` : `${listed(labels)} ${v}`)).join(', ')}.`,
     );
@@ -546,7 +553,10 @@ export function answerText(results: SpecResult[]): string {
   const outs = [...new Set(results.filter((r) => r.limits.length).map((r) => VERDICT_SHORT[r.limits[0].verdict]))];
   const failing = results.filter((r) => r.limits.length).length;
   if (outs.length === 1) parts.push(`${outs[0]} ran out first${failing === results.length ? ` in ${EVERY[failing] ?? `all ${failing}`}` : ''}.`);
-  else if (outs.length > 1) {
+  else if (outs.length > 1 && failing > 3) {
+    const n = (o: string) => results.filter((r) => r.limits.length && VERDICT_SHORT[r.limits[0].verdict] === o).length;
+    parts.push(`Ran out first: ${outs.map((o) => `${o.toLowerCase()} in ${n(o)}`).join(', ')}.`);
+  } else if (outs.length > 1) {
     parts.push(`Ran out: ${results.filter((r) => r.limits.length).map((r) => `${r.ref.groupLabel} ${VERDICT_SHORT[r.limits[0].verdict].toLowerCase()}`).join('; ')}.`);
   }
   // Two sentences at most: the fit, and what ran out.

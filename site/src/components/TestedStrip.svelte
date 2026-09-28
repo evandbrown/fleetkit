@@ -134,6 +134,11 @@
     gap: 5px;
     font-size: 0.88rem;
     white-space: nowrap;
+    max-width: 100%;
+  }
+  /* A long microVM (console, pages) wraps inside its chip rather than widening the page. */
+  .chip b {
+    white-space: normal;
   }
   .chip.on {
     padding: 1px 8px;

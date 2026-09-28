@@ -64,6 +64,14 @@
     {
       "id": "metal-lean-1",
       "title": "Metal, lean Chromium"
+    },
+    {
+      "id": "guest-cold-1",
+      "title": "Guest boot levers, cold start"
+    },
+    {
+      "id": "stack-warm-1",
+      "title": "Full stack, warm start"
     }
   ],
   "gate_allow": []

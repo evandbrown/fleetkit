@@ -234,6 +234,17 @@ describe('how it performed', () => {
     expect(answerText(specResults(refs(hv), docs))).toBe(
       'Firecracker PCI + RNG fits 10 microVMs, Cloud Hypervisor 9, Firecracker MMIO 8–9. Host CPU ran out first in all three.',
     );
+    // With more than three results the line names the best and gives the range of the rest.
+    const three = specResults(refs(hv), docs);
+    const six = [
+      ...three,
+      ...three.map((r) => ({
+        ...r,
+        ref: { ...r.ref, groupLabel: `${r.ref.groupLabel} B` },
+        replicas: r.replicas.map((x) => ({ ...x, tested_successfully: (x.tested_successfully ?? 0) - 3 })),
+      })),
+    ];
+    expect(answerText(six)).toBe('Firecracker PCI + RNG fits the most, 10 microVMs; the other 5 specs 5–9. Host CPU ran out first in all 6.');
   });
 
   it('draws each run of each spec as a bar to its first failure, with a link to the run', () => {
