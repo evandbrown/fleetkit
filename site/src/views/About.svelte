@@ -17,6 +17,7 @@
   let entry = $state<CampaignEntry | null>(null);
   let campaign = $state<CampaignDoc | null>(null);
   let film = $state<NonNullable<TrialDoc['filmstrip']> | null>(null);
+  let filmFull = $state(false); // the illustration has full-size screenshots (DATA.md, rule 10)
   let broken = $state<Partial<Record<StepName, boolean>>>({});
 
   (async () => {
@@ -31,6 +32,7 @@
         const t = await loadTrial(c.id, r.id, 'illustration').catch(() => null);
         if (t?.filmstrip) {
           film = t.filmstrip;
+          filmFull = t.full_size_screenshots;
           break;
         }
       }
@@ -164,16 +166,21 @@
       {#each frames as fr, i (fr.step)}
         <li style:--step="var(--step-{fr.step.replaceAll('_', '-')})">
           {#if fr.img && !broken[fr.step]}
-            <a href={imgUrl(fr.img, 'f')} target="_blank" rel="noopener">
+            {#snippet thumb(img: string, step: StepName)}
               <img
-                src={imgUrl(fr.img, 't')}
-                alt="{STEP_LABEL[fr.step]}: the page after this step"
+                src={imgUrl(img, 't')}
+                alt="{STEP_LABEL[step]}: the page after this step"
                 width="320"
                 height="178"
                 loading="lazy"
-                onerror={() => (broken = { ...broken, [fr.step]: true })}
+                onerror={() => (broken = { ...broken, [step]: true })}
               />
-            </a>
+            {/snippet}
+            {#if filmFull}
+              <a href={imgUrl(fr.img, 'f')} target="_blank" rel="noopener">{@render thumb(fr.img, fr.step)}</a>
+            {:else}
+              {@render thumb(fr.img, fr.step)}
+            {/if}
           {:else}
             <div class="blank" aria-hidden="true"></div>
           {/if}

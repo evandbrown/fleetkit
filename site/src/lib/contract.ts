@@ -4,6 +4,7 @@ import {
   costPer1000,
   countsTowardResult,
   densityBriefs,
+  fullSizeTrials,
   hostKindOf,
   meanMidpoint,
   meetsEveryCriterion,
@@ -300,6 +301,8 @@ export function checkTrial(doc: TrialDoc, run: RunDoc): string[] {
   if (!same(doc.microvms.map((m) => m.index), doc.microvms.map((_, i) => i + 1))) p.push(`${w}: microVMs are indexed 1..N`);
   if (doc.microvms.length !== doc.density) p.push(`${w}: ${doc.microvms.length} microVMs at density ${doc.density}`);
   if (s.attribution && !same(s.attribution.verdicts, doc.limit.verdicts)) p.push(`${w}: limit verdicts differ from the run's summary`);
+  const full = fullSizeTrials(run.trials, run.result.tested_successfully, run.result.first_failed).has(doc.id);
+  if (doc.full_size_screenshots !== full) p.push(`${w}: full_size_screenshots should be ${full} (rule 10)`);
   const h = doc.series.host;
   for (const [k, v] of Object.entries(h)) {
     if (Array.isArray(v) && v.length !== h.t_ms.length) p.push(`${w}: series.host.${k} length`);

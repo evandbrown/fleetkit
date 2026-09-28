@@ -90,14 +90,24 @@ def test_a_trial_document(data):
 
 
 @needs_results
-def test_every_screenshot_is_published_once_in_both_sizes(data):
-    shas = set()
+def test_every_screenshot_is_published_once_and_at_full_size_only_where_rule_10_says(data):
+    shas, full, flagged = set(), set(), set()
     for run_doc in (data / "campaigns").glob("*/runs/*.json"):
         shas |= {s for s in json.loads(run_doc.read_text())["tasks"]["img"] if s}
         for f in run_doc.with_suffix("").glob("*.json"):
-            shas |= {fr["img"] for fr in json.loads(f.read_text()).get("filmstrip", {}).get("frames", [])}
+            t = json.loads(f.read_text())
+            here = {m["img"] for m in t["microvms"] if m.get("img")} | \
+                {fr["img"] for fr in t.get("filmstrip", {}).get("frames", [])}
+            shas |= here
+            if t["full_size_screenshots"]:
+                full |= here
+                flagged.add(f"{run_doc.parent.parent.name}/{run_doc.stem}/{t['id']}")
     files = {p.name for p in (data / "img").iterdir()}
-    assert files == {f"{s}.{k}.webp" for s in shas for k in ("t", "f")}
+    assert files == {f"{s}.t.webp" for s in shas} | {f"{s}.f.webp" for s in full}
+    assert full < shas                   # not every screenshot is published at full size
+    # cap-baseline-1: the last pass (trial 1 at 8), the first failure (trial 1 at 12) and the illustration
+    assert {x for x in flagged if x.startswith("cap-baseline-1/")} == \
+        {"cap-baseline-1/baseline-r1/d8-t1", "cap-baseline-1/baseline-r1/d12-t1", "cap-baseline-1/baseline-r1/illustration"}
 
 
 @needs_results

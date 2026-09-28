@@ -72,6 +72,18 @@ def result_core(briefs: list[dict]) -> dict:
             "not_tested": [b["density"] for b in briefs if b["result"] == "not_tested"]}
 
 
+def full_size_trials(trials: list[dict], tested: int | None, first_failed: int | None) -> set[str]:
+    """Rule 10: the trials whose screenshots are published at full size. The last pass: trial 1 at the run's result
+    (every trial there passed). The first failure: the first trial that failed at the run's first failing density,
+    the one Results opens at the limit (trial 1, unless it passed there). And every illustration trial (its
+    filmstrip)."""
+    counting = sorted((t for t in trials if t["counts"]), key=lambda t: t["number"])
+    last_pass = next((t for t in counting if t["density"] == tested), None)
+    first_failure = next((t for t in counting if t["density"] == first_failed and t["passed"] is False), None)
+    return {t["id"] for t in trials if t["role"] == "illustration"} | \
+        {t["id"] for t in (last_pass, first_failure) if t is not None}
+
+
 def midpoint(tested: int | None, first_failed: int | None, host_vcpus: int) -> float | None:
     """Rule 6 (D60): a run's result spans from the highest density that passed (0 if none did) to the lowest
     that failed, per host vCPU; its midpoint. None when no density failed: the result is only "at least"."""

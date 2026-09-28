@@ -419,7 +419,7 @@ def build_run(src: S.RunSource, *, campaign: str, run_id: str, spec_name: str, r
         pre = tj.get("pre_trial")
         if pre:
             doc["settle"] = {"seconds": num(pre["settle_s"]), "cpu_util_mean_pct": r4(pre["cpu_util_mean"])}
-        doc.update({"microvms": lanes, "series": series,
+        doc.update({"full_size_screenshots": False, "microvms": lanes, "series": series,
                     "limit": {"verdicts": attribution["verdicts"] if attribution else ["unknown"], "microvms": lim_vms}})
         if role == "illustration":
             shots = ((tj.get("microvms") or [{}])[0].get("task") or {}).get("step_screenshots") or []
@@ -476,6 +476,15 @@ def build_run(src: S.RunSource, *, campaign: str, run_id: str, spec_name: str, r
             (tested, first_failed) != (boundary.get("last_pass"), boundary.get("first_miss")):
         raise BuildError(f"{run_id}: result {tested}/{first_failed} differs from the run's plan {boundary}")
     at_t = next((b for b in by_density if b["density"] == tested), None)
+    # Rule 10: full-size screenshots only for the trials a reader opens to see them; every other trial's are
+    # thumbnails only, which keeps the dataset within its budget as campaigns accumulate.
+    full = R.full_size_trials(summaries, tested, first_failed)
+    for d in docs:
+        d["full_size_screenshots"] = d["id"] in full
+        if d["full_size_screenshots"]:
+            for sha in [m["img"] for m in d["microvms"] if m.get("img")] + \
+                       [fr["img"] for fr in (d.get("filmstrip") or {}).get("frames", [])]:
+                images.full_size(sha)
     result = {**core,
               "per_host_vcpu": r4(tested / ncpu) if tested is not None else None,
               "midpoint_per_host_vcpu": r4(R.midpoint(tested, first_failed, ncpu)) if first_failed is not None else None,

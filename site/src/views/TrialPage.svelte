@@ -1,6 +1,7 @@
 <script lang="ts">
   // One trial: its result against each criterion, every microVM's start and steps on one clock, what limited it over
-  // time, the final screens, and (for the illustration) the filmstrip.
+  // time, the final screens, and (for the illustration) the filmstrip. Screenshots link to full size only in the
+  // trials the dataset has it for (DATA.md, rule 10); elsewhere they're thumbnails, labelled as such.
   import { loadCampaign, loadRun, loadTrial } from '../lib/data';
   import { trialSource } from '../lib/repo';
   import { href } from '../lib/router';
@@ -114,7 +115,12 @@
                 {/if}
               </tbody>
             </table>
-            <Screenshot sha={sel.img ?? null} alt="The final screen of microVM {sel.index}'s task" caption="Final screen" />
+            <Screenshot
+              sha={sel.img ?? null}
+              full={d.full_size_screenshots}
+              alt="The final screen of microVM {sel.index}'s task"
+              caption={d.full_size_screenshots ? 'Final screen' : 'Final screen, thumbnail only'}
+            />
           </div>
         </section>
       {/if}
@@ -206,9 +212,10 @@
 
       <h2>Final screens</h2>
       {#if d.microvms.some((m) => m.img)}
+        {#if !d.full_size_screenshots}<p class="muted thumbs-only">Thumbnails only</p>{/if}
         <div class="shots">
           {#each d.microvms as m (m.index)}
-            <Screenshot sha={m.img ?? null} alt="The final screen of microVM {m.index}'s task" caption="microVM {m.index}" />
+            <Screenshot sha={m.img ?? null} full={d.full_size_screenshots} alt="The final screen of microVM {m.index}'s task" caption="microVM {m.index}" />
           {/each}
         </div>
       {:else}
@@ -219,7 +226,7 @@
         <h2>Filmstrip</h2>
         <div class="shots film">
           {#each d.filmstrip.frames as fr, i (fr.step)}
-            <Screenshot sha={fr.img} alt="After step {i + 1}, {SUBJECT_LABEL[fr.step]}" caption="{i + 1}. {capital(SUBJECT_LABEL[fr.step])}" />
+            <Screenshot sha={fr.img} full={d.full_size_screenshots} alt="After step {i + 1}, {SUBJECT_LABEL[fr.step]}" caption="{i + 1}. {capital(SUBJECT_LABEL[fr.step])}" />
           {/each}
         </div>
       {/if}
@@ -326,6 +333,10 @@
     grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
     gap: 10px;
     margin: 12px 0;
+  }
+  .thumbs-only {
+    margin: 4px 0 0;
+    font-size: 0.85rem;
   }
   .shots.film {
     grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));

@@ -1,17 +1,22 @@
 <script lang="ts">
-  // A screenshot from the dataset: the 320 px thumbnail, linking to the 1,280 px original. Says so plainly when
-  // the file isn't in this dataset (the cap-baseline-1 fixture has none).
+  // A screenshot from the dataset: the 320 px thumbnail, linking to the 1,280 px copy when the dataset has one
+  // (`full`, DATA.md rule 10); otherwise the thumbnail alone, and the page says so. Says so plainly when the file
+  // isn't in this dataset (the cap-baseline-1 fixture has none).
   import { imgUrl } from '../lib/data';
 
-  let { sha, alt, caption }: { sha: string | null; alt: string; caption: string } = $props();
+  let { sha, alt, caption, full }: { sha: string | null; alt: string; caption: string; full: boolean } = $props();
   let broken = $state(false);
 </script>
 
 <figure class="shot">
   {#if sha && !broken}
-    <a href={imgUrl(sha, 'f')} target="_blank" rel="noopener">
+    {#if full}
+      <a href={imgUrl(sha, 'f')} target="_blank" rel="noopener">
+        <img src={imgUrl(sha, 't')} {alt} width="320" height="200" loading="lazy" onerror={() => (broken = true)} />
+      </a>
+    {:else}
       <img src={imgUrl(sha, 't')} {alt} width="320" height="200" loading="lazy" onerror={() => (broken = true)} />
-    </a>
+    {/if}
   {:else}
     <div class="missing" role="img" aria-label="{alt}: {sha ? 'not in this dataset' : 'not recorded'}">
       {sha ? 'Screenshot not in this dataset' : 'No screenshot recorded'}

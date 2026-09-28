@@ -78,3 +78,18 @@ def test_rule_6_midpoints_d60():
     assert R.midpoint(16, None, 16) is None         # no failure: "at least 16", no midpoint
     assert R.mean_midpoint([0.625, 0.5625]) == 0.59375
     assert R.mean_midpoint([0.625, None]) is None and R.mean_midpoint([]) is None
+
+
+def test_rule_10_full_size_screenshots_at_the_last_pass_the_first_failure_and_the_illustration():
+    def tr(density, number, passed, role="ladder"):
+        tid = f"d{density}-t{number}" if role in R.COUNTING else role
+        return {"id": tid, "density": density, "number": number, "role": role, "counts": role in R.COUNTING,
+                "passed": passed if role in R.COUNTING else None}
+    # walked down: trial 1 at 4 passed, trial 3 failed; the result is 3, the first failure trial 3 at 4
+    walked_down = [tr(1, 1, True), tr(2, 1, True), tr(3, 1, True), tr(4, 1, True), tr(6, 1, False),
+                   tr(4, 2, True, "boundary"), tr(4, 3, False, "boundary"), tr(6, 2, False, "boundary"),
+                   tr(6, 3, False, "boundary"), tr(3, 2, True, "boundary"), tr(3, 3, True, "boundary")]
+    warmup, illustration = tr(1, None, None, "warmup"), tr(1, None, None, "illustration")
+    assert R.full_size_trials([warmup, *walked_down, illustration], 3, 4) == {"d3-t1", "d4-t3", "illustration"}
+    assert R.full_size_trials([tr(1, 1, True), tr(2, 1, True)], 2, None) == {"d2-t1"}
+    assert R.full_size_trials([warmup, tr(1, 1, False)], None, 1) == {"d1-t1"}

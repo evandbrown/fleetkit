@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { densityBriefs, hostKindOf, meanMidpoint, midpoint, parseTrialId, runResultCore, span, trialId, unionVerdicts } from '../../src/lib/derive';
+import { densityBriefs, fullSizeTrials, hostKindOf, meanMidpoint, midpoint, parseTrialId, runResultCore, span, trialId, unionVerdicts } from '../../src/lib/derive';
 import type { TrialSummary } from '../../src/lib/types';
 
 function trial(density: number, number: number, passed: boolean): TrialSummary {
@@ -55,6 +55,24 @@ describe('rules 3 and 4', () => {
       first_failed: null,
       gap: null,
     });
+  });
+});
+
+describe('rule 10: full-size screenshots', () => {
+  const labelled = (role: 'warmup' | 'illustration') => ({ id: role, role, counts: false, number: null, density: 1, passed: null });
+  // Walked down: trial 1 at 4 passed and trial 3 failed, so the result is 3 and the first failure trial 3 at 4.
+  const walkedDown = [
+    trial(1, 1, true), trial(2, 1, true), trial(3, 1, true), trial(4, 1, true), trial(6, 1, false),
+    trial(4, 2, true), trial(4, 3, false), trial(6, 2, false), trial(6, 3, false), trial(3, 2, true), trial(3, 3, true),
+  ];
+
+  it('gives them to trial 1 at the result, the first trial that failed at the first failure, and the illustration', () => {
+    const trials = [labelled('warmup'), ...walkedDown, labelled('illustration')];
+    expect([...fullSizeTrials(trials, 3, 4)].sort()).toEqual(['d3-t1', 'd4-t3', 'illustration']);
+  });
+  it('gives only the last pass when nothing failed, and only the first failure when nothing passed', () => {
+    expect([...fullSizeTrials([trial(1, 1, true), trial(2, 1, true)], 2, null)]).toEqual(['d2-t1']);
+    expect([...fullSizeTrials([labelled('warmup'), trial(1, 1, false)], null, 1)]).toEqual(['d1-t1']);
   });
 });
 

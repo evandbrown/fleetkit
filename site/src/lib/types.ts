@@ -330,6 +330,8 @@ export interface TrialDoc {
   window_ms: Range;
   marks: TrialMarks;
   settle?: { seconds: number; cpu_util_mean_pct: number };
+  /** Rule 10: its screenshots have full-size copies; if false, its page shows thumbnails with no full-size link. */
+  full_size_screenshots: boolean;
   microvms: MicroVMLane[];
   series: TrialSeries;
   limit: TrialLimit;

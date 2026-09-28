@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, test, type Page } from '@playwright/test';
 import { href } from '../../src/lib/router';
-import type { CampaignDoc, Index, RunDoc } from '../../src/lib/types';
+import type { CampaignDoc, Index, RunDoc, TrialDoc } from '../../src/lib/types';
 
 // Every route over the published dataset (public/data): every campaign, run, density and trial it holds, plus the
 // fixed pages. Stricter than the fixture smoke: no request may fail (the real dataset has every screenshot), every
@@ -12,7 +12,8 @@ const DATA = fileURLToPath(new URL('../../public/data', import.meta.url));
 const read = <T>(...p: string[]): T => JSON.parse(readFileSync(join(DATA, ...p), 'utf8')) as T;
 const index = read<Index>('index.json');
 
-type Route = { name: string; path: string; h1?: RegExp | string; ready?: string };
+// full: a trial page, and whether its screenshots link to full size (DATA.md, rule 10).
+type Route = { name: string; path: string; h1?: RegExp | string; ready?: string; full?: boolean };
 const featured = read<CampaignDoc>('campaigns', index.featured!, 'campaign.json');
 const ROUTES: Route[] = [
   { name: 'home', path: './', h1: 'What is Fleetkit?', ready: 'Architecture' },
@@ -32,11 +33,12 @@ for (const e of index.campaigns) {
       if (d.result === 'not_tested') continue;
       ROUTES.push({ name: `run-${c.id}-${r.id}-density-${d.density}`, path: run(d.density), ready: 'Densities' });
     }
+    const full = (t: string) => read<TrialDoc>('campaigns', c.id, 'runs', r.id, `${t}.json`).full_size_screenshots;
     for (const t of r.trials) {
-      ROUTES.push({ name: `trial-${c.id}-${r.id}-${t.id}`, path: trial(t.id), ready: 'Final screens' });
+      ROUTES.push({ name: `trial-${c.id}-${r.id}-${t.id}`, path: trial(t.id), ready: 'Final screens', full: full(t.id) });
     }
     const last = r.trials.filter((t) => t.counts).at(-1);
-    if (last) ROUTES.push({ name: `trial-${c.id}-${r.id}-${last.id}-microvm-3`, path: trial(last.id, 3), ready: 'Final screens' });
+    if (last) ROUTES.push({ name: `trial-${c.id}-${r.id}-${last.id}-microvm-3`, path: trial(last.id, 3), ready: 'Final screens', full: full(last.id) });
   }
 }
 ROUTES.push(
@@ -100,6 +102,11 @@ for (const scheme of ['light'] as const) {
         expect(broken).toEqual([]);
         const full = await page.$$eval('a[href$=".f.webp"]', (as) => [...new Set(as.map((a) => (a as HTMLAnchorElement).href))]);
         for (const u of full) expect((await page.request.get(u)).status(), u).toBe(200);
+        // Rule 10: a trial's screenshots link to full size exactly when the dataset has it; otherwise they say so.
+        if (r.full !== undefined) {
+          expect(full.length > 0, 'links to full-size screenshots').toBe(r.full);
+          await expect(page.getByText('Thumbnails only', { exact: true })).toHaveCount(r.full ? 0 : 1);
+        }
 
         // Nothing the site failed to format.
         const text = await page.locator('main').innerText();
@@ -180,14 +187,37 @@ test.describe('the published cap-baseline-1', () => {
   });
 
   test('shows every final screen of a trial and the illustration filmstrip', async ({ page }) => {
+    // Trial 1 at 8 is the run's last pass (rule 10): each final screen opens at full size.
     await page.goto(`./${href({ name: 'trial', campaign: CAP, run: RUN, trial: 'd8-t1', microvm: null })}`);
     await expect(page.getByRole('heading', { name: 'Final screens' })).toBeVisible();
     await scrollThrough(page);
     await expect(page.locator('.shots img')).toHaveCount(8);
+    await expect(page.locator('.shots a[href$=".f.webp"] img')).toHaveCount(8);
     await page.goto(`./${href({ name: 'trial', campaign: CAP, run: RUN, trial: 'illustration', microvm: null })}`);
     await expect(page.getByRole('heading', { name: 'Filmstrip' })).toBeVisible();
     await scrollThrough(page);
     await expect(page.locator('.shots.film img')).toHaveCount(5);
+    await expect(page.locator('.shots.film a[href$=".f.webp"] img')).toHaveCount(5);
+  });
+
+  test('shows thumbnails only, labelled, for a trial between the ends (rule 10)', async ({ page }) => {
+    await page.goto(`./${href({ name: 'trial', campaign: CAP, run: RUN, trial: 'd8-t2', microvm: 3 })}`);
+    await expect(page.getByRole('heading', { name: 'Final screens' })).toBeVisible();
+    await scrollThrough(page);
+    await expect(page.getByText('Thumbnails only', { exact: true })).toBeVisible();
+    await expect(page.locator('.shots img')).toHaveCount(8);
+    await expect(page.locator('a[href$=".f.webp"]')).toHaveCount(0);
+    await expect(page.locator('figcaption', { hasText: /^Final screen, thumbnail only$/ })).toHaveCount(1);
+  });
+
+  test('opens each frame of the home page filmstrip at full size', async ({ page }) => {
+    await page.goto('./');
+    const film = page.locator('ol.film');
+    await film.scrollIntoViewIfNeeded();
+    await expect(film.locator('a[href$=".f.webp"] img')).toHaveCount(5);
+    for (const u of await film.locator('a').evaluateAll((as) => as.map((a) => (a as HTMLAnchorElement).href))) {
+      expect((await page.request.get(u)).status(), u).toBe(200);
+    }
   });
 });
 

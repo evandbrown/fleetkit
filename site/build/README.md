@@ -36,8 +36,10 @@ somewhere else; `--catalog` and `--repo` point it at another catalog and results
    file and it equals the definition as launched, or a reconstructed campaign's pre-registration. Both are judged
    from this clone's remote-tracking branches, so fetch first; a null link is logged as a note.
 4. **Scrubs** every string ([scrub.py](scrub.py)): account ids, ARNs, IP addresses, email addresses and EC2
-   instance and image ids become aliases (`account-1`, `ip-2`). Screenshots become WebP thumbnails (320 px)
-   and full-size copies (up to 1,280 px) with no metadata ([images.py](images.py)), one per distinct image.
+   instance and image ids become aliases (`account-1`, `ip-2`). Screenshots become WebP with no metadata
+   ([images.py](images.py)), one per distinct image: a thumbnail (320 px) of every one, and a full-size copy
+   (up to 1,280 px, quality 60) only of those in the trials whose pages open them (DATA.md, rule 10): each run's
+   last pass and first failure, and the illustration's filmstrip.
 5. **Checks** the staging directory (`site/build/.staging`), and replaces `site/public/data` only if all pass:
    - the gate: no instance or resource ids, ARNs, 12-digit numbers, IP or email addresses, AWS hostnames,
      URLs, availability zones, or image metadata in any published byte (a legitimate match needs a

@@ -22,7 +22,8 @@ data/
   campaigns/<campaign>/campaign.json              the definition, the specs, each run's summary, the results per spec
   campaigns/<campaign>/runs/<run>.json            one run: results by density, every trial's summary, every task and step
   campaigns/<campaign>/runs/<run>/<trial>.json    one trial, fetched only when opened: microVM lanes and time series
-  img/<sha8>.t.webp  img/<sha8>.f.webp            screenshots: a 320 px thumbnail and the 1,280 px original
+  img/<sha8>.t.webp                               every screenshot as a 320 px thumbnail
+  img/<sha8>.f.webp                               and at full size (1,280 px), only where rule 10 publishes it
 ```
 
 Every URL is relative (`./data/...`), because the site is served under `evan.mx/fleetkit/`. The site loads `index.json`, then a campaign, then a run, then a trial. A run document includes its `RunEntry` from the campaign, and a trial document its marks from the run, so the contract can check them against each other.
@@ -297,6 +298,8 @@ interface TrialDoc {
   window_ms: Range;                    // the span drawn: settle start to clean + 1,000
   marks: TrialMarks;
   settle?: { seconds: number; cpu_util_mean_pct: number };
+  full_size_screenshots: boolean;      // rule 10: its screenshots (final screens, filmstrip) have full-size copies;
+                                       // if false, its page shows their thumbnails with no full-size link
   microvms: {
     index: number; product: string; outcome: MicroVMOutcome; ready_ms: number | null;
     boot?: { process_started_ms: number; kernel_start_ms: number; guestd_start_ms: number;
@@ -335,6 +338,7 @@ The builder applies these rules, and `contract.ts` checks them on every document
 7. **Failures outside the experiment are never results (D63).** When a trial fails because of something the spec doesn't test (the support host overloaded, a harness error, an AWS problem), the harness sets it aside under the run's `ops/` directory, notes the cause in its operational log, and runs it again. The builder reads only the run's own trials, so a set-aside trial never appears and leaves no gap in the numbering. If no clean trial was possible at a density, that density and those above it are `not_tested`; the run isn't "stopped early". Smoke, case and fault trials test the harness and are never published either.
 8. **Consistency:** `by_density` lists exactly the spec's densities; a run document's entry equals the campaign's; `outcomes` equal the runs' results; a complete campaign has specs × replicas runs, none stopped early.
 9. **Links (D73):** `definition_path` is `experiments/campaigns/<campaign>.json`, or for a reconstructed definition the `preregistration` path, or null; `harness_commit` is 40 lowercase hex characters or null. Both are present (null, not absent) and always null in synthetic data, which has nothing on GitHub.
+10. **Full-size screenshots** are published only for the trials whose pages open them: the last pass, trial 1 at the run's `tested_successfully` (every trial there passed); the first failure, the first trial that failed at its `first_failed`, which Results opens at the limit (trial 1, unless it passed there); and every illustration trial (the filmstrip, which About shows too). Those trials have `full_size_screenshots: true`. Every other trial's screenshots are thumbnails only, and its page shows them with no full-size link, labelled "Thumbnails only". Every screenshot a document names has a thumbnail, and `img/` holds nothing else: no full-size copy that no such trial names. This keeps the dataset within its budget as campaigns accumulate.
 
 ## Links to the repository (D73)
 

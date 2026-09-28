@@ -53,6 +53,16 @@ describe('the contract refuses what breaks a rule', () => {
   it('a featured campaign that is not listed', () => {
     expect(checkIndex({ ...index, featured: 'nowhere' })).toEqual(['index: featured nowhere is not listed']);
   });
+  it('full-size screenshots where rule 10 gives none, or none where it gives them', () => {
+    const run = read<RunDoc>('campaigns', 'cap-baseline-1', 'runs', 'baseline-r1.json');
+    const trial = (id: string) => read<TrialDoc>('campaigns', 'cap-baseline-1', 'runs', 'baseline-r1', `${id}.json`);
+    expect(checkTrial({ ...trial('d8-t2'), full_size_screenshots: true }, run)).toEqual([
+      'trial cap-baseline-1/baseline-r1/d8-t2: full_size_screenshots should be false (rule 10)',
+    ]);
+    expect(checkTrial({ ...trial('d12-t1'), full_size_screenshots: false }, run)).toEqual([
+      'trial cap-baseline-1/baseline-r1/d12-t1: full_size_screenshots should be true (rule 10)',
+    ]);
+  });
   it('an outcome that does not match its runs', () => {
     const bad = structuredClone(c);
     bad.outcomes[0].replicas[0].tested_successfully = 99;
@@ -116,6 +126,11 @@ describe('cap-baseline-1, a campaign of one copied from the real build', () => {
 
   it('keeps the published result: 8 tested successfully, 12 failed, 9 to 11 and 16 not tested, midpoint 0.625', () => {
     expect(run.result).toMatchObject({ tested_successfully: 8, first_failed: 12, gap: [9, 11], not_tested: [16], per_host_vcpu: 0.5, midpoint_per_host_vcpu: 0.625 });
+  });
+
+  it('has full-size screenshots for trial 1 at 8 and at 12, and for the illustration (rule 10)', () => {
+    const full = run.trials.filter((t) => read<TrialDoc>('campaigns', 'cap-baseline-1', 'runs', 'baseline-r1', `${t.id}.json`).full_size_screenshots);
+    expect(full.map((t) => t.id)).toEqual(['d8-t1', 'd12-t1', 'illustration']);
   });
 
   it('numbers trials within their density and keeps the run-wide order separately', () => {

@@ -47,6 +47,25 @@ export function densityBriefs(densities: number[], trials: TrialSummary[]): Dens
   });
 }
 
+/**
+ * Rule 10: the trials whose screenshots are published at full size. The last pass: trial 1 at the run's result (every
+ * trial there passed). The first failure: the first trial that failed at the run's first failing density, the one
+ * Results opens at the limit (trial 1, unless it passed there). And every illustration trial (its filmstrip).
+ */
+export function fullSizeTrials(
+  trials: Pick<TrialSummary, 'id' | 'role' | 'counts' | 'number' | 'density' | 'passed'>[],
+  tested: number | null,
+  firstFailed: number | null,
+): Set<string> {
+  const counting = trials.filter((t) => t.counts).sort((a, b) => a.number! - b.number!);
+  const lastPass = counting.find((t) => t.density === tested);
+  const firstFailure = counting.find((t) => t.density === firstFailed && t.passed === false);
+  return new Set([
+    ...trials.filter((t) => t.role === 'illustration').map((t) => t.id),
+    ...[lastPass, firstFailure].flatMap((t) => (t ? [t.id] : [])),
+  ]);
+}
+
 export interface ResultCore {
   tested_successfully: number | null;
   first_failed: number | null;

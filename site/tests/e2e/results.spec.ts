@@ -308,6 +308,19 @@ test('links what is public on GitHub from campaign, run and trial pages, and not
   await expect(source).toHaveCount(0);
 });
 
+test('labels thumbnails as such where the dataset has no full-size screenshots (rule 10)', async ({ page }) => {
+  // Trial 1 at 12 is the run's first failure, so its screenshots are published at full size; trial 1 at 4 isn't.
+  await page.goto(at({ name: 'trial', campaign: CAP, run: 'baseline-r1', trial: 'd12-t1', microvm: 3 }));
+  await expect(page.getByRole('heading', { name: 'Final screens' })).toBeVisible();
+  await expect(page.getByText('Thumbnails only')).toHaveCount(0);
+  await expect(page.locator('figcaption', { hasText: /^Final screen$/ })).toHaveCount(1);
+  await page.goto(at({ name: 'trial', campaign: CAP, run: 'baseline-r1', trial: 'd4-t1', microvm: 2 }));
+  await expect(page.getByRole('heading', { name: 'Final screens' })).toBeVisible();
+  await expect(page.getByText('Thumbnails only', { exact: true })).toBeVisible();
+  await expect(page.locator('figcaption', { hasText: /^Final screen, thumbnail only$/ })).toHaveCount(1);
+  await distilled(page);
+});
+
 test('highlights one density of a run', async ({ page }) => {
   await page.goto(at({ name: 'run', campaign: CAP, run: 'baseline-r1', density: 8 }));
   await expect(page.locator('table.densities tr.current')).toHaveCount(1);

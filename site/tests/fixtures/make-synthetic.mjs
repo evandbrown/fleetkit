@@ -509,6 +509,7 @@ function makeRun(camp, specName, replica, sp) {
       window_ms: [-settle * 1000, t.marks.end_ms],
       marks: t.marks,
       settle: { seconds: settle, cpu_util_mean_pct: r4(between(0.2, 0.6)) },
+      full_size_screenshots: false, // rule 10, set once the run's result is known
       microvms: t.microvms.map(lane),
       series: trialSeries(t, hostSpec, settle),
       limit: {
@@ -575,6 +576,15 @@ function makeRun(camp, specName, replica, sp) {
   const failedDs = by_density.filter((b) => b.result === 'failed').map((b) => b.density);
   const firstFailed = failedDs.length ? Math.min(...failedDs) : null;
   const atTested = by_density.find((b) => b.density === tested);
+  // Rule 10: full-size screenshots for trial 1 at the result, the first trial that failed at the first failure, and
+  // the illustration.
+  const byNumber = trials.filter((t) => t.counts).sort((a, b) => a.number - b.number);
+  const full = new Set([
+    byNumber.find((t) => t.density === tested)?.id,
+    byNumber.find((t) => t.density === firstFailed && t.passed === false)?.id,
+    ...trials.filter((t) => t.role === 'illustration').map((t) => t.id),
+  ]);
+  for (const d of docs) d.full_size_screenshots = full.has(d.id);
   const atFailed = by_density.find((b) => b.density === firstFailed);
   let limit = null;
   if (atFailed) {
